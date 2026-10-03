@@ -127,4 +127,5 @@ frontmatter 之后的部分 → raw
 - **代码风格由 Biome 定**（`biome.json`）：120 列、LF、双引号、尾逗号 always、自动整理 import。`pnpm check` 会自动改，别手写格式化。
 - **`src/utils/yaml.ts` 是死代码**：导出的 `readMatter()` 没有任何地方引用，`gray-matter` 与 `js-yaml` 这两个依赖只为它而存在。代码实际读 frontmatter 走 Obsidian 的 `metadataCache.getFileCache().frontmatter`。清理前先确认没有外部引用。
 - **`src/utils/id.ts` 的 `randomUUID()` 是手写实现**（不用 `crypto`），用于生成新文章的 resource name 与 multipart boundary。
+- **`biome check src/` 报的 15 个 format 错误不是你的问题**：本仓库 `core.autocrlf=true` 且没有 `.gitattributes`，所以 Windows 检出后所有上游文件在工作区是 CRLF，而 `.editorconfig` 与 `biome.json` 都要求 LF。**这些报错纯属换行符冲突**——实测对 `src/` 全量跑 `biome check --write` 后 `git diff` 为空，因为 git 会把换行归一化掉。因此不必"修复"它们，也不会产生无关 diff。（新文件请按 `.editorconfig` 写成 LF。）
 - **License 以 `LICENSE` 文件为准：GPL-3.0**。`package.json` 里写的 `"license": "MIT"` 与仓库实际的 GPL-3.0 全文冲突，属于上游遗留错误——按 GPL-3.0 处理。
