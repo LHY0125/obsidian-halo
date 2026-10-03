@@ -1,7 +1,7 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 import type HaloPlugin from "./main";
-import { runSelfCheck } from "./mcp-self-check";
+import { describeSelfCheckError, runSelfCheck } from "./mcp-self-check";
 import { type HaloSite, mcpEndpointOf, normalizeSite } from "./settings";
 
 export function openSiteEditingModal(
@@ -103,9 +103,11 @@ export class SiteEditingModal extends Modal {
               const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
               if (report.error) {
+                const { key, params } = describeSelfCheckError(report.error);
+
                 new Notice(
                   i18next.t("command.mcp_self_check.error_failed", {
-                    message: i18next.t(report.error.key, report.error.params),
+                    message: i18next.t(key, params),
                   }),
                 );
               } else if (report.ok) {
@@ -118,6 +120,10 @@ export class SiteEditingModal extends Modal {
                   }),
                 );
               }
+            } catch {
+              // runSelfCheck 目前契约上不抛，但万一这里抛出而无人接住，用户会得到零反馈 ——
+              // 这个按钮的全部职责就是告诉用户哪儿不对。复用通用连接失败文案，不新增键。
+              new Notice(i18next.t("common.error_connection_failed"));
             } finally {
               button.setDisabled(false);
               button.setButtonText(i18next.t("site_editing_modal.settings.validate.button"));
