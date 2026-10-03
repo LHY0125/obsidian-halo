@@ -452,6 +452,32 @@ describe("HaloService.uploadImages", () => {
       consoleError.mockRestore();
     }
   });
+
+  test("上传被 MCP 拒绝时（例如密钥无效）也弹出可操作原因，而不是只进 console", async () => {
+    const note = createFile("post.md");
+    const image = createFile("a.png");
+    const { app } = createMockApp("![A](a.png)", note, [image]);
+    const consoleError = rs.spyOn(console, "error").mockImplementation(() => undefined);
+    // 升级用户最可能撞上的那条：没填 `mcpToken` → 每张小图都 401。
+    // 抛出的是 `McpError`（不是 `ImageUploadError`），正是原先只进 console 的那一类。
+    const { client } = createFakeClient(() => {
+      throw new McpError("unauthorized", { status: 401 });
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    try {
+      const result = await service.uploadImages({ silent: true });
+
+      expect(result.failedCount).toBe(1);
+      // 关键：用户必须看到**为什么**。只报一个数字的话，他无从知道是密钥没填 ——
+      // 而 `McpError` 的 key 本就是处置指引（核对密钥 / 为该密钥勾工具授权 / 检查端点）
+      expect(notices.slice(seen)).toEqual([i18next.t("transport.error.unauthorized", { status: 401 })]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 });
 
 describe("HaloService.updatePost", () => {
@@ -1135,12 +1161,20 @@ describe("发布成功后的回读", () => {
   test("回读失败不会被报成「发布失败」，frontmatter 仍用本地 params 回写", async () => {
     const note = createFile("post.md");
     const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
-    metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
+    // 本次**明确要求发布**（frontmatter 写了 `halo.publish: true`）—— 下面那条断言要钉的正是
+    // 「回读失败时写回的 publish 是不是这个意图」，没有意图就无从判别。
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { publish: true } },
+    }));
 
     let writeDone = false;
+    const publishStates: Record<string, unknown>[] = [];
     const { client, calls } = fakeService({
       onWrite: () => {
         writeDone = true;
+      },
+      onPublishState: (args) => {
+        publishStates.push(args);
       },
       // 新建分支只在**写成功之后**回读一次。让它在那之后失败，
       // 模拟的就是「文章已经落库、回读时网络抖了一下」。
@@ -1170,11 +1204,60 @@ describe("发布成功后的回读", () => {
     // 写已经落库，用户必须看到成功 —— 报失败会让他重发一遍
     expect(notices.slice(seen)).toEqual([i18next.t("service.notice_publish_success")]);
 
+    // 前提：本次确实要求了发布。上面那条断言要靠它才有意义
+    expect(publishStates).toEqual([{ name: expect.any(String), publish: true }]);
+
     // 回读失败只是少了服务端归一化，frontmatter 仍要用本地 params 回写（不能整个跳过）
     const createdName = calls.find((call) => call.name === "halo_create_post")?.args.name;
     expect(createdName).toEqual(expect.any(String));
     expect(written?.title).toBe("Post title");
     expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
+
+    // 而 `publish` **不能**沿用本地 params 里那个陈旧值：新建分支的 params 来自字面量，
+    // `spec.publish` 恒为 false（`applyPostFrontmatter` 不碰它）。把它写进 frontmatter 后，
+    // **下一次**发布会读到 `halo.publish: false` → `changePostPublish(name, false)` →
+    // 把这篇已发布的文章**静默退回草稿**，而用户再次看到「发布成功」。
+    expect((written?.halo as { publish?: boolean } | undefined)?.publish).toBe(true);
+  });
+
+  test("更新已发布文章时回读失败：publish 取本次意图，而不是改状态之前的服务端值", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", publish: true } },
+    }));
+
+    let writeDone = false;
+    const { client } = fakeService({
+      onWrite: () => {
+        writeDone = true;
+      },
+      // 更新分支的 params 来自 `getPost` → `toPost`，其 `publish` 取 `publishRequested` ——
+      // 而那是**改发布状态之前**的服务端值。这里刻意让它为 false，正是陈旧值的来源。
+      itemFor: (name) => {
+        if (writeDone) {
+          throw new McpError("network", { context: "tools/call halo_get_post" }, "socket hang up");
+        }
+
+        return remoteItem(name, { publishRequested: false, published: false });
+      },
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+
+    await service.publishPost();
+
+    // 两条分支的陈旧值来源不同（新建＝本地字面量，更新＝服务端改状态前的值），
+    // 但都必须被本次意图覆盖 —— 否则下一次发布会把文章退回草稿
+    expect((written?.halo as { publish?: boolean } | undefined)?.publish).toBe(true);
   });
 
   test("写后读失败时，分类/标签字段保持用户原值，不被 metadata name 覆盖", async () => {

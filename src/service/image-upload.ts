@@ -1,7 +1,9 @@
 import i18next from "i18next";
 import { type App, Notice, TFile, getLinkpath, requestUrl } from "obsidian";
 import { randomUUID } from "src/utils/id";
+import { renderErrorMessage } from "../i18n/error-message";
 import type { HaloSetting, HaloSite, ImageUploadCacheEntry } from "../settings";
+import { McpError } from "../transport/errors";
 import type { McpClient } from "../transport/mcp-client";
 import {
   type LocalImageReference,
@@ -435,6 +437,11 @@ export async function uploadImages(
       // 发布流程正是以 silent 调用它，而那里的中止提示同样只报数字，这个原因更需要被说出来。
       if (error instanceof ImageUploadError) {
         new Notice(i18next.t(error.key, error.params));
+      } else if (error instanceof McpError) {
+        // MCP 侧的失败（密钥无效 / 未授权调用该工具 / 网络）原先只进 console —— 而**最可能撞上它的
+        // 恰恰是刚升级的用户**：没填 `mcpToken` 时每张小图都 401，用户却只看到「N 张失败」。
+        // 走共享渲染器，拿到的是可操作的处置指引（核对密钥 / 为该密钥勾工具授权 / 检查端点）。
+        new Notice(renderErrorMessage(error));
       }
     }
   }

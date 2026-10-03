@@ -177,6 +177,14 @@ class HaloService {
 
     let remotePostName = matterData?.halo?.name;
 
+    /**
+     * 本次**要求的**发布状态（没要求就是 `undefined`）。
+     *
+     * 必须在重试闭包**外**记录：闭包内的 `params` 会被下一次重试覆盖，而回读失败时要把这个意图
+     * 覆盖回 frontmatter —— 详见 `refreshPostAfterWrite` 的「职责边界」。
+     */
+    let intendedPublish: boolean | undefined;
+
     try {
       params = await this.withPublishRetry(async () => {
         // 两个分支刻意用 if/else 而不是 if + 提前 return：发布状态那步必须对**两条**分支都生效，
@@ -230,15 +238,27 @@ class HaloService {
         // 只有没写时才看 publishByDefault。
         // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
         if (matterData?.halo?.hasOwnProperty("publish")) {
-          await this.changePostPublish(params.metadata.name, Boolean(matterData.halo.publish));
+          intendedPublish = Boolean(matterData.halo.publish);
+          await this.changePostPublish(params.metadata.name, intendedPublish);
         } else if (this.settings.publishByDefault) {
+          intendedPublish = true;
           await this.changePostPublish(params.metadata.name, true);
         }
 
         return params;
       });
 
-      params = await this.refreshPostAfterWrite(params);
+      const refreshed = await this.refreshPostAfterWrite(params);
+
+      // 服务端归一化过的字段（slug / publishTime 等）照用，但**发布意图以本地记录的为准**：
+      // 回读失败时 `refreshed` 就是本地构造的 `params`，其 `spec.publish` 是**陈旧的** ——
+      // 新建分支恒为字面量的 `false`，更新分支是「改发布状态之前」的服务端值。直接沿用会把这个
+      // 陈旧值写进 frontmatter，**下一次**发布据此把已发布的文章静默退回草稿（详见上面 `intendedPublish`）。
+      // 用展开而不是就地赋值：不改动服务端返回的对象。
+      params =
+        intendedPublish === undefined
+          ? refreshed
+          : { ...refreshed, spec: { ...refreshed.spec, publish: intendedPublish } };
     } catch (error) {
       new Notice(this.publishFailureMessage(error));
       return;
@@ -285,6 +305,12 @@ class HaloService {
    * 「东西已经写进 Halo 了，只是回读时网络抖了一下」会被报成「发布失败」——
    * 用户重发一遍，而重发不会再建一篇（`remotePostName` 已回填）但会白跑一趟并收到错误提示。
    * 读失败就沿用本地构造的 params：少了服务端归一化，发布本身依然是成功的。
+   *
+   * **职责边界（写清以免又被依赖错）**：它只负责**服务端归一化**（slug、publishTime 这类服务端才算得准的字段），
+   * **不承担「发布意图的回传」**。回读失败时它返回的 `params.spec.publish` 是**陈旧**的 ——
+   * 新建分支恒为字面量的 `false`，更新分支是「改发布状态之前」的服务端值。调用方必须用自己记录的
+   * `intendedPublish` 覆盖它，否则这个陈旧值会被写进 frontmatter，让**下一次**发布把已发布的文章
+   * 静默退回草稿，而用户两次都看到「发布成功」。
    */
   private async refreshPostAfterWrite(params: Post): Promise<Post> {
     try {
