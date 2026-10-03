@@ -2,9 +2,9 @@ import type { Category, Content, Post, Snapshot, Tag } from "@halo-dev/api-clien
 import i18next from "i18next";
 import { type App, Notice, type TFile, requestUrl } from "obsidian";
 import { randomUUID } from "src/utils/id";
-import markdownIt from "src/utils/markdown";
 import { slugify } from "transliteration";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
+import { McpError } from "../transport/errors";
 import { McpClient } from "../transport/mcp-client";
 import {
   type ImageUploadContext,
@@ -165,12 +165,13 @@ class HaloService {
       tagNames = await this.getTagNames(matterData.tags);
     }
 
-    let remotePostName = matterData?.halo?.name;
+    const remotePostName = matterData?.halo?.name;
 
     try {
       params = await this.withPublishRetry(async () => {
         if (remotePostName) {
           const latestPost = await this.getPostResource(remotePostName);
+
           params = applyPostFrontmatter(latestPost, {
             activeFile,
             categoryNames,
@@ -179,79 +180,39 @@ class HaloService {
             useActiveFileDefaults: false,
           });
 
-          await requestUrl({
-            url: `${this.site.url}/apis/uc.api.content.halo.run/v1alpha1/posts/${remotePostName}`,
-            method: "PUT",
-            contentType: "application/json",
-            headers: this.headers,
-            body: JSON.stringify(params),
-          });
-
-          const snapshot = await this.getPostDraft(remotePostName);
-          const content = this.createPostContent(raw, snapshot.spec?.rawType);
-
-          snapshot.metadata.annotations = {
-            ...snapshot.metadata.annotations,
-            "content.halo.run/content-json": JSON.stringify(content),
-          };
-
-          await requestUrl({
-            url: `${this.site.url}/apis/uc.api.content.halo.run/v1alpha1/posts/${remotePostName}/draft`,
-            method: "PUT",
-            contentType: "application/json",
-            headers: this.headers,
-            body: JSON.stringify(snapshot),
-          });
-        } else {
-          if (!params.metadata.name) {
-            params.metadata.name = randomUUID();
-          }
-
-          params = applyPostFrontmatter(params, {
-            activeFile,
-            categoryNames,
-            matterData,
-            tagNames,
-            useActiveFileDefaults: true,
-          });
-
-          params.metadata.annotations = {
-            ...params.metadata.annotations,
-            "content.halo.run/content-json": JSON.stringify(this.createPostContent(raw)),
-          };
-
-          const post = await requestUrl({
-            url: `${this.site.url}/apis/uc.api.content.halo.run/v1alpha1/posts`,
-            method: "POST",
-            contentType: "application/json",
-            headers: this.headers,
-            body: JSON.stringify(params),
-          }).json;
-
-          params = post;
-          remotePostName = params.metadata.name;
+          // 上游原本分两步写（PUT post + PUT draft 快照），MCP 的 update_post 带 raw
+          // 即同时更新元数据与可编辑内容，两次请求合成一次。
+          return this.client.callToolJson<Post>("halo_update_post", this.toUpdateArgs(params, raw));
         }
 
-        // Publish post
-        // biome-ignore lint: no
-        if (matterData?.halo?.hasOwnProperty("publish")) {
-          if (matterData?.halo?.publish) {
-            await this.changePostPublish(params.metadata.name, true);
-          } else {
-            await this.changePostPublish(params.metadata.name, false);
-          }
-        } else {
-          if (this.settings.publishByDefault) {
-            await this.changePostPublish(params.metadata.name, true);
-          }
+        if (!params.metadata.name) {
+          params.metadata.name = randomUUID();
         }
 
-        return params;
+        params = applyPostFrontmatter(params, {
+          activeFile,
+          categoryNames,
+          matterData,
+          tagNames,
+          useActiveFileDefaults: true,
+        });
+
+        return this.client.callToolJson<Post>("halo_create_post", this.toCreateArgs(params, raw));
       });
+
+      // 发布状态独立于内容：上游用 changePostPublish，MCP 是 set_post_publish_state。
+      // 优先级与上游一致——frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
+      // 只有没写时才看 publishByDefault。
+      // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
+      if (matterData?.halo?.hasOwnProperty("publish")) {
+        await this.changePostPublish(params.metadata.name, Boolean(matterData.halo.publish));
+      } else if (this.settings.publishByDefault) {
+        await this.changePostPublish(params.metadata.name, true);
+      }
 
       params = (await this.getPost(params.metadata.name))?.post || params;
     } catch (error) {
-      new Notice(i18next.t("service.error_publish_failed"));
+      new Notice(this.publishFailureMessage(error));
       return;
     }
 
@@ -276,20 +237,69 @@ class HaloService {
   }
 
   public async changePostPublish(name: string, publish: boolean): Promise<void> {
-    await requestUrl({
-      url: `${this.site.url}/apis/uc.api.content.halo.run/v1alpha1/posts/${name}/${publish ? "publish" : "unpublish"}`,
-      method: "PUT",
-      contentType: "application/json",
-      headers: this.headers,
-    });
+    await this.client.callToolJson("halo_set_post_publish_state", { name, publish });
   }
 
-  private createPostContent(raw: string, rawType = "markdown"): Content {
+  /**
+   * 把 Post 投影成 `halo_create_post` 的入参。
+   *
+   * 两条硬约束（实测自 tool schema）：
+   * - `rawType` 必须显式传 `"markdown"` —— schema 默认值是 `"html"`，漏传会把 Markdown 当 HTML 存，
+   *   站点渲染错乱而本地看不出任何异常；
+   * - `publishTime` 空值传 `null`，**不能传空字符串**——schema 是 `["string","null"]` + `format: date-time`。
+   *
+   * 另外刻意不传 `content`：schema 说它默认取 `raw`，交给服务端渲染即可。
+   * （客户端跑 `markdownIt.render()` 的结果本来也不是读者看到的 HTML，见 spec F1。）
+   */
+  private toCreateArgs(params: Post, raw: string): Record<string, unknown> {
     return {
-      content: markdownIt.render(raw),
-      raw,
-      rawType,
+      ...this.toUpdateArgs(params, raw),
+      // 新建时默认推草稿；是否发布由随后的 set_post_publish_state 决定（与上游行为一致）
+      publish: false,
     };
+  }
+
+  /** 把 Post 投影成 `halo_update_post` 的入参。注意该工具没有 `publish`。 */
+  private toUpdateArgs(params: Post, raw: string): Record<string, unknown> {
+    return {
+      name: params.metadata.name,
+      title: params.spec.title,
+      slug: params.spec.slug || undefined,
+      raw,
+      rawType: "markdown",
+      cover: params.spec.cover || null,
+      excerpt: params.spec.excerpt.autoGenerate ? null : params.spec.excerpt.raw || null,
+      autoGenerateExcerpt: params.spec.excerpt.autoGenerate,
+      categories: params.spec.categories,
+      tags: params.spec.tags,
+      visible: params.spec.visible,
+      pinned: params.spec.pinned,
+      priority: params.spec.priority,
+      publishTime: params.spec.publishTime || null,
+      allowComment: params.spec.allowComment,
+      template: params.spec.template || null,
+    };
+  }
+
+  /**
+   * 发布失败的提示文案。
+   *
+   * 必须把 `McpError.detail` 一起显示：工具级失败（HTTP 200 + `isError: true`）的全部线索都在那里，
+   * 只弹「发布失败，请重试」会让用户完全无从自查。
+   *
+   * 判据用**真值**而非 `??`——`detail` 合法地可以是空串（服务端失败了但没给原因），
+   * `detail ?? fallback` 挡不住空串，只会留下一个孤零零的分隔符。
+   *
+   * 拼接用换行而非标点：detail 是服务端原文、未经本地化，标点却需要翻译。
+   */
+  private publishFailureMessage(error: unknown): string {
+    const message = i18next.t("service.error_publish_failed");
+
+    if (error instanceof McpError && error.detail) {
+      return `${message}\n${error.detail}`;
+    }
+
+    return message;
   }
 
   private async withPublishRetry<T>(operation: () => Promise<T>): Promise<T> {
