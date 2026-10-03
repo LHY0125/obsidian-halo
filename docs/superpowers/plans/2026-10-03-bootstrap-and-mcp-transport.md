@@ -32,7 +32,7 @@
 
 | 文件                                  | 职责                                                                         | 状态 |
 | --------------------------------------- | ------------------------------------------------------------------------------ | ------ |
-| `.gitignore`                          | 忽略`node_modules/`、构建产物、Obsidian 运行时文件                           | 创建 |
+| `.gitignore`                          | 忽略 `node_modules/`、构建产物、本地设置                           | 创建 |
 | `manifest.json`                       | 插件清单，id 改`halo-mcp`                                                    | 修改 |
 | `package.json`                        | 包名与版本                                                                   | 修改 |
 | `README.md`                           | 写入前置条件与开发说明                                                       | 修改 |
@@ -68,7 +68,6 @@
 
 **Files:**
 
-- Create: `.gitignore`
 - Modify: `manifest.json`, `package.json`, `README.md`
 
 **Interfaces:**
@@ -132,19 +131,19 @@ ls src/i18n/locales/
 "version": "0.1.0",
 ```
 
-- [ ]  **Step 5: 加 .gitignore**
+- [ ]  **Step 5: 核对 .gitignore 已覆盖所需项**
 
-创建 `.gitignore`：
+**上游仓库自带 `.gitignore`，本任务不改它。** 只需确认它覆盖了以下各项：
 
-```gitignore
-node_modules/
-main.js
-*.log
-.DS_Store
-data.json
+```bash
+grep -nE 'node_modules|main\.js|data\.json|\.DS_Store' .gitignore
 ```
 
-> `data.json` 是 Obsidian 插件的本地设置文件，含 `hmcp_` 密钥与 PAT，**绝不能提交**。
+预期四处都能命中。上游该文件依次忽略了 `.vscode`、`.idea`、`node_modules`、`coverage`、`main.js` / `main.js.LICENSE.txt`、`*.map`、`data.json`、`.DS_Store`。
+
+> 若发现缺 `data.json`，**追加**一行而不是重写整个文件。`data.json` 是 Obsidian 插件的本地设置文件，含 `hmcp_` 密钥与 PAT，一旦提交就是不可撤销的泄密；而重写会丢掉上游已有的 `.vscode` / `.idea` / `coverage` / `*.map` 等规则。
+>
+> **反面教训**：本计划初稿把这一步写成"新建 `.gitignore` 并写入自己的内容"，那会覆盖上游文件、静默丢失四条规则。凡是以为自己要"创建"某个文件时，先确认它在仓库里是否已存在。
 
 - [ ]  **Step 6: 安装依赖并验证构建**
 
