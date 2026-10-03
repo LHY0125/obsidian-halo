@@ -35,8 +35,10 @@
 HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
 ```
 
-它对真实站点断言必需的 13 个工具都在。**两个环境变量缺任何一个都会静默跳过**（输出 1 passed，
-但什么都没验证），请确认两者都设了。
+它对真实站点断言必需的 13 个工具都在。环境变量的设置情况分两种：
+
+- **两个都没设**：这是预期的跳过，保持静默（输出 1 passed，但什么都没验证）。
+- **只设了一个**：几乎肯定是配置失误，测试会往 stderr 打一行**点名缺失变量**的告警。看到告警就说明本次没有做任何断言，请把两个变量都设上。
 
 This plugin allows you to publish your Obsidian documents to [Halo](https://github.com/halo-dev/halo).
 
