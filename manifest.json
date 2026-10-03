@@ -1,9 +1,9 @@
 {
-  "id": "halo",
+  "id": "halo-mcp",
   "name": "Halo",
   "version": "1.2.0",
   "minAppVersion": "1.4.4",
-  "description": "Halo's Obsidian integration supports publishing content to Halo sites",
+  "description": "Publish content to Halo sites through the official Halo MCP Server",
   "author": "Ryan Wang",
   "authorUrl": "https://github.com/ruibaby",
   "isDesktopOnly": false
