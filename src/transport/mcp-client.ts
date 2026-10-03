@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
-import { McpError, assertJsonBody, classifyHttpFailure } from "./errors";
-import type { JsonRpcResponse, McpInitializeResult } from "./types";
+import { McpError, assertJsonBody, classifyHttpFailure, missingToolError } from "./errors";
+import type { JsonRpcResponse, McpInitializeResult, McpTool, McpToolCallResult, McpToolsListResult } from "./types";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const CLIENT_NAME = "obsidian-halo-mcp";
@@ -29,6 +29,9 @@ function unwrap<T>(body: string, context: string): T {
 export class McpClient {
   /** 成功的握手结果缓存；失败时会被清空以允许重试 */
   private handshake?: Promise<McpInitializeResult>;
+
+  /** 工具列表缓存；站点侧工具集可变，必要时用 listTools(true) 强制刷新 */
+  private toolCache?: McpTool[];
 
   constructor(private readonly options: McpClientOptions) {}
 
@@ -92,5 +95,36 @@ export class McpClient {
     );
 
     return unwrap<McpInitializeResult>(body, "MCP handshake");
+  }
+
+  public async listTools(force = false): Promise<McpTool[]> {
+    if (this.toolCache && !force) {
+      return this.toolCache;
+    }
+
+    await this.initialize();
+    const body = await this.post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, "tools/list");
+
+    this.toolCache = unwrap<McpToolsListResult>(body, "tools/list").tools;
+    return this.toolCache;
+  }
+
+  public async callTool<T = McpToolCallResult>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+    await this.initialize();
+
+    const tools = await this.listTools();
+    if (!tools.some((tool) => tool.name === name)) {
+      throw missingToolError(
+        name,
+        tools.map((tool) => tool.name),
+      );
+    }
+
+    const body = await this.post(
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } },
+      `tools/call ${name}`,
+    );
+
+    return unwrap<T>(body, `tools/call ${name}`);
   }
 }

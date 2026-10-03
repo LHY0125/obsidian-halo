@@ -114,3 +114,117 @@ describe("McpClient.initialize", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+const TOOLS_OK = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 2,
+  result: {
+    tools: [
+      { name: "halo_create_post", inputSchema: { type: "object" } },
+      { name: "halo_list_posts", inputSchema: { type: "object" } },
+    ],
+  },
+});
+
+const CALL_OK = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 3,
+  result: { content: [{ type: "text", text: "ok" }] },
+});
+
+describe("McpClient.listTools / callTool", () => {
+  beforeEach(() => {
+    rq.mockReset();
+  });
+
+  it("listTools 前会自动握手（连发 initialize + tools/list 两次请求）", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+    ]);
+    const tools = await new McpClient(options).listTools();
+
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[1].body).method).toBe("tools/list");
+    expect(tools.map((t) => t.name)).toEqual(["halo_create_post", "halo_list_posts"]);
+  });
+
+  it("listTools 结果被缓存，第二次不再发请求", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+    ]);
+    const client = new McpClient(options);
+
+    await client.listTools();
+    await client.listTools();
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("listTools(true) 强制刷新", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      { status: 200, text: TOOLS_OK },
+    ]);
+    const client = new McpClient(options);
+
+    await client.listTools();
+    await client.listTools(true);
+
+    expect(calls).toHaveLength(3);
+  });
+
+  it("callTool 发送 tools/call 与 arguments", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      { status: 200, text: CALL_OK },
+    ]);
+    await new McpClient(options).callTool("halo_create_post", { title: "标题" });
+
+    const body = JSON.parse(calls[2].body);
+    expect(body.method).toBe("tools/call");
+    expect(body.params.name).toBe("halo_create_post");
+    expect(body.params.arguments).toEqual({ title: "标题" });
+  });
+
+  it("工具不在站点可用列表中时抛 missing-tool，且不发出 tools/call 请求", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+    ]);
+    const client = new McpClient(options);
+
+    await expect(client.callTool("halo_not_exists")).rejects.toMatchObject({ kind: "missing-tool" });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("callTool 的 arguments 缺省为空对象", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      { status: 200, text: CALL_OK },
+    ]);
+    await new McpClient(options).callTool("halo_list_posts");
+
+    expect(JSON.parse(calls[2].body).params.arguments).toEqual({});
+  });
+
+  it("JSON-RPC error 字段被转成 McpError", async () => {
+    stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      {
+        status: 200,
+        text: JSON.stringify({ jsonrpc: "2.0", id: 3, error: { code: -32602, message: "invalid params" } }),
+      },
+    ]);
+
+    await expect(new McpClient(options).callTool("halo_create_post")).rejects.toMatchObject({
+      kind: "unknown",
+      detail: "invalid params",
+    });
+  });
+});
