@@ -228,3 +228,67 @@ describe("McpClient.listTools / callTool", () => {
     });
   });
 });
+
+import { parseToolResult } from "src/transport/mcp-client";
+
+// 以下两个外壳取自 2026-10-03 对 https://blog.liuhangyv.top/mcp 的实测原始响应
+const SUCCESS_RESULT = {
+  content: [
+    { type: "text", text: '{"items":[{"name":"real-ip-always-there-and-forgery"}],"total":74}' },
+    { type: "text", text: "Listed 1 posts" },
+  ],
+  isError: false,
+  structuredContent: { items: [{ name: "real-ip-always-there-and-forgery" }], total: 74 },
+};
+
+// 工具级失败：HTTP 状态码是 200，但它不是成功
+const TOOL_FAILURE_RESULT = {
+  content: [
+    {
+      type: "text",
+      text: "Tool (halo_list_posts) input validation failed: Validation failed: JSON schema validation errors: [/size: must have a maximum value of 100]",
+    },
+  ],
+  isError: true,
+};
+
+describe("parseToolResult", () => {
+  it("优先使用 structuredContent，而不是解析 content 文本", () => {
+    const parsed = parseToolResult<{ total: number }>(SUCCESS_RESULT, "halo_list_posts");
+    expect(parsed.total).toBe(74);
+  });
+
+  it("structuredContent 缺席时回落解析 content[0].text", () => {
+    const withoutStructured = {
+      content: [{ type: "text", text: '{"total":9}' }],
+      isError: false,
+    };
+    const parsed = parseToolResult<{ total: number }>(withoutStructured, "halo_list_posts");
+    expect(parsed.total).toBe(9);
+  });
+
+  it("isError 为 true 时抛 McpError，且 detail 带上服务端原文", () => {
+    let thrown: unknown;
+    try {
+      parseToolResult(TOOL_FAILURE_RESULT, "halo_list_posts");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(McpError);
+    expect((thrown as McpError).detail).toContain("must have a maximum value of 100");
+  });
+
+  it("isError 为 true 时绝不能被当成数据返回", () => {
+    expect(() => parseToolResult(TOOL_FAILURE_RESULT, "halo_list_posts")).toThrow();
+  });
+
+  it("既无 structuredContent 又无可用文本块时抛错，而不是返回 undefined", () => {
+    expect(() => parseToolResult({ content: [], isError: false }, "halo_x")).toThrow(McpError);
+  });
+
+  it("content[0].text 不是合法 JSON 时抛错", () => {
+    expect(() => parseToolResult({ content: [{ type: "text", text: "not json" }], isError: false }, "halo_x")).toThrow(
+      McpError,
+    );
+  });
+});

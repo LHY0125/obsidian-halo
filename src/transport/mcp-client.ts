@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { McpError, assertJsonBody, classifyHttpFailure, missingToolError } from "./errors";
+import { McpError, assertJsonBody, classifyHttpFailure, missingToolError, toolFailureError } from "./errors";
 import type { JsonRpcResponse, McpInitializeResult, McpTool, McpToolCallResult, McpToolsListResult } from "./types";
 
 const PROTOCOL_VERSION = "2025-06-18";
@@ -24,6 +24,43 @@ function unwrap<T>(body: string, context: string): T {
     throw new McpError("unknown", { context });
   }
   return json.result;
+}
+
+/**
+ * 解包 `tools/call` 的结果。
+ *
+ * 三条实测出来的形状约束（见 Global Constraints）：
+ * ① 工具级失败是 HTTP 200 + `isError: true`，必须显式检查，否则会把报错文本当数据；
+ * ② 成功时优先取 `structuredContent`（已解析），它缺席才回落解析 `content[0].text`；
+ * ③ `content` 是文本块**数组**——首块是负载，末块是人读摘要，拼接全部会得到非法 JSON。
+ */
+export function parseToolResult<T>(result: McpToolCallResult | undefined, tool: string): T {
+  const blocks = result?.content ?? [];
+  const message = blocks
+    .map((block) => block.text ?? "")
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  if (result?.isError) {
+    throw toolFailureError(tool, message);
+  }
+
+  if (result?.structuredContent !== undefined) {
+    return result.structuredContent as T;
+  }
+
+  const first = blocks.find((block) => block.type === "text" && block.text)?.text;
+
+  if (first === undefined) {
+    throw toolFailureError(tool, message);
+  }
+
+  try {
+    return JSON.parse(first) as T;
+  } catch {
+    throw new McpError("unknown", { tool }, first.slice(0, 200));
+  }
 }
 
 export class McpClient {
@@ -126,5 +163,16 @@ export class McpClient {
     );
 
     return unwrap<T>(body, `tools/call ${name}`);
+  }
+
+  /**
+   * 调用工具并解包成实际负载。
+   *
+   * 业务代码一律用这个方法，**不要**直接用 `callTool()` —— 后者返回的是
+   * 未解包的 MCP 外壳，会让每个调用点都重复一遍「检查 isError / 取 structuredContent」。
+   */
+  public async callToolJson<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+    const result = await this.callTool<McpToolCallResult>(name, args);
+    return parseToolResult<T>(result, name);
   }
 }

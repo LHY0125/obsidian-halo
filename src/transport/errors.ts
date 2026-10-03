@@ -74,3 +74,15 @@ export function assertJsonBody(body: string): unknown {
 export function missingToolError(name: string, available: string[]): McpError {
   return new McpError("missing-tool", { tool: name, count: available.length });
 }
+
+/**
+ * 工具执行失败。
+ *
+ * ⚠️ 这类失败以 `HTTP 200` + `result.isError: true` 送达，**不是 HTTP 错误**——
+ * `classifyHttpFailure()` 看不到它。只检查 JSON-RPC 的 `error` 字段会把参数错误当成成功。
+ * 归类沿用 `unknown`（服务端拒绝的原因千差万别，硬拆 kind 只会拆错），
+ * 但**必须把服务端原文放进 `detail`**，否则用户看到「MCP 请求失败」却拿不到任何线索。
+ */
+export function toolFailureError(tool: string, message: string): McpError {
+  return new McpError("unknown", { tool }, message);
+}

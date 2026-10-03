@@ -33,4 +33,9 @@ export interface McpContentBlock {
 export interface McpToolCallResult {
   content?: McpContentBlock[];
   isError?: boolean;
+  /**
+   * 服务端提供的**已解析**结果。成功时存在，失败时缺席。
+   * 优先用它而不是解析 content[0].text —— 后者要处理转义与分块。
+   */
+  structuredContent?: unknown;
 }
