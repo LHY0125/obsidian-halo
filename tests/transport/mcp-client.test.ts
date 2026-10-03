@@ -252,6 +252,15 @@ const TOOL_FAILURE_RESULT = {
   isError: true,
 };
 
+// isError 为 true，但负载本身是**可解析的 JSON**。
+// 这才是 `isError` 分支的真正判别器：TOOL_FAILURE_RESULT 的文本无法 JSON.parse，
+// 即使删掉 isError 分支也会在回落解析时抛错，因此它判别不出该分支是否还在。
+// 本 fixture 一旦漏检 isError，就会被原样当数据返回——正是本任务要堵的洞。
+const TOOL_FAILURE_WITH_PAYLOAD = {
+  content: [{ type: "text", text: '{"items":[{"name":"should-never-be-returned"}],"total":74}' }],
+  isError: true,
+};
+
 describe("parseToolResult", () => {
   it("优先使用 structuredContent，而不是解析 content 文本", () => {
     const parsed = parseToolResult<{ total: number }>(SUCCESS_RESULT, "halo_list_posts");
@@ -279,16 +288,81 @@ describe("parseToolResult", () => {
   });
 
   it("isError 为 true 时绝不能被当成数据返回", () => {
-    expect(() => parseToolResult(TOOL_FAILURE_RESULT, "halo_list_posts")).toThrow();
+    expect(() => parseToolResult(TOOL_FAILURE_RESULT, "halo_list_posts")).toThrow(McpError);
+    expect(() => parseToolResult(TOOL_FAILURE_WITH_PAYLOAD, "halo_list_posts")).toThrow(McpError);
   });
 
   it("既无 structuredContent 又无可用文本块时抛错，而不是返回 undefined", () => {
-    expect(() => parseToolResult({ content: [], isError: false }, "halo_x")).toThrow(McpError);
+    let thrown: unknown;
+    try {
+      parseToolResult({ content: [], isError: false }, "halo_x");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(McpError);
+    expect((thrown as McpError).detail).toBeTruthy();
+    expect((thrown as McpError).detail).toContain("halo_x");
   });
 
   it("content[0].text 不是合法 JSON 时抛错", () => {
     expect(() => parseToolResult({ content: [{ type: "text", text: "not json" }], isError: false }, "halo_x")).toThrow(
       McpError,
     );
+  });
+});
+
+describe("McpClient.callToolJson", () => {
+  beforeEach(() => {
+    rq.mockReset();
+  });
+
+  it("成功时返回解包后的负载，而不是未解包的 MCP 外壳", async () => {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      {
+        status: 200,
+        text: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          result: {
+            content: [{ type: "text", text: '{"total":74}' }],
+            isError: false,
+            structuredContent: { total: 74 },
+          },
+        }),
+      },
+    ]);
+
+    const parsed = await new McpClient(options).callToolJson<{ total: number }>("halo_list_posts", { size: 1 });
+
+    // 拿到的是解包后的负载，不是 `{ content, isError, structuredContent }` 外壳
+    expect(parsed).toEqual({ total: 74 });
+    expect(parsed).not.toHaveProperty("content");
+
+    // 且确实经由 tools/call 把工具名与参数透传下去
+    const body = JSON.parse(calls[2].body);
+    expect(body.method).toBe("tools/call");
+    expect(body.params.name).toBe("halo_list_posts");
+    expect(body.params.arguments).toEqual({ size: 1 });
+  });
+
+  it("外壳 isError 为 true 时抛 McpError 且带服务端原文，而不是把 content 当返回值", async () => {
+    stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      { status: 200, text: JSON.stringify({ jsonrpc: "2.0", id: 3, result: TOOL_FAILURE_RESULT }) },
+    ]);
+
+    let thrown: unknown;
+    try {
+      await new McpClient(options).callToolJson("halo_list_posts");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(McpError);
+    expect((thrown as McpError).kind).toBe("unknown");
+    expect((thrown as McpError).detail).toContain("must have a maximum value of 100");
   });
 });

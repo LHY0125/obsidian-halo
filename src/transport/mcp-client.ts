@@ -53,7 +53,7 @@ export function parseToolResult<T>(result: McpToolCallResult | undefined, tool: 
   const first = blocks.find((block) => block.type === "text" && block.text)?.text;
 
   if (first === undefined) {
-    throw toolFailureError(tool, message);
+    throw toolFailureError(tool, message || `no content in ${tool} result`);
   }
 
   try {
