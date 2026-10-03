@@ -1374,3 +1374,134 @@ describe("分类与标签走 MCP", () => {
     expect(await service.getCategoryDisplayNames(undefined)).toBeUndefined();
   });
 });
+
+/**
+ * 三处「分类/标签解析失败 = 静默什么都不发生」的收口。
+ *
+ * 立意与 `describe("发布成功后的回读")` 相同：失败要看得见。区别在于**主目的有没有达成**——
+ * 发布那处主目的（文章落库）已完成，故尾部读失败只跳过两个字段、不额外弹提示；
+ * 这三处主目的（中止发布 / 更新笔记 / 拉取笔记）尚未达成或只达成一半，故必须让用户知道。
+ *
+ * 判别器都刻意让两种可能产生**不同的观测**：要么断言「写工具一次都没调用」（真中止了），
+ * 要么断言「这两个字段没变**且**其余字段已写」（部分成功，而不是整体跳过）。
+ * 异常一律用 `.catch()` 收回，由断言而不是一个裸 rejection 来说明问题。
+ */
+describe("分类/标签解析失败时的三处收口", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  test("发布前解析失败：弹提示并中止，两个写工具一次都没调用", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { categories: ["技术思考"], title: "Post title" },
+    }));
+
+    // 分类的列举发生在**写入之前**，此时站点上还什么都没有
+    const { client, calls } = createFakeClient(() => {
+      throw new McpError("forbidden", { status: 403 });
+    });
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    const thrown = await service.publishPost().catch((error: unknown) => error);
+
+    // 异常不再穿出 —— 穿出去的话 Obsidian 只把它记进控制台，用户什么都看不到
+    expect(thrown).toBeUndefined();
+    // 且不是「提示了但照写不误」：两个写工具一次都没被调用，frontmatter 也没动
+    expect(calls.filter((call) => call.name === "halo_create_post" || call.name === "halo_update_post")).toEqual([]);
+    expect(fileManager.processFrontMatter).not.toHaveBeenCalled();
+    // 用户看得见真实原因（这里是权限，不是泛泛的「发布失败」）
+    expect(notices.slice(seen)).toEqual([i18next.t("transport.error.forbidden", { status: 403 })]);
+  });
+
+  test("updatePost 解析失败：分类/标签保持笔记原值，其余 frontmatter 照常回写", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("local markdown", note, []);
+    metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
+
+    const { client } = createFakeClient((name) => {
+      if (name === "halo_get_post") {
+        return getPostResult(remoteItem("post-1", { categories: ["category-a"], tags: ["tag-a"] }), "# 远端正文");
+      }
+
+      // 文章读到了，但分类/标签的列举失败 —— 例如这个密钥没被勾选这两个工具的权限
+      throw new McpError("forbidden", { status: 403 });
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        // 模拟真实语义：回调拿到笔记里已有的 frontmatter（title 特意给旧值）
+        written = { categories: ["技术思考"], tags: ["Rust"], title: "旧标题" };
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    const thrown = await service.updatePost().catch((error: unknown) => error);
+
+    expect(thrown).toBeUndefined();
+    // 其余字段照常回写 —— 证明整次更新没有被跳过
+    expect(written?.title).toBe("Post title");
+    expect((written?.halo as { name?: string } | undefined)?.name).toBe("post-1");
+    // 这两个字段保持笔记原值（解析不出来就不写，绝不落回 metadata.name）
+    expect(written?.categories).toEqual(["技术思考"]);
+    expect(written?.tags).toEqual(["Rust"]);
+    // 键必须真的在 locale 里 —— 否则 i18next 原样返回键名，上面那条断言就成了
+    // 「键名与键名相比」，永远成立（假绿）
+    expect(i18next.t("service.notice_taxonomy_not_resolved")).not.toBe("service.notice_taxonomy_not_resolved");
+    // 一次提示，两段：这次操作变成了什么样 + 为什么
+    expect(notices.slice(seen)).toEqual([
+      `${i18next.t("service.notice_taxonomy_not_resolved")}\n${i18next.t("transport.error.forbidden", { status: 403 })}`,
+    ]);
+  });
+
+  test("pullPost 解析失败：笔记照样建出来，分类/标签不写，其余 frontmatter 照常回写", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, vault } = createMockApp("", note, []);
+    const { client } = createFakeClient((name) => {
+      if (name === "halo_get_post") {
+        return getPostResult(
+          remoteItem("post-1", { categories: ["category-a"], tags: ["tag-a"], title: "标题" }),
+          "# 远端正文",
+        );
+      }
+
+      throw new McpError("forbidden", { status: 403 });
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        // 新建的笔记没有 frontmatter，回调拿到的是空对象 —— 所以这里没有「原值」可保留，
+        // 观测结果是「这两个键不存在」（故提示语说「保持原样（未写入）」而不是「保留原值」）
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    const thrown = await service.pullPost("post-1").catch((error: unknown) => error);
+
+    expect(thrown).toBeUndefined();
+    // 笔记仍然建出来了：分类解析失败不该让整次拉取白做（正文才是用户要的）
+    expect(vault.create).toHaveBeenCalledWith("标题.md", "# 远端正文");
+    expect(written?.title).toBe("标题");
+    expect((written?.halo as { name?: string } | undefined)?.name).toBe("post-1");
+    expect(written).not.toHaveProperty("categories");
+    expect(written).not.toHaveProperty("tags");
+    expect(notices.slice(seen)).toEqual([
+      `${i18next.t("service.notice_taxonomy_not_resolved")}\n${i18next.t("transport.error.forbidden", { status: 403 })}`,
+    ]);
+  });
+});

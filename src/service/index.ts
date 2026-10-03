@@ -152,14 +152,26 @@ class HaloService {
       return;
     }
 
+    // 分类/标签的解析发生在**写入之前**：此刻站点上还什么都没有，所以失败的正确处置是
+    // **中止本次发布**并把原因带给用户。此前异常会直接穿出 `publishPost`，Obsidian 只把它记进
+    // 控制台 —— 用户看到「什么都没发生」，而站点上确实什么都没发生，他却无从知道为什么。
+    //
+    // （`getCategoryNames` 是逐个创建的：失败前已建好的那几个会留在站点上。这是本设计的既有
+    // 副作用、与上游一致 —— 它不改变「此刻文章还没写」这个判断，故中止依然是对的语义。）
     let categoryNames: string[] | undefined;
-    if (matterData?.categories) {
-      categoryNames = await this.getCategoryNames(matterData.categories);
-    }
-
     let tagNames: string[] | undefined;
-    if (matterData?.tags) {
-      tagNames = await this.getTagNames(matterData.tags);
+
+    try {
+      if (matterData?.categories) {
+        categoryNames = await this.getCategoryNames(matterData.categories);
+      }
+
+      if (matterData?.tags) {
+        tagNames = await this.getTagNames(matterData.tags);
+      }
+    } catch (error) {
+      new Notice(this.resolutionFailureMessage(error));
+      return;
     }
 
     let remotePostName = matterData?.halo?.name;
@@ -366,7 +378,32 @@ class HaloService {
     return message;
   }
 
-  /** 发布失败的提示文案 */
+  /**
+   * 把 `McpError` 还原成**具体**原因，说不出来才回落到给定的泛化文案。
+   *
+   * 与上游的差异（刻意的）：上游把 `getPost()` 的所有失败都吞成 `undefined`，于是密钥过期、
+   * MCP 端点配错、网络不通全都被显示成「文章不存在」，用户照着这句话怎么查都查不对。
+   * 现在失败即抛，这里用 `McpError` 自带的 `key` + `params` 还原出**具体**原因
+   * （`transport.error.*` 本就是面向用户的处置指引：核对密钥 / 勾选工具授权 / 检查网络）。
+   *
+   * `fallbackKey` 是「连具体原因都拿不到」时的兜底，各调用点按自己的语义取：
+   * 读取失败说「文章不存在」，发布前的中止说「发布失败」。
+   */
+  private failureMessage(fallbackKey: string, error: unknown): string {
+    if (error instanceof McpError) {
+      return this.withErrorDetail(i18next.t(error.key, error.params), error);
+    }
+
+    return this.withErrorDetail(i18next.t(fallbackKey), error);
+  }
+
+  /**
+   * 发布失败的提示文案（写已经发出去、服务端拒绝了）。
+   *
+   * 这里刻意**不**走 `failureMessage`：这条路上 `McpError.detail` 就是最有价值的线索
+   * （工具级失败的全部说明都只在它里面），保留「发布失败」这个框架 + 服务端原文，
+   * 比换成 `transport.error.*` 的泛化处置指引更贴近用户此刻的处境。改动它会破坏既有断言。
+   */
   private publishFailureMessage(error: unknown): string {
     return this.withErrorDetail(i18next.t("service.error_publish_failed"), error);
   }
@@ -374,19 +411,39 @@ class HaloService {
   /**
    * 读取失败的提示文案。
    *
-   * 与上游的差异（刻意的）：上游把 `getPost()` 的所有失败都吞成 `undefined`，于是密钥过期、
-   * MCP 端点配错、网络不通全都被显示成「文章不存在」，用户照着这句话怎么查都查不对。
-   * 现在 `getPost()` 失败即抛，这里用 `McpError` 自带的 `key` + `params` 还原出**具体**原因
-   * （`transport.error.*` 本就是面向用户的文案）。
-   *
    * 非 `McpError` 的意外错误才回落到「文章不存在」—— 那正是这句话本来就对应的情形。
    */
   private readFailureMessage(error: unknown): string {
+    return this.failureMessage("service.error_post_not_found", error);
+  }
+
+  /**
+   * 发布**前**解析分类/标签失败的提示文案。
+   *
+   * 与 `publishFailureMessage` 的区别是刻意的：那条路上写已经发出去了，`detail` 是主线索；
+   * 这条路上失败几乎都来自 `halo_list_categories` / `halo_create_category` 这类工具调用，
+   * 而 `McpError` 的 key 本身就是**可操作的处置指引**（该去后台给这个密钥勾工具授权，
+   * 还是该查网络 / 端点）—— 换成泛泛的「发布失败，请重试」等于把唯一的线索扔掉。
+   */
+  private resolutionFailureMessage(error: unknown): string {
+    return this.failureMessage("service.error_publish_failed", error);
+  }
+
+  /**
+   * 分类/标签显示名解析失败的提示文案（`updatePost` / `pullPost` 用）。
+   *
+   * 两段拼起来是刻意的：第一段说清**这次操作变成了什么样**（这两个字段没动、其余照常写入），
+   * 第二段（`McpError` 时）说清**为什么**。只给其中一段，用户都得再猜一半 ——
+   * 而「哪两个字段没同步」与「下一步该去后台勾工具授权还是查网络」正是他要的两件事。
+   */
+  private taxonomyFailureMessage(error: unknown): string {
+    const outcome = i18next.t("service.notice_taxonomy_not_resolved");
+
     if (error instanceof McpError) {
-      return this.withErrorDetail(i18next.t(error.key, error.params), error);
+      return `${outcome}\n${this.withErrorDetail(i18next.t(error.key, error.params), error)}`;
     }
 
-    return i18next.t("service.error_post_not_found");
+    return outcome;
   }
 
   private async withPublishRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -452,8 +509,19 @@ class HaloService {
       return;
     }
 
-    const postCategories = await this.getCategoryDisplayNames(post.post.spec.categories);
-    const postTags = await this.getTagDisplayNames(post.post.spec.tags);
+    // 显示名解析失败**不能**让整次更新炸掉：异常穿出去的话用户什么都看不到，而笔记一个字都没改。
+    // 处置与 `publishPost` 的收尾读一致 —— 解析不出来就**跳过**这两个字段（保持笔记原值）、
+    // 其余照常回写。区别在这处要**弹一次提示**：更新文档的**主目的**就是把远端状态同步进笔记，
+    // 这两个字段没同步上属于主目的未完全达成，不能默默咽掉（发布那处主目的已完成，故不弹）。
+    let postCategories: string[] | undefined;
+    let postTags: string[] | undefined;
+
+    try {
+      postCategories = await this.getCategoryDisplayNames(post.post.spec.categories);
+      postTags = await this.getTagDisplayNames(post.post.spec.tags);
+    } catch (error) {
+      new Notice(this.taxonomyFailureMessage(error));
+    }
 
     const raw = this.settings.replaceImageLinks
       ? `${post.content.raw}`
@@ -466,8 +534,14 @@ class HaloService {
       frontmatter.slug = post.post.spec.slug;
       frontmatter.cover = post.post.spec.cover;
       frontmatter.excerpt = post.post.spec.excerpt.autoGenerate ? undefined : post.post.spec.excerpt.raw;
-      frontmatter.categories = postCategories;
-      frontmatter.tags = postTags;
+      // 只在解析成功时才写这两个字段：它们承载的是**显示名**，而消费方按 displayName 匹配，
+      // 写错东西会在下次发布时造出垃圾分类/标签（同 `publishPost` 里那道守卫）
+      if (postCategories) {
+        frontmatter.categories = postCategories;
+      }
+      if (postTags) {
+        frontmatter.tags = postTags;
+      }
       frontmatter.halo = {
         site: this.site.url,
         name: post.post.metadata.name,
@@ -484,8 +558,22 @@ class HaloService {
       return;
     }
 
-    const postCategories = await this.getCategoryDisplayNames(post.post.spec.categories);
-    const postTags = await this.getTagDisplayNames(post.post.spec.tags);
+    // 与 `updatePost` 同款处置。这里多一层考虑：**笔记照样要建出来** —— 分类名解析失败不该让
+    // 整次拉取白做，正文才是用户要的东西；而且若失败是持久的（比如这个密钥没被勾选列举类工具），
+    // 改成中止会让「拉取文章」永久不可用，比少两个字段严重得多。
+    //
+    // 新笔记没有「原值」可保留，跳过赋值的观测结果就是「这两个键不存在」。这不会误伤远端：
+    // 发布时 `if (matterData?.categories)` 不成立，更新分支的 `spec.categories` 会保留服务端
+    // 已有的分类，而不是把它们清空。
+    let postCategories: string[] | undefined;
+    let postTags: string[] | undefined;
+
+    try {
+      postCategories = await this.getCategoryDisplayNames(post.post.spec.categories);
+      postTags = await this.getTagDisplayNames(post.post.spec.tags);
+    } catch (error) {
+      new Notice(this.taxonomyFailureMessage(error));
+    }
 
     const file = await this.app.vault.create(`${post.post.spec.title}.md`, `${post.content.raw}`);
     this.app.workspace.getLeaf().openFile(file);
@@ -495,8 +583,12 @@ class HaloService {
       frontmatter.slug = post.post.spec.slug;
       frontmatter.cover = post.post.spec.cover;
       frontmatter.excerpt = post.post.spec.excerpt.autoGenerate ? undefined : post.post.spec.excerpt.raw;
-      frontmatter.categories = postCategories;
-      frontmatter.tags = postTags;
+      if (postCategories) {
+        frontmatter.categories = postCategories;
+      }
+      if (postTags) {
+        frontmatter.tags = postTags;
+      }
       frontmatter.halo = {
         site: this.site.url,
         name: name,
