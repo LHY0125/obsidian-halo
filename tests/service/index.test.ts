@@ -975,6 +975,55 @@ describe("publishPost 走 MCP", () => {
     // 支撑断言：回写用的 name 就是建文章时传出去的那个（而不是被扁平响应体冲成 undefined）
     expect(fetchedName).toEqual(createdName);
   });
+
+  test("写工具返回非 JSON 确认文案时，发布仍然成功且 frontmatter 正常回写", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { halo: { publish: true }, title: "Post title" },
+    }));
+
+    // 写工具都没有 outputSchema，「回一句人读确认文案」是合理形态。
+    // 若写路径走 callToolJson（它要求返回体是可解析的 JSON 负载），这里会在
+    // **服务端已经写成功之后**抛错 —— 触发整事务重试、用户看到「发布失败」。
+    const { client, calls } = createFakeClient((name) => {
+      if (name === "halo_create_post" || name === "halo_set_post_publish_state") {
+        return "Created post";
+      }
+
+      throw new Error(`Unexpected tool: ${name}`);
+    });
+
+    mockPublishRest(() => makeRemotePost("post-1"));
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    await service.publishPost();
+
+    expect(notices.slice(seen)).not.toContain(i18next.t("service.error_publish_failed"));
+
+    // 两个写工具都走了「不解析返回体」的入口
+    const writeCalls = calls.filter(
+      (call) => call.name === "halo_create_post" || call.name === "halo_set_post_publish_state",
+    );
+    expect(writeCalls.map((call) => call.name)).toEqual(["halo_create_post", "halo_set_post_publish_state"]);
+    expect(writeCalls.map((call) => call.method)).toEqual(["callToolVoid", "callToolVoid"]);
+
+    // frontmatter 正常回写
+    expect(written?.title).toBe("Post title");
+    expect(written?.slug).toBe("post-title");
+    expect((written?.halo as { name?: string } | undefined)?.name).toEqual(expect.any(String));
+  });
 });
 
 describe("changePostPublish 走 MCP", () => {
@@ -990,6 +1039,9 @@ describe("changePostPublish 走 MCP", () => {
 
     await service.changePostPublish("abc", false);
 
-    expect(calls).toEqual([{ name: "halo_set_post_publish_state", args: { name: "abc", publish: false } }]);
+    // 整体 toEqual 而不是取末元素：顺带钉住「没有多余的调用」，以及走的是不解析返回体的入口
+    expect(calls).toEqual([
+      { args: { name: "abc", publish: false }, method: "callToolVoid", name: "halo_set_post_publish_state" },
+    ]);
   });
 });

@@ -390,3 +390,56 @@ describe("McpClient.callToolJson", () => {
     expect((thrown as McpError).detail).toContain("must have a maximum value of 100");
   });
 });
+
+describe("McpClient.callToolVoid", () => {
+  beforeEach(() => {
+    rq.mockReset();
+  });
+
+  /** 跑一次 tools/call，回传 stub 记录到的请求与抛出的东西 */
+  async function callVoid(toolResult: unknown) {
+    const calls = stub([
+      { status: 200, text: INIT_OK },
+      { status: 200, text: TOOLS_OK },
+      { status: 200, text: JSON.stringify({ jsonrpc: "2.0", id: 3, result: toolResult }) },
+    ]);
+    let thrown: unknown;
+
+    try {
+      await new McpClient(options).callToolVoid("halo_create_post", { name: "abc" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    return { calls, thrown };
+  }
+
+  it("返回体是人读确认文案（非 JSON）时不抛错", async () => {
+    // 写工具没有 outputSchema，回一句人读确认文案是合理形态。
+    // 若走 callToolJson，这里会 parse 失败并抛错 —— 而那一刻服务端其实已经写成功了。
+    const { calls, thrown } = await callVoid({
+      content: [{ type: "text", text: "Created post abc" }],
+      isError: false,
+    });
+
+    expect(thrown).toBeUndefined();
+    // 且请求确实发出去了：否则「没抛错」在「压根没调工具」的实现下同样成立
+    expect(calls).toHaveLength(3);
+    expect(JSON.parse(calls[2].body).params.name).toBe("halo_create_post");
+  });
+
+  it("返回体没有文本块时不抛错", async () => {
+    const { calls, thrown } = await callVoid({ content: [], isError: false });
+
+    expect(thrown).toBeUndefined();
+    expect(calls).toHaveLength(3);
+  });
+
+  it("isError 为 true 时抛 McpError，detail 带服务端原文", async () => {
+    const { thrown } = await callVoid(TOOL_FAILURE_RESULT);
+
+    expect(thrown).toBeInstanceOf(McpError);
+    expect((thrown as McpError).kind).toBe("unknown");
+    expect((thrown as McpError).detail).toContain("must have a maximum value of 100");
+  });
+});
