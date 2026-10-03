@@ -77,7 +77,7 @@
       },
       "token": {
         "name": "Personal Access Token (fallback only)",
-        "description": "Only needed for two REST paths: uploading images larger than 7 MiB, and listing posts for the Pull posts from Halo command. The hmcp key does not work on the REST API, so this is a separate credential."
+        "description": "Only needed to upload images larger than 7 MiB. The hmcp key does not work on the REST API, so this is a separate credential."
       },
       "mcpToken": {
         "name": "MCP access key",

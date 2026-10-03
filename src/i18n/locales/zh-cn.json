@@ -77,7 +77,7 @@
       },
       "token": {
         "name": "个人访问令牌（仅回退用）",
-        "description": "仅在两条 REST 路径上需要：上传超过 7 MiB 的图片，以及「从 Halo 拉取文档」的选文列表。hmcp 密钥在 REST API 上无效，两者是不同凭据。"
+        "description": "仅用于上传超过 7 MiB 的图片。hmcp 密钥在 REST API 上无效，两者是不同凭据。"
       },
       "mcpToken": {
         "name": "MCP 访问密钥",

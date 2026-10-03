@@ -77,6 +77,8 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
   发布状态那一步必须留在重试闭包**内**：移出去会同时丢掉重试覆盖与「建文章成功、发布状态失败」的自愈回填。
 - 分类/标签**不存在会自动创建**，slug 用 `transliteration` 转拼音（所以中文标题的 permalink 是拼音）。副作用：一次手误的标签名会在站点上永久留下垃圾标签。
 - 分类/标签的**显示名解析失败要跳过该字段的回写**，绝不落回 `metadata.name`：消费方按 displayName 精确匹配，写入 name 会在下次发布时造出垃圾分类/标签。注意 `getCategoryDisplayNames()` / `getTagDisplayNames()` 返回 `undefined`（无从解析）与 `[]`（确实没有）是两回事，签名已如实标注。
+- **两处 `size` 上限都还没实现翻页**：`HaloService.getCategories()` / `getTags()`（分类、标签）与 `post-selection-model.ts` 的 `fetchSelectablePosts()`（拉取弹窗的文章列表）都写死 `size: 100`（schema 的上限）。站点现有 74 篇文章，一页够用；**一旦超过 100 就会静默漏掉后面的** —— 届时必须用起返回体里的 `hasNext` / `totalPages`。两处代码注释里都留了同一句提醒。
+- **选择器列表项的三个字段是可选契约**：`halo_list_posts` 的 item `required` 只有 `["published","publishRequested","recycled","categories","tags"]`，`name` / `title` / `slug` 都不在其中。所以 `toSelectablePosts()` 会剔除缺 `name` 的项（无法拉取）、把缺 `title` 的回落成 `name`（否则一行空白）。
 
 ### MCP 协议硬约束
 
@@ -100,7 +102,7 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 | `src/sites-modal.ts` | 站点列表（增删、设为默认） |
 | `src/site-editing-modal.ts` | 编辑单个站点。内含「Validate」按钮，已改为跑 **MCP 自检**（`runSelfCheck` + `mcpToken`）——校验的正是用户真正要填的那把密钥 |
 | `src/site-selection-modal.ts` | 发布时选目标站点 |
-| `src/post-selection-model.ts` | 拉取时选远程文章。⚠️ **文件名是 `-model` 不是 `-modal`**，容易写错，但它是个 Modal |
+| `src/post-selection-model.ts` | 拉取时选远程文章，列表走 MCP 的 `halo_list_posts`。⚠️ **文件名是 `-model` 不是 `-modal`**，容易写错，但它是个 Modal。取数与映射已抽成 `fetchSelectablePosts(client)` / `toSelectablePosts(items)` 两个纯函数（可直接单测），UI 层刻意不做 client 注入 |
 
 ### frontmatter 契约
 
