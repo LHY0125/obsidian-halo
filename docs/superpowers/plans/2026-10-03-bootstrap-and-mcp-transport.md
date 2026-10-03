@@ -183,8 +183,10 @@ git commit -m "chore: 引入上游 v1.2.0 并改名为 halo-mcp"
 
 - Consumes: 无
 - Produces:
-  - `type McpErrorKind = "protocol" | "auth" | "gateway" | "missing-tool" | "network" | "unknown"`
-  - `class McpError extends Error { readonly kind: McpErrorKind; readonly detail?: string }`
+  - `type McpErrorKind = "protocol" | "unauthorized" | "forbidden" | "gateway" | "missing-tool" | "network" | "unknown"`
+  - `class McpError extends Error { readonly kind: McpErrorKind; readonly key: string; readonly params: Record<string, string | number>; readonly detail?: string }`
+  - 约定：`key` 是 i18n 键（`transport.error.<kind>`），**用户可见文案由 UI 层用 i18next 解析**；`message` 就是这个键本身，只供日志定位。本模块不携带任何用户文案、不依赖 i18next
+  - 401 与 403 是两个 kind（`unauthorized` / `forbidden`），因为 spec §4.3 给它们的处置不同
   - `function classifyHttpFailure(status: number, body: string): McpError`
   - `function assertJsonBody(body: string): unknown`
   - `function missingToolError(name: string, available: string[]): McpError`
@@ -197,37 +199,62 @@ git commit -m "chore: 引入上游 v1.2.0 并改名为 halo-mcp"
 import { describe, expect, it } from "@rstest/core";
 import { assertJsonBody, classifyHttpFailure, McpError, missingToolError } from "../../src/transport/errors";
 
+/** 捕获同步抛出的 McpError，便于断言 kind / params，而不是本地化文案 */
+function captureError(fn: () => unknown): McpError {
+  try {
+    fn();
+  } catch (error) {
+    return error as McpError;
+  }
+  throw new Error("expected the call to throw");
+}
+
 describe("classifyHttpFailure", () => {
-  it("400 且响应体为空 → protocol（这是误解 Accept 头或握手顺序的典型症状）", () => {
+  it("400 且响应体为空 → protocol（误解 Accept 头或握手顺序的典型症状）", () => {
     const err = classifyHttpFailure(400, "");
+
     expect(err).toBeInstanceOf(McpError);
     expect(err.kind).toBe("protocol");
-    expect(err.message).toContain("text/event-stream");
+    expect(err.key).toBe("transport.error.protocol");
   });
 
   it("400 但响应体非空 → 不判为 protocol，交回 unknown", () => {
     expect(classifyHttpFailure(400, '{"error":"bad params"}').kind).toBe("unknown");
   });
 
-  it("401 → auth", () => {
-    expect(classifyHttpFailure(401, "").kind).toBe("auth");
+  it("401 → unauthorized（密钥无效，处置与 403 不同）", () => {
+    expect(classifyHttpFailure(401, "").kind).toBe("unauthorized");
   });
 
-  it("403 → auth，且提示去后台勾选工具", () => {
-    const err = classifyHttpFailure(403, "");
-    expect(err.kind).toBe("auth");
-    expect(err.message).toContain("工具");
+  it("403 → forbidden（密钥未获授权调用该工具）", () => {
+    expect(classifyHttpFailure(403, "").kind).toBe("forbidden");
   });
 
   it("状态码正常但响应体是 HTML → gateway（ESA/WAF 拦截页）", () => {
-    const err = classifyHttpFailure(200, "<!DOCTYPE html><html><body>blocked</body></html>");
-    expect(err.kind).toBe("gateway");
+    expect(classifyHttpFailure(200, "<!DOCTYPE html><html><body>blocked</body></html>").kind).toBe("gateway");
   });
 
-  it("其它状态码 → unknown，并带上响应体片段", () => {
+  it("其它状态码 → unknown，并把响应体片段留在 detail", () => {
     const err = classifyHttpFailure(500, "boom");
+
     expect(err.kind).toBe("unknown");
     expect(err.detail).toBe("boom");
+    expect(err.params).toMatchObject({ status: 500 });
+  });
+
+  it("每个 kind 都映射到 transport.error.* 下的 i18n 键，供 UI 层解析文案", () => {
+    const errors = [
+      classifyHttpFailure(400, ""),
+      classifyHttpFailure(401, ""),
+      classifyHttpFailure(403, ""),
+      classifyHttpFailure(500, "x"),
+      missingToolError("halo_create_post", []),
+    ];
+
+    for (const err of errors) {
+      expect(err.key).toBe(`transport.error.${err.kind}`);
+      expect(err.key).toMatch(/^transport\.error\.[a-z-]+$/);
+    }
   });
 });
 
@@ -237,20 +264,20 @@ describe("assertJsonBody", () => {
   });
 
   it("HTML 即便状态码是 200 也判为 gateway——不能把拦截页当 JSON 解", () => {
-    expect(() => assertJsonBody("<html><head></head></html>")).toThrowError(/网关/);
+    expect(captureError(() => assertJsonBody("<html><head></head></html>")).kind).toBe("gateway");
   });
 
   it("非 JSON 非 HTML → unknown", () => {
-    expect(() => assertJsonBody("not json at all")).toThrowError(/JSON/);
+    expect(captureError(() => assertJsonBody("not json at all")).kind).toBe("unknown");
   });
 });
 
 describe("missingToolError", () => {
-  it("消息里包含缺失工具名与可操作指引", () => {
-    const err = missingToolError("halo_create_post", ["halo_list_posts"]);
+  it("把缺失工具名与可用数量放进 params，供 UI 层插值", () => {
+    const err = missingToolError("halo_create_post", ["halo_list_posts", "halo_get_post"]);
+
     expect(err.kind).toBe("missing-tool");
-    expect(err.message).toContain("halo_create_post");
-    expect(err.message).toContain("2.26");
+    expect(err.params).toEqual({ tool: "halo_create_post", count: 2 });
   });
 });
 ```
@@ -311,48 +338,63 @@ export interface McpToolCallResult {
 创建 `src/transport/errors.ts`：
 
 ```typescript
-export type McpErrorKind = "protocol" | "auth" | "gateway" | "missing-tool" | "network" | "unknown";
+export type McpErrorKind =
+  | "protocol"
+  | "unauthorized"
+  | "forbidden"
+  | "gateway"
+  | "missing-tool"
+  | "network"
+  | "unknown";
 
+/**
+ * MCP 传输层错误。
+ *
+ * 职责划分：`key` + `params` 交给 UI 层用 i18next 解析出**用户可见文案**；
+ * `message` 就是那个键本身（供日志定位），本模块**不携带任何用户文案、也不依赖 i18next**，
+ * 因此它的单测无需初始化 i18n。
+ */
 export class McpError extends Error {
+  readonly key: string;
+
   constructor(
     readonly kind: McpErrorKind,
-    message: string,
+    readonly params: Record<string, string | number> = {},
     readonly detail?: string,
   ) {
-    super(message);
+    const key = `transport.error.${kind}`;
+    super(key);
     this.name = "McpError";
+    this.key = key;
   }
 }
 
 /** 响应体看上去是 HTML —— 说明命中了网关（ESA/WAF）拦截页而非 MCP 端点 */
 const HTML_BODY = /<\s*(!doctype|html|head|body)\b/i;
 
-const PROTOCOL_HINT =
-  "MCP 协议错误：服务端返回 400 且响应体为空。通常是握手顺序错误（未先 initialize），或请求头 Accept 未同时包含 application/json 与 text/event-stream。";
-
 /**
  * 把 HTTP 层现象归一化成可操作的错误类别。
  * 判据取自真实站点的实测行为（见 spec 的 F4 / F7）。
+ *
+ * 401 与 403 拆成两个 kind：spec §4.3 给它们的处置不同（核对密钥 vs 为该密钥勾选工具），
+ * 合成一个 kind 就没法各自给出正确的指引。
  */
 export function classifyHttpFailure(status: number, body: string): McpError {
   const trimmed = body.trim();
 
   if (HTML_BODY.test(trimmed)) {
-    return new McpError("gateway", "站点返回了 HTML 而非 JSON，疑似被网关（ESA/WAF）拦截。", trimmed.slice(0, 200));
+    return new McpError("gateway", { status }, trimmed.slice(0, 200));
   }
   if (status === 400 && trimmed === "") {
-    return new McpError("protocol", PROTOCOL_HINT);
+    return new McpError("protocol", { status });
   }
   if (status === 401) {
-    return new McpError("auth", "MCP 密钥无效或已失效。请到 Halo 后台「工具 → MCP 服务」核对访问密钥。");
+    return new McpError("unauthorized", { status });
   }
   if (status === 403) {
-    return new McpError(
-      "auth",
-      "该 MCP 密钥未被授权调用此工具。请到 Halo 后台「工具 → MCP 服务」为该密钥勾选所需工具。",
-    );
+    return new McpError("forbidden", { status });
   }
-  return new McpError("unknown", `MCP 请求失败：HTTP ${status}`, trimmed.slice(0, 200));
+  return new McpError("unknown", { status }, trimmed.slice(0, 200));
 }
 
 /** 响应体必须能解析为 JSON；HTML 一律判为网关拦截，即使状态码是 200 */
@@ -360,21 +402,17 @@ export function assertJsonBody(body: string): unknown {
   const trimmed = body.trim();
 
   if (HTML_BODY.test(trimmed)) {
-    throw new McpError("gateway", "站点返回了 HTML 而非 JSON，疑似被网关（ESA/WAF）拦截。", trimmed.slice(0, 200));
+    throw new McpError("gateway", {}, trimmed.slice(0, 200));
   }
   try {
     return JSON.parse(trimmed);
   } catch {
-    throw new McpError("unknown", "MCP 响应不是合法 JSON。", trimmed.slice(0, 200));
+    throw new McpError("unknown", {}, trimmed.slice(0, 200));
   }
 }
 
 export function missingToolError(name: string, available: string[]): McpError {
-  return new McpError(
-    "missing-tool",
-    `站点未提供 MCP 工具「${name}」。请确认站点 Halo 版本 ≥ 2.26 且已启用 MCP Server 插件，并检查该密钥的工具授权。`,
-    `当前可用 ${available.length} 个工具`,
-  );
+  return new McpError("missing-tool", { tool: name, count: available.length });
 }
 ```
 
@@ -384,7 +422,7 @@ export function missingToolError(name: string, available: string[]): McpError {
 pnpm test tests/transport/errors.test.ts
 ```
 
-预期：PASS（10 个用例）。
+预期：PASS（11 个用例：`classifyHttpFailure` 7 + `assertJsonBody` 3 + `missingToolError` 1）。
 
 - [ ]  **Step 6: 提交**
 
@@ -494,10 +532,10 @@ describe("McpClient.initialize", () => {
     await expect(new McpClient(options).initialize()).rejects.toMatchObject({ kind: "protocol" });
   });
 
-  it("401 → kind 为 auth", async () => {
+  it("401 → kind 为 unauthorized", async () => {
     stub([{ status: 401, text: "" }]);
 
-    await expect(new McpClient(options).initialize()).rejects.toMatchObject({ kind: "auth" });
+    await expect(new McpClient(options).initialize()).rejects.toMatchObject({ kind: "unauthorized" });
   });
 
   it("200 但响应体是 HTML → kind 为 gateway", async () => {
@@ -565,10 +603,10 @@ function unwrap<T>(body: string, context: string): T {
   const json = assertJsonBody(body) as JsonRpcResponse<T>;
 
   if (json.error) {
-    throw new McpError("unknown", `${context} 失败：${json.error.message}`);
+    throw new McpError("unknown", { context }, json.error.message);
   }
   if (json.result === undefined) {
-    throw new McpError("unknown", `${context} 未返回结果。`);
+    throw new McpError("unknown", { context });
   }
   return json.result;
 }
@@ -604,7 +642,7 @@ export class McpClient {
         throw: false,
       });
     } catch (error) {
-      throw new McpError("network", `${context}网络请求失败：${(error as Error).message}`);
+      throw new McpError("network", { context }, (error as Error).message);
     }
 
     if (response.status >= 400) {
@@ -635,10 +673,10 @@ export class McpClient {
           clientInfo: { name: CLIENT_NAME, version: CLIENT_VERSION },
         },
       },
-      "MCP 握手",
+      "MCP handshake",
     );
 
-    return unwrap<McpInitializeResult>(body, "MCP 握手");
+    return unwrap<McpInitializeResult>(body, "MCP handshake");
   }
 }
 ```
@@ -785,7 +823,10 @@ describe("McpClient.listTools / callTool", () => {
       { status: 200, text: JSON.stringify({ jsonrpc: "2.0", id: 3, error: { code: -32602, message: "invalid params" } }) },
     ]);
 
-    await expect(new McpClient(options).callTool("halo_create_post")).rejects.toThrowError(/invalid params/);
+    await expect(new McpClient(options).callTool("halo_create_post")).rejects.toMatchObject({
+      kind: "unknown",
+      detail: "invalid params",
+    });
   });
 });
 ```
@@ -818,9 +859,9 @@ import type { JsonRpcResponse, McpInitializeResult, McpTool, McpToolsListResult,
     }
 
     await this.initialize();
-    const body = await this.post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, "获取工具列表");
+    const body = await this.post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, "tools/list");
 
-    this.toolCache = unwrap<McpToolsListResult>(body, "获取工具列表").tools;
+    this.toolCache = unwrap<McpToolsListResult>(body, "tools/list").tools;
     return this.toolCache;
   }
 
@@ -834,10 +875,10 @@ import type { JsonRpcResponse, McpInitializeResult, McpTool, McpToolsListResult,
 
     const body = await this.post(
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } },
-      `调用工具 ${name}`,
+      `tools/call ${name}`,
     );
 
-    return unwrap<T>(body, `调用工具 ${name}`);
+    return unwrap<T>(body, `tools/call ${name}`);
   }
 ```
 
@@ -1209,7 +1250,7 @@ describe("runSelfCheck", () => {
     const report = await runSelfCheck("https://blog.example.com/mcp", "bad");
 
     expect(report.ok).toBe(false);
-    expect(report.error?.kind).toBe("auth");
+    expect(report.error?.kind).toBe("unauthorized");
   });
 
   it("REQUIRED_TOOLS 覆盖阶段 0/1 依赖的工具，且不含运维类工具", () => {
@@ -1417,6 +1458,60 @@ export class SettingsMigrationModal extends Modal {
 
 > `{{...}}` 是 i18next 的插值占位符，与上游 `service.notice_upload_images_success` 的写法一致。**上架到社区插件市场时** `command.mcp_self_check.name` 要按官方惯例把插件名前缀去掉——现在写成「MCP 连通性自检」而非「Halo: MCP 连通性自检」，Obsidian 会自动加上插件名前缀。
 
+- [ ]  **Step 4c: 补 `transport.error.*` 文案（Task 2 的 `McpError.key` 指向这里）**
+
+Task 2 的 `McpError` 只携带 `key`（`transport.error.<kind>`）与 `params`，**用户可见文案全部在这里落地**。七个 kind 三份语言必须键路径完全一致，否则报错时界面会显示原始键名。
+
+可用插值变量仅限 `params` 里有的：`missing-tool` 有 `{{tool}}` 与 `{{count}}`；其余 kind 只有 `{ status }` 或 `{ context }`，**不要在这些文案里插值 `detail`**（`detail` 是给日志用的独立字段，不在 `params` 里）。
+
+`en.json`（新增顶层 `transport` 键）：
+
+```json
+  "transport": {
+    "error": {
+      "protocol": "MCP protocol error: the server returned HTTP 400 with an empty body. This usually means the handshake order is wrong (initialize must come first), or the Accept header is missing text/event-stream.",
+      "unauthorized": "The MCP key is invalid or has expired. Check the access key under Tools -> MCP Service in the Halo console.",
+      "forbidden": "This MCP key is not authorized to call that tool. Grant the tool to the key under Tools -> MCP Service in the Halo console.",
+      "gateway": "The site returned HTML instead of JSON, which usually means a gateway (ESA/WAF) intercepted the request. Confirm the site is reachable and the WAF is not blocking it.",
+      "missing-tool": "The site does not provide the MCP tool \"{{tool}}\" ({{count}} tool(s) available). Confirm the site runs Halo >= 2.26 with the MCP Server plugin enabled, and check this key's tool grants.",
+      "network": "Could not reach the MCP endpoint. Check the site URL and your network.",
+      "unknown": "The MCP request failed. Check the site configuration and the Halo console."
+    }
+  },
+```
+
+`zh-cn.json`：
+
+```json
+  "transport": {
+    "error": {
+      "protocol": "MCP 协议错误：服务端返回 400 且响应体为空。通常是握手顺序错误（未先 initialize），或请求头 Accept 未同时包含 application/json 与 text/event-stream。",
+      "unauthorized": "MCP 密钥无效或已失效。请到 Halo 后台「工具 → MCP 服务」核对访问密钥。",
+      "forbidden": "该 MCP 密钥未被授权调用此工具。请到 Halo 后台「工具 → MCP 服务」为该密钥勾选所需工具。",
+      "gateway": "站点返回了 HTML 而非 JSON，疑似被网关（ESA/WAF）拦截。请确认站点可达且 WAF 未拦截该请求。",
+      "missing-tool": "站点未提供 MCP 工具「{{tool}}」（当前可用 {{count}} 个）。请确认站点 Halo 版本 ≥ 2.26 且已启用 MCP Server 插件，并检查该密钥的工具授权。",
+      "network": "无法连接 MCP 端点。请检查站点地址与网络。",
+      "unknown": "MCP 请求失败。请检查站点配置与 Halo 后台。"
+    }
+  },
+```
+
+`zh-tw.json`：
+
+```json
+  "transport": {
+    "error": {
+      "protocol": "MCP 協定錯誤：伺服器回傳 400 且回應內容為空。通常是握手順序錯誤（未先 initialize），或請求標頭 Accept 未同時包含 application/json 與 text/event-stream。",
+      "unauthorized": "MCP 金鑰無效或已失效。請到 Halo 後台「工具 → MCP 服務」核對存取金鑰。",
+      "forbidden": "該 MCP 金鑰未被授權呼叫此工具。請到 Halo 後台「工具 → MCP 服務」為該金鑰勾選所需工具。",
+      "gateway": "站點回傳 HTML 而非 JSON，疑似被閘道（ESA/WAF）攔截。請確認站點可達且 WAF 未攔截該請求。",
+      "missing-tool": "站點未提供 MCP 工具「{{tool}}」（目前可用 {{count}} 個）。請確認站點 Halo 版本 ≥ 2.26 且已啟用 MCP Server 外掛，並檢查該金鑰的工具授權。",
+      "network": "無法連線 MCP 端點。請檢查站點位址與網路。",
+      "unknown": "MCP 請求失敗。請檢查站點設定與 Halo 後台。"
+    }
+  },
+```
+
 - [ ]  **Step 5: 接入 main.ts**
 
 在 `src/main.ts` 中：
@@ -1468,7 +1563,11 @@ import { SettingsMigrationModal } from "./settings-migration-modal";
         const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
         if (report.error) {
-          new Notice(i18next.t("command.mcp_self_check.error_failed", { message: report.error.message }));
+          new Notice(
+            i18next.t("command.mcp_self_check.error_failed", {
+              message: i18next.t(report.error.key, report.error.params),
+            }),
+          );
           return;
         }
 
@@ -1525,7 +1624,11 @@ import { SettingsMigrationModal } from "./settings-migration-modal";
               const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
               if (report.error) {
-                new Notice(i18next.t("command.mcp_self_check.error_failed", { message: report.error.message }));
+                new Notice(
+                  i18next.t("command.mcp_self_check.error_failed", {
+                    message: i18next.t(report.error.key, report.error.params),
+                  }),
+                );
               } else if (report.ok) {
                 new Notice(i18next.t("site_editing_modal.settings.validate.notice_validated"));
               } else {
