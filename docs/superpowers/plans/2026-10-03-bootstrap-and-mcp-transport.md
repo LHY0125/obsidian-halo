@@ -1560,13 +1560,25 @@ Task 2 的 `McpError` 只携带 `key`（`transport.error.<kind>`）与 `params`�
 
 在 `src/main.ts` 中：
 
-1. 顶部补导入：
+1. 调整顶部导入 —— **既补新的，也删掉将变成未使用的**：
+
+`src/main.ts` 已有一条从 `./settings` 的导入，把 `mcpEndpointOf` 与 `migrateSettings` 加进**那一条**，并**移除 `DEFAULT_SETTINGS`**：
 
 ```typescript
-import { mcpEndpointOf } from "./settings";
+import {
+  type HaloSetting,
+  HaloSettingTab,
+  type HaloSite,
+  isSameSiteUrl,
+  mcpEndpointOf,
+  migrateSettings,
+  normalizeSite,
+} from "./settings";
 import { runSelfCheck } from "./mcp-self-check";
 import { SettingsMigrationModal } from "./settings-migration-modal";
 ```
+
+> **为什么必须删掉 `DEFAULT_SETTINGS`**：它原本只在 `loadSettings()` 里的 `Object.assign({}, DEFAULT_SETTINGS, ...)` 被用到，而第 2 步会把那个函数整体替换掉——换完之后这条导入就没有引用者了。`biome.json` 的 `recommended: true` 含 `noUnusedImports`，而 `pnpm check` 覆盖 `src/`，所以留着它会直接让 lint 报错。`normalizeSite` 不受影响（`saveSettings()` 里仍在用），别一起删了。
 
 2. 把 `loadSettings()` 改为走迁移：
 
@@ -1586,7 +1598,7 @@ import { SettingsMigrationModal } from "./settings-migration-modal";
   }
 ```
 
-（`migrateSettings` 一并加进 `./settings` 的导入列表。）
+（第 1 步给出的导入块已包含 `migrateSettings`。）
 
 3. 在 `onload()` 末尾、`addSettingTab` 之前注册自检命令：
 
