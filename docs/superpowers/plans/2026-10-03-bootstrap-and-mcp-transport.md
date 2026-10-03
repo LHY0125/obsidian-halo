@@ -1774,6 +1774,10 @@ const rq = requestUrl as unknown as ReturnType<typeof rs.fn>;
  * 只替换这一个函数而不是改 `tests/setup.ts`：`requestUrl` 是 Electron 运行时才有的 API，
  * Node 测试环境里没有真货，它是唯一无法真实存在的边界。换上 fetch 之后，`McpClient`、
  * `unwrap`、错误归一化、`runSelfCheck` 全部走真实代码路径。
+ *
+ * 不映射 `throw` 参数：调用方（`McpClient.post()`）固定传 `throw: false`，而 `fetch` 本就不会
+ * 因 HTTP 4xx/5xx 抛错——返回 `{ status, text }` 正好是它要的行为。若将来调用方改用 `throw: true`，
+ * 这个适配器需要跟着处理。
  */
 function useRealHttp(): void {
   rq.mockImplementation(
@@ -1798,7 +1802,15 @@ describe("MCP 契约（真实站点）", () => {
     "必需工具全部存在，且服务端为 halo-mcp-server",
     async () => {
       if (!enabled) {
-        // 未配置环境变量时静默跳过：契约测试是可选验证，不阻塞常规开发与 CI
+        // 两个变量都缺 → 这是预期的跳过（可选验证，不阻塞常规开发与 CI）
+        // 只缺一个 → 几乎肯定是配置失误，必须让人看见，否则只会得到"1 passed 但什么都没验"
+        if (Boolean(endpoint) !== Boolean(token)) {
+          console.warn(
+            `[mcp-contract] 本次未做任何断言：HALO_MCP_ENDPOINT 与 HALO_MCP_TOKEN 必须同时设置，当前缺少 ${
+              endpoint ? "HALO_MCP_TOKEN" : "HALO_MCP_ENDPOINT"
+            }。`,
+          );
+        }
         return;
       }
 
@@ -1871,8 +1883,23 @@ pnpm test:contract
 在 `README.md` 顶部（标题之后）插入一节，说明本 fork 与上游的差异与硬性前置条件：
 
 ```markdown
-> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，改造方向是把发布后端从直连 REST API
-> 切换为 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
+> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，正在把发布后端从直连 REST API
+> 迁移到 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
+
+## 当前进度与凭据要求
+
+迁移是分阶段的，**两套凭据目前都需要**：
+
+| 已就绪（走 MCP） | 尚未迁移（仍走 REST + PAT） |
+|---|---|
+| MCP 传输层、`Halo: MCP 连通性自检` 命令 | 发布、更新、拉取、**图片上传**等既有命令 |
+
+- **`hmcp_` 访问密钥**：供 MCP 路径使用（连通性自检，以及后续阶段的发布能力）。
+- **个人访问令牌 PAT**：**现阶段必需** —— 既有命令全部仍走 REST API，图片上传用的就是它。
+  `hmcp_` 密钥在 REST API 上无效（实测返回 401），两者不可互换。
+
+> REST 只在迁移完成后才会收窄到「超过 7 MiB 的图片回退上传」这一项用途；**那时** PAT 才成为可选
+> （MCP 的 `halo_upload_attachment` 上限为 7 MiB）。在那之前请照常配置 PAT。
 
 ## 前置条件
 
@@ -1880,19 +1907,19 @@ pnpm test:contract
 - 站点已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)
 - 在 Halo 后台「工具 → MCP 服务」创建一个访问密钥（以 `hmcp_` 开头），
   并为其勾选文章、独立页面、分类、标签、附件、全文检索相关工具
-- 可选：若需上传超过 7 MiB 的图片，另需一个 Halo 个人访问令牌（PAT，需附件管理权限）。
-  `hmcp_` 密钥在 REST API 上无效，两者不可互换
-
-## 插件的两个凭据
-
-| 凭据 | 用途 | 是否必需 |
-|---|---|---|
-| `hmcp_` 访问密钥 | 所有 MCP 操作 | 必需 |
-| 个人访问令牌（PAT） | 仅 >7 MiB 图片的 REST 回退上传 | 可选 |
 
 ## 连通性自检
 
 在 Obsidian 命令面板执行 `Halo: MCP 连通性自检`，它会握手并检查所需工具是否齐备。
+
+## 契约测试（可选，需真实站点）
+
+```bash
+HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
+```
+
+它对真实站点断言必需的 13 个工具都在。**两个环境变量缺任何一个都会静默跳过**（输出 1 passed，
+但什么都没验证），请确认两者都设了。
 
 ## License
 
