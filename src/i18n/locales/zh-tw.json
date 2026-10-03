@@ -62,7 +62,8 @@
   },
   "post_selection_modal": {
     "title": "從 Halo 拉取文章",
-    "button_pull": "拉取"
+    "button_pull": "拉取",
+    "notice_truncated": "站點文章數超過一頁上限（{{size}} 篇），下面的清單並不完整 —— 還有文章沒有列出來。"
   },
   "site_editing_modal": {
     "title": "Halo 網站",

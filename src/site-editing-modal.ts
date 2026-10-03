@@ -1,7 +1,7 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 import type HaloPlugin from "./main";
-import { describeSelfCheckError, runSelfCheck } from "./mcp-self-check";
+import { describeMcpError, runSelfCheck } from "./mcp-self-check";
 import { type HaloSite, mcpEndpointOf, normalizeSite } from "./settings";
 
 export function openSiteEditingModal(
@@ -103,7 +103,7 @@ export class SiteEditingModal extends Modal {
               const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
               if (report.error) {
-                const { key, params } = describeSelfCheckError(report.error);
+                const { key, params } = describeMcpError(report.error);
 
                 new Notice(
                   i18next.t("command.mcp_self_check.error_failed", {

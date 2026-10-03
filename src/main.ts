@@ -2,7 +2,7 @@ import i18next from "i18next";
 import { Notice, Plugin, moment } from "obsidian";
 import { resources } from "./i18n";
 import { addHaloIcon } from "./icons";
-import { describeSelfCheckError, runSelfCheck } from "./mcp-self-check";
+import { describeMcpError, runSelfCheck } from "./mcp-self-check";
 import { openPostSelectionModal } from "./post-selection-model";
 import HaloService from "./service";
 import {
@@ -151,7 +151,7 @@ export default class HaloPlugin extends Plugin {
         const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
         if (report.error) {
-          const { key, params } = describeSelfCheckError(report.error);
+          const { key, params } = describeMcpError(report.error);
 
           new Notice(
             i18next.t("command.mcp_self_check.error_failed", {

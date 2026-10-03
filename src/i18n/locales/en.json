@@ -62,7 +62,8 @@
   },
   "post_selection_modal": {
     "title": "Pull posts from Halo",
-    "button_pull": "Pull"
+    "button_pull": "Pull",
+    "notice_truncated": "This site has more posts than fit on one page ({{size}}), so the list below is incomplete — some posts are not shown."
   },
   "site_editing_modal": {
     "title": "Halo site",

@@ -62,7 +62,8 @@
   },
   "post_selection_modal": {
     "title": "从 Halo 拉取文章",
-    "button_pull": "拉取"
+    "button_pull": "拉取",
+    "notice_truncated": "站点文章数超过一页上限（{{size}} 篇），下面的列表并不完整 —— 还有文章没有列出来。"
   },
   "site_editing_modal": {
     "title": "Halo 站点",

@@ -1,12 +1,18 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 import type HaloPlugin from "./main";
+import { describeMcpError } from "./mcp-self-check";
 import type { McpPostItem } from "./service/post-mapping";
 import { type HaloSite, mcpEndpointOf } from "./settings";
+import { McpError } from "./transport/errors";
 import { McpClient } from "./transport/mcp-client";
 
-/** 一页取多少篇。`size` 的 schema 上限就是 100（实测自 `halo_list_posts` 的 inputSchema）。 */
-const LIST_PAGE_SIZE = 100;
+/**
+ * 一页取多少篇。`size` 的 schema 上限就是 100（实测自 `halo_list_posts` 的 inputSchema）。
+ *
+ * 导出是给测试用的：截断提示的文案里带的正是这个数，测试若写死 100 就与实际值脱钩。
+ */
+export const LIST_PAGE_SIZE = 100;
 
 /**
  * 选择器需要的最小字段集。
@@ -27,12 +33,46 @@ export interface SelectablePost {
 /**
  * `halo_list_posts` 的返回体。
  *
- * 只声明消费得上的 `items`：响应里还有 `page` / `size` / `total` / `totalPages` / `hasNext`
+ * 只声明**消费得上**的字段：响应里还有 `page` / `size` / `total` / `totalPages`
  * （schema 全部列为必需，实测确有），但本模块不读它们 —— 多声明就是一份要跟着服务端走的契约。
- * 将来要翻页时，需要读的正是 `hasNext` / `totalPages`。
+ * 将来真要翻页时，需要读的是 `totalPages`。
  */
 interface PostListResult {
   items?: McpPostItem[];
+  /**
+   * 还有下一页时为 true。schema 把它列为必需，实测确实返回。
+   *
+   * 读它**只为一个目的**：列表不完整时告诉用户。注释救不了用户 —— 他会看到一份不完整的列表
+   * 而不知道它不完整，然后以为某篇文章不存在（与本阶段反复处理的「静默」是同一类问题）。
+   */
+  hasNext?: boolean;
+}
+
+/**
+ * 列表加载失败时给用户看的文案。
+ *
+ * 抽成独立函数（而不是写在 `catch` 里）是为了能被直接断言：这条路径最容易退化成
+ * 「反正都是连接失败」，而 `McpError` 自带的 key 本身就是**可操作的处置指引**
+ * （核对密钥 / 给这个密钥勾工具授权 / 检查端点与插件），丢掉它用户只能瞎猜。
+ *
+ * `detail` 必须拼上：工具级失败（HTTP 200 + `isError`）的归类只能是泛化的 `unknown`，
+ * 而服务端原文全在 `detail` 里 —— 不拼的话这类失败就只剩一句「MCP 请求失败」
+ * （`transport/errors.ts` 的 `toolFailureError` 对这一点有同样的要求）。
+ * 拼接用换行而非标点：`detail` 是服务端原文、未经本地化，标点却需要翻译。
+ *
+ * （这条规则与 `HaloService.withErrorDetail` 相同；那个是私有的，故此处是第二份实现。
+ * 若要把两份合一，正确做法是把这个纯函数提到 `transport/errors.ts` 共用，
+ * 而不是继续各写一份 —— 但那会动到已经过审的服务层，故本轮只在这里注明。）
+ */
+export function describeListFailure(error: unknown): string {
+  const { key, params } = describeMcpError(error);
+  const message = i18next.t(key, params);
+
+  if (error instanceof McpError && error.detail) {
+    return `${message}\n${error.detail}`;
+  }
+
+  return message;
 }
 
 /**
@@ -45,15 +85,34 @@ interface PostListResult {
  * 不传 `published`：与迁移前的 REST 查询一致 —— 草稿与已发布都要列出来给用户选。
  * `recycled` 也不必显式传，schema 的默认值就是 `false`（等价于迁移前那句 `labelSelector=…deleted=false`）。
  *
- * ⚠️ **不翻页**：`size` 上限 100。站点现有文章数少于该值即一页取尽；一旦超过 100，
- * 这里会**漏掉后面的**。取舍与 `HaloService.getCategories()` 相同 ——
- * 已知的已知，写在注释里，而不是让它静默发生。
+ * ⚠️ **本函数有副作用：它自己弹 Notice**，两处，都是刻意的 ——
+ * 1. 列表不完整（`hasNext`）时提示「还有文章没有列出来」；
+ * 2. 加载失败时提示**具体原因**，并返回空数组（**不抛**）。
+ *
+ * 提示放在这里而不是 modal 里，是为了让这两条都能被测到：modal 的渲染没有测试脚手架，
+ * 而本阶段明确不新建一套 UI mock 基建。「吞掉异常并返回空」也与
+ * `HaloService.readPostOrNotify` 同款 —— 命令入口不该把异常放给 Obsidian，
+ * 它只会记进控制台，用户什么都看不到。
+ *
+ * ⚠️ **仍不翻页**：`size` 上限 100，站点文章数超过它就会漏。区别在于这里**会提示**，
+ * 而不是静默漏掉（`HaloService.getCategories()` 面临同一处境，但那处只有注释、没有提示）。
  */
 export async function fetchSelectablePosts(client: McpClient): Promise<SelectablePost[]> {
-  const result = await client.callToolJson<PostListResult>("halo_list_posts", {
-    page: 1,
-    size: LIST_PAGE_SIZE,
-  });
+  let result: PostListResult;
+
+  try {
+    result = await client.callToolJson<PostListResult>("halo_list_posts", {
+      page: 1,
+      size: LIST_PAGE_SIZE,
+    });
+  } catch (error) {
+    new Notice(describeListFailure(error));
+    return [];
+  }
+
+  if (result.hasNext) {
+    new Notice(i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE }));
+  }
 
   return toSelectablePosts(result.items ?? []);
 }
@@ -126,6 +185,9 @@ class PostSelectionModal extends Modal {
         text: i18next.t("post_selection_modal.title"),
       });
 
+      // 这里**没有 `.catch`**：`fetchSelectablePosts` 的契约就是「不抛」——
+      // 失败时它自己弹提示并给空数组（见那里的说明）。再挂一个 catch 只会是死代码，
+      // 而且会掩盖契约：读的人会以为失败是从这里兜的。
       fetchSelectablePosts(this.client)
         .then((posts) => {
           for (const post of posts) {
@@ -138,9 +200,6 @@ class PostSelectionModal extends Modal {
               }),
             );
           }
-        })
-        .catch(() => {
-          new Notice(i18next.t("common.error_connection_failed"));
         })
         .finally(() => {
           new Setting(contentEl).addButton((button) =>
