@@ -1,5 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
-import { McpError, assertJsonBody, classifyHttpFailure, missingToolError } from "../../src/transport/errors";
+import {
+  McpError,
+  assertJsonBody,
+  classifyHttpFailure,
+  describeError,
+  missingToolError,
+  toolFailureError,
+} from "../../src/transport/errors";
 
 /** 捕获同步抛出的 McpError，便于断言 kind / params，而不是本地化文案 */
 function captureError(fn: () => unknown): McpError {
@@ -80,5 +87,53 @@ describe("missingToolError", () => {
 
     expect(err.kind).toBe("missing-tool");
     expect(err.params).toEqual({ tool: "halo_create_post", count: 2 });
+  });
+});
+
+describe("describeError", () => {
+  it("McpError 原样返回其 key 与 params", () => {
+    const error = new McpError("missing-tool", { tool: "halo_create_post", count: 3 });
+
+    expect(describeError(error)).toEqual({
+      key: "transport.error.missing-tool",
+      params: { tool: "halo_create_post", count: 3 },
+    });
+  });
+
+  it("工具级失败把服务端原文一起带出来（detail）—— 那类失败的全部线索只在它里面", () => {
+    expect(describeError(toolFailureError("halo_list_posts", "size must be <= 100"))).toEqual({
+      key: "transport.error.unknown",
+      params: { tool: "halo_list_posts" },
+      detail: "size must be <= 100",
+    });
+  });
+
+  it("detail 为空串时不带出来 —— 判据是真值而非 `??`，否则 UI 会多拼一个孤零零的换行", () => {
+    expect(describeError(new McpError("unknown", {}, ""))).toEqual({
+      key: "transport.error.unknown",
+      params: {},
+    });
+  });
+
+  it("普通 Error 回落到通用连接失败文案，不把 undefined 渲染进提示", () => {
+    expect(describeError(new Error("boom"))).toEqual({
+      key: "common.error_connection_failed",
+      params: {},
+    });
+  });
+
+  it("undefined 同样回落且不抛", () => {
+    expect(() => describeError(undefined)).not.toThrow();
+    expect(describeError(undefined)).toEqual({
+      key: "common.error_connection_failed",
+      params: {},
+    });
+  });
+
+  it("fallbackKey 由调用点按语义给（读取失败说「文章不存在」），但具体原因优先于兜底", () => {
+    expect(describeError(new Error("boom"), "service.error_post_not_found").key).toBe("service.error_post_not_found");
+    expect(describeError(new McpError("unauthorized", { status: 401 }), "service.error_post_not_found").key).toBe(
+      "transport.error.unauthorized",
+    );
   });
 });

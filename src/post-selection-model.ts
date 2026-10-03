@@ -1,10 +1,9 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
+import { renderErrorMessage } from "./i18n/error-message";
 import type HaloPlugin from "./main";
-import { describeMcpError } from "./mcp-self-check";
 import type { McpPostItem } from "./service/post-mapping";
 import { type HaloSite, mcpEndpointOf } from "./settings";
-import { McpError } from "./transport/errors";
 import { McpClient } from "./transport/mcp-client";
 
 /**
@@ -49,33 +48,6 @@ interface PostListResult {
 }
 
 /**
- * 列表加载失败时给用户看的文案。
- *
- * 抽成独立函数（而不是写在 `catch` 里）是为了能被直接断言：这条路径最容易退化成
- * 「反正都是连接失败」，而 `McpError` 自带的 key 本身就是**可操作的处置指引**
- * （核对密钥 / 给这个密钥勾工具授权 / 检查端点与插件），丢掉它用户只能瞎猜。
- *
- * `detail` 必须拼上：工具级失败（HTTP 200 + `isError`）的归类只能是泛化的 `unknown`，
- * 而服务端原文全在 `detail` 里 —— 不拼的话这类失败就只剩一句「MCP 请求失败」
- * （`transport/errors.ts` 的 `toolFailureError` 对这一点有同样的要求）。
- * 拼接用换行而非标点：`detail` 是服务端原文、未经本地化，标点却需要翻译。
- *
- * （这条规则与 `HaloService.withErrorDetail` 相同；那个是私有的，故此处是第二份实现。
- * 若要把两份合一，正确做法是把这个纯函数提到 `transport/errors.ts` 共用，
- * 而不是继续各写一份 —— 但那会动到已经过审的服务层，故本轮只在这里注明。）
- */
-export function describeListFailure(error: unknown): string {
-  const { key, params } = describeMcpError(error);
-  const message = i18next.t(key, params);
-
-  if (error instanceof McpError && error.detail) {
-    return `${message}\n${error.detail}`;
-  }
-
-  return message;
-}
-
-/**
  * 拉取可选择的文章列表。
  *
  * 走 MCP 的 `halo_list_posts`（**读路径 → `callToolJson`**）。此前这里直连 REST
@@ -106,7 +78,10 @@ export async function fetchSelectablePosts(client: McpClient): Promise<Selectabl
       size: LIST_PAGE_SIZE,
     });
   } catch (error) {
-    new Notice(describeListFailure(error));
+    // 文案统一由 `renderErrorMessage` 出（与服务层共用一份实现）：命中 McpError 就是
+    // **可操作的处置指引**（核对密钥 / 为该密钥勾工具授权 / 检查端点与插件），并附上服务端原文。
+    // 这条路径最怕退化成「反正都是连接失败」—— 那样用户只能瞎猜。
+    new Notice(renderErrorMessage(error));
     return [];
   }
 

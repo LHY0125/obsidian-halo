@@ -1,8 +1,9 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 import type HaloPlugin from "./main";
-import { describeMcpError, runSelfCheck } from "./mcp-self-check";
+import { runSelfCheck } from "./mcp-self-check";
 import { type HaloSite, mcpEndpointOf, normalizeSite } from "./settings";
+import { describeError } from "./transport/errors";
 
 export function openSiteEditingModal(
   plugin: HaloPlugin,
@@ -103,7 +104,9 @@ export class SiteEditingModal extends Modal {
               const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
               if (report.error) {
-                const { key, params } = describeMcpError(report.error);
+                // 只取 key/params 插进「自检失败」的框架里 —— 不在这里拼 detail，
+                // 故文案与收敛前逐字一致（要让它也带上服务端原文是另一件事，见报告）
+                const { key, params } = describeError(report.error);
 
                 new Notice(
                   i18next.t("command.mcp_self_check.error_failed", {

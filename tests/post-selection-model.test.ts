@@ -2,12 +2,7 @@ import { beforeAll, describe, expect, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
 import { resources } from "../src/i18n";
-import {
-  LIST_PAGE_SIZE,
-  describeListFailure,
-  fetchSelectablePosts,
-  toSelectablePosts,
-} from "../src/post-selection-model";
+import { LIST_PAGE_SIZE, fetchSelectablePosts, toSelectablePosts } from "../src/post-selection-model";
 import type { McpPostItem } from "../src/service/post-mapping";
 import { McpError } from "../src/transport/errors";
 import { createFakeClient } from "./helpers/mcp-mock";
@@ -107,31 +102,6 @@ describe("fetchSelectablePosts", () => {
     await fetchSelectablePosts(client);
 
     expect(notices.slice(seen)).toEqual([]);
-  });
-});
-
-describe("describeListFailure", () => {
-  test("McpError 给的是具体处置指引，而不是那句泛化的连接失败", () => {
-    const message = describeListFailure(new McpError("forbidden", { status: 403 }));
-
-    expect(message).toBe(i18next.t("transport.error.forbidden", { status: 403 }));
-    expect(message).not.toBe(i18next.t("common.error_connection_failed"));
-  });
-
-  test("非 McpError 才回落到泛化文案（这把兜底不能丢）", () => {
-    expect(describeListFailure(new Error("boom"))).toBe(i18next.t("common.error_connection_failed"));
-    // 连抛出来的东西都不是对象时也不能炸 —— 这条路径的首要职责是「说出点什么」
-    expect(() => describeListFailure(undefined)).not.toThrow();
-    expect(describeListFailure(undefined)).toBe(i18next.t("common.error_connection_failed"));
-  });
-
-  test("工具级失败（kind 为 unknown）必须拼上服务端原文 —— 那类失败的全部线索只在 detail 里", () => {
-    // 见 `transport/errors.ts` 的 toolFailureError：它以 HTTP 200 + isError 送达，
-    // 归类只能是泛化的 `unknown`，去掉 detail 就只剩一句「MCP 请求失败」
-    const message = describeListFailure(new McpError("unknown", { tool: "halo_list_posts" }, "size must be <= 100"));
-
-    expect(message).toContain(i18next.t("transport.error.unknown", { tool: "halo_list_posts" }));
-    expect(message).toContain("size must be <= 100");
   });
 });
 

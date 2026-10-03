@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, type rs } from "@rstest/core";
 import { requestUrl } from "obsidian";
-import { REQUIRED_TOOLS, describeMcpError, runSelfCheck } from "../src/mcp-self-check";
-import { McpError } from "../src/transport/errors";
+import { REQUIRED_TOOLS, runSelfCheck } from "../src/mcp-self-check";
 
 const rq = requestUrl as unknown as ReturnType<typeof rs.fn>;
 
@@ -80,31 +79,5 @@ describe("runSelfCheck", () => {
 
     expect(REQUIRED_TOOLS).not.toContain("halo_list_comments");
     expect(REQUIRED_TOOLS).not.toContain("halo_update_theme_setting_group");
-  });
-});
-
-describe("describeMcpError", () => {
-  it("McpError 原样返回其 key 与 params", () => {
-    const error = new McpError("missing-tool", { tool: "halo_create_post", count: 3 });
-
-    expect(describeMcpError(error)).toEqual({
-      key: "transport.error.missing-tool",
-      params: { tool: "halo_create_post", count: 3 },
-    });
-  });
-
-  it("普通 Error 回落到通用连接失败文案，不把 undefined 渲染进提示", () => {
-    expect(describeMcpError(new Error("boom"))).toEqual({
-      key: "common.error_connection_failed",
-      params: {},
-    });
-  });
-
-  it("undefined 同样回落且不抛", () => {
-    expect(() => describeMcpError(undefined)).not.toThrow();
-    expect(describeMcpError(undefined)).toEqual({
-      key: "common.error_connection_failed",
-      params: {},
-    });
   });
 });

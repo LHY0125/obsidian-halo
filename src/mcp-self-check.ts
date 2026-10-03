@@ -1,4 +1,4 @@
-import { McpError } from "./transport/errors";
+import type { McpError } from "./transport/errors";
 import { McpClient } from "./transport/mcp-client";
 
 /**
@@ -69,29 +69,4 @@ export async function runSelfCheck(endpoint: string, token: string): Promise<Sel
       error: error as McpError,
     };
   }
-}
-
-/**
- * 把任意抛出物归一化为可本地化的 { key, params }；非 McpError 时回落到通用文案。
- *
- * 名字刻意**不含 `selfCheck`**：本函数与自检无关 —— 它服务的是「任何 UI 边界拿到一个未知抛出物」
- * 这个通用场景。三个调用点是 MCP 自检、站点编辑弹窗的「验证」按钮、拉取弹窗的列表加载；
- * 后两者用一个带 `selfCheck` 的名字读起来是错的。
- *
- * 存在的理由：`runSelfCheck` 里那句 `error as McpError` 是未校验的断言，一旦逃出来的不是
- * McpError（例如 initialize 返回体缺 serverInfo），调用方直接读 `.key` 会把 undefined
- * 渲染进 Notice —— 用户得到一条空白提示，而调用点的全部职责就是告诉用户哪儿不对。
- *
- * 分层：本函数**不 import i18next**，只产 key/params，由 UI 边界用 i18next.t(key, params) 解析。
- * 它**也不含 `detail`**（服务端原文）：拼接规则属于 UI 边界，见 `post-selection-model.ts`
- * 的 `describeListFailure` —— 那里演示了为什么工具级失败必须把 detail 拼上。
- */
-export function describeMcpError(error: unknown): {
-  key: string;
-  params: Record<string, string | number>;
-} {
-  if (error instanceof McpError) {
-    return { key: error.key, params: error.params };
-  }
-  return { key: "common.error_connection_failed", params: {} };
 }

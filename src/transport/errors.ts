@@ -86,3 +86,41 @@ export function missingToolError(name: string, available: string[]): McpError {
 export function toolFailureError(tool: string, message: string): McpError {
   return new McpError("unknown", { tool }, message);
 }
+
+/**
+ * 一个错误「意味着什么」—— **尚未本地化**。
+ *
+ * `detail` 是服务端原文（工具级失败才有，见 `toolFailureError`）：它必须被交给 UI 层拼在译文之后，
+ * 否则用户看到一句「MCP 请求失败」却拿不到任何线索。
+ */
+export interface ErrorDescriptor {
+  key: string;
+  params: Record<string, string | number>;
+  detail?: string;
+}
+
+/**
+ * 把任意抛出物归一化成可本地化的描述。
+ *
+ * **本模块不依赖 i18next**（见 file 首注释的同类约定）：这里只回答「用哪个 key、带什么参数、
+ * 服务端原文是什么」，渲染成用户文案是 UI 边界的事 —— 见 `src/i18n/error-message.ts`。
+ *
+ * 存在的理由：调用点常有一个未校验的 `error as McpError` 断言，一旦逃出来的不是 McpError
+ * （例如 initialize 返回体缺 serverInfo），直接读 `.key` 会把 undefined 渲染进提示 ——
+ * 用户得到一条空白，而调用点的全部职责正是告诉用户哪儿不对。
+ *
+ * `fallbackKey` 是「连具体原因都拿不到」时的兜底，各调用点按自己的语义取
+ * （读取失败说「文章不存在」，列表加载 / 自检说「连接失败」）。
+ * 默认值就是「连接失败」——它同时是历史上写死在此处的那一个。
+ */
+export function describeError(error: unknown, fallbackKey = "common.error_connection_failed"): ErrorDescriptor {
+  if (!(error instanceof McpError)) {
+    return { key: fallbackKey, params: {} };
+  }
+
+  // detail 用**真值**判据而非 `??`：它合法地可以是空串（服务端失败了但没给原因），
+  // 而拼一个空的 detail 只会留下一个孤零零的换行。
+  return error.detail
+    ? { key: error.key, params: error.params, detail: error.detail }
+    : { key: error.key, params: error.params };
+}

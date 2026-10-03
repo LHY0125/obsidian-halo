@@ -3,6 +3,7 @@ import i18next from "i18next";
 import { type App, Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
+import { renderErrorMessage, withErrorDetail } from "../i18n/error-message";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
 import { McpError } from "../transport/errors";
 import { McpClient } from "../transport/mcp-client";
@@ -360,61 +361,28 @@ class HaloService {
   }
 
   /**
-   * 把 `McpError.detail` 接到提示语后面。
-   *
-   * 必须显示：工具级失败（HTTP 200 + `isError: true`）的全部线索都在那里，只弹一句泛泛的
-   * 提示会让用户完全无从自查。
-   *
-   * 判据用**真值**而非 `??`——`detail` 合法地可以是空串（服务端失败了但没给原因），
-   * `detail ?? fallback` 挡不住空串，只会留下一个孤零零的分隔符。
-   *
-   * 拼接用换行而非标点：detail 是服务端原文、未经本地化，标点却需要翻译。
-   */
-  private withErrorDetail(message: string, error: unknown): string {
-    if (error instanceof McpError && error.detail) {
-      return `${message}\n${error.detail}`;
-    }
-
-    return message;
-  }
-
-  /**
-   * 把 `McpError` 还原成**具体**原因，说不出来才回落到给定的泛化文案。
-   *
-   * 与上游的差异（刻意的）：上游把 `getPost()` 的所有失败都吞成 `undefined`，于是密钥过期、
-   * MCP 端点配错、网络不通全都被显示成「文章不存在」，用户照着这句话怎么查都查不对。
-   * 现在失败即抛，这里用 `McpError` 自带的 `key` + `params` 还原出**具体**原因
-   * （`transport.error.*` 本就是面向用户的处置指引：核对密钥 / 勾选工具授权 / 检查网络）。
-   *
-   * `fallbackKey` 是「连具体原因都拿不到」时的兜底，各调用点按自己的语义取：
-   * 读取失败说「文章不存在」，发布前的中止说「发布失败」。
-   */
-  private failureMessage(fallbackKey: string, error: unknown): string {
-    if (error instanceof McpError) {
-      return this.withErrorDetail(i18next.t(error.key, error.params), error);
-    }
-
-    return this.withErrorDetail(i18next.t(fallbackKey), error);
-  }
-
-  /**
    * 发布失败的提示文案（写已经发出去、服务端拒绝了）。
    *
-   * 这里刻意**不**走 `failureMessage`：这条路上 `McpError.detail` 就是最有价值的线索
+   * 这里刻意**不**走 `renderErrorMessage`：这条路上 `McpError.detail` 就是最有价值的线索
    * （工具级失败的全部说明都只在它里面），保留「发布失败」这个框架 + 服务端原文，
    * 比换成 `transport.error.*` 的泛化处置指引更贴近用户此刻的处境。改动它会破坏既有断言。
+   * 所以只借 `withErrorDetail` 那一半（补 detail），key 由这里写死。
    */
   private publishFailureMessage(error: unknown): string {
-    return this.withErrorDetail(i18next.t("service.error_publish_failed"), error);
+    return withErrorDetail(i18next.t("service.error_publish_failed"), error);
   }
 
   /**
    * 读取失败的提示文案。
    *
-   * 非 `McpError` 的意外错误才回落到「文章不存在」—— 那正是这句话本来就对应的情形。
+   * 非 `McpError` 的意外错误才回落到「文章不存在」—— 那正是这句话本来就对应的情形；
+   * 命中 `McpError` 时用它的 key 还原出**具体**原因（密钥过期 / 端点配错 / 网络不通
+   * 各说各的，而不是一律「文章不存在」，那样用户照着怎么查都不对）。
+   *
+   * 这层还原原先在本类里手写了一份，现已收敛到 `renderErrorMessage`（与拉取弹窗共用一份实现）。
    */
   private readFailureMessage(error: unknown): string {
-    return this.failureMessage("service.error_post_not_found", error);
+    return renderErrorMessage(error, "service.error_post_not_found");
   }
 
   /**
@@ -426,7 +394,7 @@ class HaloService {
    * 还是该查网络 / 端点）—— 换成泛泛的「发布失败，请重试」等于把唯一的线索扔掉。
    */
   private resolutionFailureMessage(error: unknown): string {
-    return this.failureMessage("service.error_publish_failed", error);
+    return renderErrorMessage(error, "service.error_publish_failed");
   }
 
   /**
@@ -440,7 +408,7 @@ class HaloService {
     const outcome = i18next.t("service.notice_taxonomy_not_resolved");
 
     if (error instanceof McpError) {
-      return `${outcome}\n${this.withErrorDetail(i18next.t(error.key, error.params), error)}`;
+      return `${outcome}\n${withErrorDetail(i18next.t(error.key, error.params), error)}`;
     }
 
     return outcome;
