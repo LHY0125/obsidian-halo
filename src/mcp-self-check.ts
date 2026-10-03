@@ -1,3 +1,5 @@
+import i18next from "i18next";
+import { renderErrorMessage } from "./i18n/error-message";
 import type { McpError } from "./transport/errors";
 import { McpClient } from "./transport/mcp-client";
 
@@ -69,4 +71,33 @@ export async function runSelfCheck(endpoint: string, token: string): Promise<Sel
       error: error as McpError,
     };
   }
+}
+
+/**
+ * 自检失败时给用户看的**完整文案**：「自检失败」框架 + 具体原因（`McpError` 的 key 本就是
+ * 可操作的处置指引：核对密钥 / 为该密钥勾工具授权 / 检查端点与插件），**并把服务端原文一并附上**。
+ *
+ * 自检这一处为什么要拼 `detail`（而服务层的「发布失败」另有固定框架）：用户跑自检**恰恰是在
+ * 出问题的时候**，此时把服务端原文藏起来，等于把诊断工具最该给的那条线索掐掉。
+ * 工具级失败（HTTP 200 + `isError`）更是只剩 `detail` 可说 —— 见 `transport/errors.ts` 的 `toolFailureError`。
+ *
+ * 另外两件事顺带解决了：
+ * - 它**收掉了两处调用点重复的框架 key**：命令面板的自检与站点编辑弹窗的「验证」按钮
+ *   原本各写一遍 `command.mcp_self_check.error_failed`，改文案时容易只改一处；
+ * - 这条路径**第一次有了判别器**：`main.ts` 与弹窗都没有测试脚手架，渲染逻辑抽到这里才测得到。
+ *
+ * 本模块因此开始依赖 i18next。放这里（而不是放回两个调用点）是刻意的：自检模块已经拥有
+ * `REQUIRED_TOOLS` 与该命令的语义，它的用户文案由它自己拥有是自然的；放回调用点则等于
+ * 为「可测」付出「无法测」的代价。（`transport/` 仍然零 i18next 依赖，那条约定未受影响。）
+ */
+export function describeSelfCheckFailure(error: unknown): string {
+  // `escapeValue: false` 是**必须的**，不是顺手关的：i18next 默认对插值做 HTML 转义，而这里插进去的
+  // 是**已经渲染好的用户文案**（可能含服务端原文），Obsidian 的 Notice 按纯文本显示，不解析 HTML。
+  // 开着转义的后果很具体：网关类失败的 `detail` 是一段 HTML 片段，会被转义成 `&lt;!doctype …&gt;`，
+  // 用户看到的是一堆实体字符而不是服务端原话 —— 比不给原文更糟。
+  // （其余调用点不经 i18next 插值，故没有这个问题。）
+  return i18next.t("command.mcp_self_check.error_failed", {
+    message: renderErrorMessage(error),
+    interpolation: { escapeValue: false },
+  });
 }

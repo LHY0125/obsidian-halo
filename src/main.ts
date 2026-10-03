@@ -2,7 +2,7 @@ import i18next from "i18next";
 import { Notice, Plugin, moment } from "obsidian";
 import { resources } from "./i18n";
 import { addHaloIcon } from "./icons";
-import { runSelfCheck } from "./mcp-self-check";
+import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
 import { openPostSelectionModal } from "./post-selection-model";
 import HaloService from "./service";
 import {
@@ -16,7 +16,6 @@ import {
 } from "./settings";
 import { SettingsMigrationModal } from "./settings-migration-modal";
 import { openSiteSelectionModal } from "./site-selection-modal";
-import { describeError } from "./transport/errors";
 
 export default class HaloPlugin extends Plugin {
   settings: HaloSetting;
@@ -152,14 +151,8 @@ export default class HaloPlugin extends Plugin {
         const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
         if (report.error) {
-          // 与站点编辑弹窗同一处置：只取 key/params 插进「自检失败」框架，文案保持不变
-          const { key, params } = describeError(report.error);
-
-          new Notice(
-            i18next.t("command.mcp_self_check.error_failed", {
-              message: i18next.t(key, params),
-            }),
-          );
+          // 与站点编辑弹窗共用同一个文案函数（含服务端原文），免得两处各拼一遍框架
+          new Notice(describeSelfCheckFailure(report.error));
           return;
         }
 
