@@ -1,7 +1,22 @@
 # Obsidian plugin for Halo
 
-> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，改造方向是把发布后端从直连 REST API
-> 切换为 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
+> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，正在把发布后端从直连 REST API
+> 迁移到 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
+
+## 当前进度与凭据要求
+
+迁移是分阶段的，**两套凭据目前都需要**：
+
+| 已就绪（走 MCP） | 尚未迁移（仍走 REST + PAT） |
+|---|---|
+| MCP 传输层、`Halo: MCP 连通性自检` 命令 | 发布、更新、拉取、**图片上传**等既有命令 |
+
+- **`hmcp_` 访问密钥**：供 MCP 路径使用（连通性自检，以及后续阶段的发布能力）。
+- **个人访问令牌 PAT**：**现阶段必需** —— 既有命令全部仍走 REST API，图片上传用的就是它。
+  `hmcp_` 密钥在 REST API 上无效（实测返回 401），两者不可互换。
+
+> REST 只在迁移完成后才会收窄到「超过 7 MiB 的图片回退上传」这一项用途；**那时** PAT 才成为可选
+> （MCP 的 `halo_upload_attachment` 上限为 7 MiB）。在那之前请照常配置 PAT。
 
 ## 前置条件
 
@@ -9,23 +24,19 @@
 - 站点已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)
 - 在 Halo 后台「工具 → MCP 服务」创建一个访问密钥（以 `hmcp_` 开头），
   并为其勾选文章、独立页面、分类、标签、附件、全文检索相关工具
-- 可选：若需上传超过 7 MiB 的图片，另需一个 Halo 个人访问令牌（PAT，需附件管理权限）。
-  `hmcp_` 密钥在 REST API 上无效，两者不可互换
-
-## 插件的两个凭据
-
-| 凭据 | 用途 | 是否必需 |
-|---|---|---|
-| `hmcp_` 访问密钥 | 所有 MCP 操作 | 必需 |
-| 个人访问令牌（PAT） | 仅 >7 MiB 图片的 REST 回退上传 | 可选 |
 
 ## 连通性自检
 
 在 Obsidian 命令面板执行 `Halo: MCP 连通性自检`，它会握手并检查所需工具是否齐备。
 
-## License
+## 契约测试（可选，需真实站点）
 
-GPL-3.0（沿用上游）
+```bash
+HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
+```
+
+它对真实站点断言必需的 13 个工具都在。**两个环境变量缺任何一个都会静默跳过**（输出 1 passed，
+但什么都没验证），请确认两者都设了。
 
 This plugin allows you to publish your Obsidian documents to [Halo](https://github.com/halo-dev/halo).
 
@@ -97,3 +108,7 @@ This plugin allows you to publish your Obsidian documents to [Halo](https://gith
 - [x] i18n
 - [x] Upload images
 - [x] Publish this plugin to Obsidian community
+
+## License
+
+GPL-3.0（沿用上游）
