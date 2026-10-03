@@ -94,7 +94,7 @@ src/
 │   └── image-upload.ts          ★ 抽取：MCP base64 主路径 + REST multipart 超限回退
 ├── frontmatter-map.ts           ★ 新增：frontmatter ⇄ MCP 参数双向映射（纯函数）
 ├── publish-preview-modal.ts     ★ 新增：发布前预览与确认
-├── post-selection-modal.ts      保留：扩展支持独立页面与查重
+├── post-selection-model.ts      保留：扩展支持独立页面与查重（文件名是 -model 不是 -modal）
 ├── sites-modal.ts / site-editing-modal.ts / site-selection-modal.ts  保留：字段改为 MCP
 ├── icons.ts / i18n/ / utils/    保留
 ```

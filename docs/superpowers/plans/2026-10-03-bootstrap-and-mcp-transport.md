@@ -24,6 +24,7 @@
   - **一处刻意的例外**：Task 6 会把站点编辑弹窗的「Validate」按钮从「用 PAT 探测 REST 权限」改为「调 MCP 自检」。它不在 `src/service/` 下、也不是命令，但它确实改变了既有行为。理由：该按钮校验的是 `token`（PAT），对用户真正要填的 `mcpToken` 毫无意义——保留它等于让用户在设置页得到错误的安心感。若不认可这处例外，删掉 Task 6 Step 5 的第 4 项即可，其余不受影响。
 - **不新增运行时依赖**。
 - 所有面向用户的文案走 `i18next`，与上游一致。
+- **测试用 rstest，其 mock API 是 Jest 风格**——仓库内既有测试 `tests/service/index.test.ts` 已经在用 `rs.fn(impl)`、`rs.spyOn(obj, key).mockImplementation(...)`、`mockRestore()`、`mock.calls`、`mockReset()`，本计划的测试代码与之一致，可直接照用，无需另找 API。
 
 ---
 
