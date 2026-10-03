@@ -54,20 +54,6 @@ export const IMAGE_EXTENSIONS = new Set([
   "webp",
 ]);
 
-export const IMAGE_MIME_TYPES: Record<string, string> = {
-  avif: "image/avif",
-  bmp: "image/bmp",
-  gif: "image/gif",
-  ico: "image/x-icon",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  png: "image/png",
-  svg: "image/svg+xml",
-  tif: "image/tiff",
-  tiff: "image/tiff",
-  webp: "image/webp",
-};
-
 export function applyPostFrontmatter(post: Post, options: ApplyPostFrontmatterOptions): Post {
   const { activeFile, categoryNames, matterData, tagNames, useActiveFileDefaults } = options;
   const nextPost: Post = {

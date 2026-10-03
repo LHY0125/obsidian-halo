@@ -1,152 +1,14 @@
 import { beforeEach, describe, expect, rs, test } from "@rstest/core";
-import type { App, RequestUrlParam } from "obsidian";
-import { TFile, requestUrl } from "obsidian";
+import type { RequestUrlParam } from "obsidian";
 import HaloService from "../../src/service";
-import { CURRENT_SETTINGS_VERSION, type HaloSetting, type HaloSite } from "../../src/settings";
-
-interface RequestUrlMock {
-  mock: {
-    calls: [RequestUrlParam][];
-  };
-  mockImplementation: (implementation: (request: RequestUrlParam) => unknown) => void;
-  mockReset: () => void;
-}
-
-interface MockAppParts {
-  app: App;
-  contents: Map<string, string>;
-  fileManager: {
-    processFrontMatter: ReturnType<typeof rs.fn>;
-  };
-  metadataCache: {
-    getFileCache: ReturnType<typeof rs.fn>;
-    getFirstLinkpathDest: ReturnType<typeof rs.fn>;
-  };
-  vault: {
-    getAbstractFileByPath: ReturnType<typeof rs.fn>;
-    modify: ReturnType<typeof rs.fn>;
-    read: ReturnType<typeof rs.fn>;
-    readBinary: ReturnType<typeof rs.fn>;
-  };
-}
-
-const site: HaloSite = {
-  name: "Halo",
-  url: "https://halo.example.com",
-  token: "token",
-  mcpToken: "",
-  default: true,
-};
-
-function createSettings(overrides: Partial<HaloSetting> = {}): HaloSetting {
-  return {
-    settingsVersion: CURRENT_SETTINGS_VERSION,
-    sites: [site],
-    publishByDefault: false,
-    replaceImageLinks: true,
-    imageUploadCache: {},
-    ...overrides,
-  };
-}
-
-function createFile(path: string, size = 100, mtime = 1000): TFile {
-  const file = new TFile();
-  const name = path.split("/").pop() || path;
-  const extension = name.includes(".") ? name.split(".").pop() || "" : "";
-  const basename = extension ? name.slice(0, -(extension.length + 1)) : name;
-  const parentPath = path.split("/").slice(0, -1).join("/");
-
-  Object.assign(file, {
-    basename,
-    extension,
-    name,
-    parent: parentPath
-      ? {
-          name: parentPath.split("/").pop() || parentPath,
-          path: parentPath,
-        }
-      : null,
-    path,
-    stat: {
-      ctime: mtime,
-      mtime,
-      size,
-    },
-  });
-
-  return file;
-}
-
-function createMockApp(markdown: string, activeFile: TFile, files: TFile[]): MockAppParts {
-  const contents = new Map<string, string>([[activeFile.path, markdown]]);
-  const filesByPath = new Map<string, TFile>([[activeFile.path, activeFile]]);
-
-  for (const file of files) {
-    filesByPath.set(file.path, file);
-  }
-
-  const vault = {
-    getAbstractFileByPath: rs.fn((path: string) => filesByPath.get(path)),
-    modify: rs.fn(async (file: TFile, updatedMarkdown: string) => {
-      contents.set(file.path, updatedMarkdown);
-    }),
-    read: rs.fn(async (file: TFile) => contents.get(file.path) || ""),
-    readBinary: rs.fn(async () => new TextEncoder().encode("image").buffer),
-  };
-
-  const metadataCache = {
-    getFileCache: rs.fn(() => ({ frontmatter: {} })),
-    getFirstLinkpathDest: rs.fn((linkPath: string) => filesByPath.get(linkPath)),
-  };
-
-  const fileManager = {
-    processFrontMatter: rs.fn((file: TFile, callback: (frontmatter: Record<string, unknown>) => void) => {
-      callback({});
-    }),
-  };
-
-  return {
-    app: {
-      fileManager,
-      metadataCache,
-      vault,
-      workspace: {
-        activeEditor: {
-          file: activeFile,
-        },
-      },
-    } as unknown as App,
-    contents,
-    fileManager,
-    metadataCache,
-    vault,
-  };
-}
-
-function requestUrlMock(): RequestUrlMock {
-  return requestUrl as unknown as RequestUrlMock;
-}
-
-function mockAttachmentUploads(...permalinks: string[]): void {
-  let index = 0;
-
-  requestUrlMock().mockImplementation(() => {
-    const permalink = permalinks[index];
-    index += 1;
-
-    if (!permalink) {
-      throw new Error("Unexpected upload");
-    }
-
-    return {
-      json: {
-        status: {
-          permalink,
-        },
-      },
-    };
-  });
-}
+import { createFakeClient } from "../helpers/mcp-mock";
+import {
+  createFile,
+  createMockApp,
+  createSettings,
+  requestUrlMock,
+  TEST_SITE as site,
+} from "../helpers/obsidian-mocks";
 
 function mockUpdatePostRequests(raw: string): void {
   requestUrlMock().mockImplementation((request: RequestUrlParam) => {
@@ -202,6 +64,28 @@ function mockUpdatePostRequests(raw: string): void {
   });
 }
 
+/**
+ * 按文件名给回相对 permalink 的假 MCP 客户端。
+ *
+ * 用文件名而不是调用序号来配对：断言就不依赖上传顺序，
+ * 且未知文件会像旧版 `mockAttachmentUploads` 一样直接抛错，不会静默返回 undefined。
+ */
+function fakeUploads(permalinks: Record<string, string>) {
+  return createFakeClient((name, args) => {
+    if (name !== "halo_upload_attachment") {
+      throw new Error(`Unexpected tool: ${name}`);
+    }
+
+    const permalink = permalinks[String(args.filename)];
+
+    if (!permalink) {
+      throw new Error(`Unexpected upload: ${String(args.filename)}`);
+    }
+
+    return { permalink };
+  });
+}
+
 describe("HaloService.uploadImages", () => {
   beforeEach(() => {
     requestUrlMock().mockReset();
@@ -219,9 +103,11 @@ describe("HaloService.uploadImages", () => {
     ].join("\n");
     const { contents, vault, app } = createMockApp(markdown, note, [logo, banner]);
     const settings = createSettings();
-    const service = new HaloService(app, settings, site);
-
-    mockAttachmentUploads("/uploads/logo.png", "/uploads/banner.png");
+    const { client, calls } = fakeUploads({
+      "banner.png": "/uploads/banner.png",
+      "logo.png": "/uploads/logo.png",
+    });
+    const service = new HaloService(app, settings, site, client);
 
     const result = await service.uploadImages({ silent: true });
 
@@ -242,7 +128,8 @@ describe("HaloService.uploadImages", () => {
     expect(result.markdown).toBe(expectedMarkdown);
     expect(contents.get(note.path)).toBe(expectedMarkdown);
     expect(vault.modify).toHaveBeenCalledTimes(1);
-    expect(requestUrlMock().mock.calls).toHaveLength(2);
+    // 原先断言的是 requestUrl 被调了 2 次；上传改走 MCP 后，同一事实表现为 2 次 halo_upload_attachment 调用
+    expect(calls.map((call) => call.name)).toEqual(["halo_upload_attachment", "halo_upload_attachment"]);
     expect(settings.imageUploadCache["https://halo.example.com"]["images/logo.png"]).toMatchObject({
       linkType: "markdown",
       permalink: "https://halo.example.com/uploads/logo.png",
@@ -262,7 +149,11 @@ describe("HaloService.uploadImages", () => {
       "![Anchor](#local-anchor)",
     ].join("\n");
     const { contents, vault, app } = createMockApp(markdown, note, []);
-    const service = new HaloService(app, createSettings(), site);
+    // 没有本地图片 → 一次工具调用都不该发生
+    const { client, calls } = createFakeClient(() => {
+      throw new Error("no images should be uploaded");
+    });
+    const service = new HaloService(app, createSettings(), site, client);
 
     const result = await service.uploadImages({ silent: true });
 
@@ -276,7 +167,8 @@ describe("HaloService.uploadImages", () => {
     expect(result.markdown).toBe(markdown);
     expect(contents.get(note.path)).toBe(markdown);
     expect(vault.modify).not.toHaveBeenCalled();
-    expect(requestUrlMock().mock.calls).toHaveLength(0);
+    // 原先断言的是没发 HTTP 请求；上传改走 MCP 后，同一事实表现为没调 MCP 工具
+    expect(calls).toHaveLength(0);
   });
 
   test("uploads encoded markdown image targets wrapped in angle brackets", async () => {
@@ -284,9 +176,8 @@ describe("HaloService.uploadImages", () => {
     const logo = createFile("images/my logo.png", 10, 100);
     const markdown = "![Logo](<images/my%20logo.png>)";
     const { app } = createMockApp(markdown, note, [logo]);
-    const service = new HaloService(app, createSettings(), site);
-
-    mockAttachmentUploads("/uploads/my-logo.png");
+    const { client } = fakeUploads({ "my logo.png": "/uploads/my-logo.png" });
+    const service = new HaloService(app, createSettings(), site, client);
 
     const result = await service.uploadImages({ silent: true });
 
@@ -304,9 +195,8 @@ describe("HaloService.uploadImages", () => {
     const logo = createFile("logo.png", 10, 100);
     const markdown = "![Logo](logo.png)";
     const { contents, vault, app } = createMockApp(markdown, note, [logo]);
-    const service = new HaloService(app, createSettings({ replaceImageLinks: false }), site);
-
-    mockAttachmentUploads("/uploads/logo.png");
+    const { client } = fakeUploads({ "logo.png": "/uploads/logo.png" });
+    const service = new HaloService(app, createSettings({ replaceImageLinks: false }), site, client);
 
     const result = await service.uploadImages({ silent: true });
 
@@ -338,11 +228,11 @@ describe("HaloService.uploadImages", () => {
       },
     });
     const { app } = createMockApp("![Logo](logo.png)", note, [logo]);
-    const service = new HaloService(app, settings, site);
-
-    requestUrlMock().mockImplementation(() => {
+    // 缓存命中 → 一次工具调用都不该发生
+    const { client, calls } = createFakeClient(() => {
       throw new Error("cache should prevent uploads");
     });
+    const service = new HaloService(app, settings, site, client);
 
     const result = await service.uploadImages({ silent: true });
 
@@ -353,7 +243,8 @@ describe("HaloService.uploadImages", () => {
       uploadedCount: 0,
     });
     expect(result.markdown).toBe("![Logo](https://halo.example.com/uploads/cached-logo.png)");
-    expect(requestUrlMock().mock.calls).toHaveLength(0);
+    // 原先断言的是没发 HTTP 请求；现在断言的是没调 MCP 工具——缓存命中在新架构下更该守住这一点
+    expect(calls).toHaveLength(0);
   });
 
   test("ignores stale cache entries and refreshes the cache after upload", async () => {
@@ -373,12 +264,13 @@ describe("HaloService.uploadImages", () => {
       },
     });
     const { app } = createMockApp("![Logo](logo.png)", note, [logo]);
-    const service = new HaloService(app, settings, site);
-
-    mockAttachmentUploads("/uploads/new-logo.png");
+    const { client, calls } = fakeUploads({ "logo.png": "/uploads/new-logo.png" });
+    const service = new HaloService(app, settings, site, client);
 
     const result = await service.uploadImages({ silent: true });
 
+    // 失效的缓存条目必须真的触发一次上传
+    expect(calls.map((call) => call.name)).toEqual(["halo_upload_attachment"]);
     expect(result).toMatchObject({
       failedCount: 0,
       reusedCount: 0,
@@ -398,25 +290,20 @@ describe("HaloService.uploadImages", () => {
     const banner = createFile("banner.png", 20, 200);
     const markdown = ["![Logo](logo.png)", "![Banner](banner.png)"].join("\n");
     const { contents, vault, app } = createMockApp(markdown, note, [logo, banner]);
-    const service = new HaloService(app, createSettings(), site);
     const consoleError = rs.spyOn(console, "error").mockImplementation(() => undefined);
-    let calls = 0;
+    // 第二张图（banner.png）的 MCP 上传失败
+    const { client } = createFakeClient((name, args) => {
+      if (name !== "halo_upload_attachment") {
+        throw new Error(`Unexpected tool: ${name}`);
+      }
 
-    requestUrlMock().mockImplementation(() => {
-      calls += 1;
-
-      if (calls === 2) {
+      if (args.filename === "banner.png") {
         throw new Error("upload failed");
       }
 
-      return {
-        json: {
-          status: {
-            permalink: "/uploads/logo.png",
-          },
-        },
-      };
+      return { permalink: "/uploads/logo.png" };
     });
+    const service = new HaloService(app, createSettings(), site, client);
 
     try {
       const result = await service.uploadImages({ silent: true });

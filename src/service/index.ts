@@ -1,34 +1,19 @@
-import type { Attachment, Category, Content, Post, Snapshot, Tag } from "@halo-dev/api-client";
+import type { Category, Content, Post, Snapshot, Tag } from "@halo-dev/api-client";
 import i18next from "i18next";
-import { type App, Notice, TFile, getLinkpath, requestUrl } from "obsidian";
+import { type App, Notice, type TFile, requestUrl } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import markdownIt from "src/utils/markdown";
 import { slugify } from "transliteration";
-import { type HaloSetting, type HaloSite, type ImageUploadCacheEntry, isSameSiteUrl, normalizeSite } from "../settings";
+import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
+import { McpClient } from "../transport/mcp-client";
 import {
-  type HaloPostFrontmatter,
-  IMAGE_MIME_TYPES,
-  type LocalImageReference,
-  applyPostFrontmatter,
-  collectLocalImageReferences,
-  decodeMarkdownPath,
-  formatMarkdownImagePath,
-  formatWikiImageEmbed,
-  getMarkdownImageAlt,
-  getWikiImageAlias,
-  isImageFile,
-  isRemotePath,
-  parseMarkdownImageTarget,
-} from "./local-content";
-
-interface UploadImagesResult {
-  processedCount: number;
-  uploadedCount: number;
-  reusedCount: number;
-  failedCount: number;
-  markdown?: string;
-  replaced: boolean;
-}
+  type ImageUploadContext,
+  type UploadImagesResult,
+  restoreCachedLocalImageLinks,
+  uploadImage,
+  uploadImages,
+} from "./image-upload";
+import { type HaloPostFrontmatter, applyPostFrontmatter } from "./local-content";
 
 const PUBLISH_RETRY_COUNT = 3;
 const PUBLISH_RETRY_DELAY_MS = 500;
@@ -37,10 +22,16 @@ class HaloService {
   private readonly site: HaloSite;
   private readonly app: App;
   private readonly settings: HaloSetting;
+  /**
+   * MCP 客户端。**可注入**——测试传 `createFakeClient()` 造的对象，生产代码不传、用真实的。
+   * 可注入是本计划全部服务层测试的前提：`McpClient` 内部走 `requestUrl`，
+   * 而测试要断言的是「调了哪个工具、传了什么参数」，不是「发了什么 HTTP 请求」。
+   */
+  private readonly client: McpClient;
   private readonly headers: Record<string, string> = {};
   private readonly authHeaders: Record<string, string> = {};
 
-  constructor(app: App, settings: HaloSetting, site: HaloSite) {
+  constructor(app: App, settings: HaloSetting, site: HaloSite, client?: McpClient) {
     this.app = app;
     this.settings = settings;
     this.site = normalizeSite(site);
@@ -56,6 +47,18 @@ class HaloService {
     this.headers = {
       "Content-Type": "application/json",
       ...this.authHeaders,
+    };
+
+    this.client = client ?? new McpClient({ endpoint: mcpEndpointOf(this.site), token: this.site.mcpToken });
+  }
+
+  /** 图片上传模块的运行上下文。三个调用点共用，避免各写一遍字段拼装 */
+  private imageUploadContext(): ImageUploadContext {
+    return {
+      app: this.app,
+      client: this.client,
+      settings: this.settings,
+      site: this.site,
     };
   }
 
@@ -351,7 +354,7 @@ class HaloService {
 
     const raw = this.settings.replaceImageLinks
       ? `${post.content.raw}`
-      : this.restoreCachedLocalImageLinks(`${post.content.raw}`);
+      : restoreCachedLocalImageLinks(`${post.content.raw}`, this.imageUploadContext());
 
     await this.app.vault.modify(activeEditor.file, raw);
 
@@ -399,288 +402,24 @@ class HaloService {
     });
   }
 
+  /**
+   * 上传当前笔记里的图片，必要时回写 markdown。
+   *
+   * 实现在 `./image-upload`——这里只负责拼出运行上下文。
+   */
   public async uploadImages(
     options: { silent?: boolean; replaceMarkdown?: boolean } = {},
   ): Promise<UploadImagesResult> {
-    const { activeEditor } = this.app.workspace;
-
-    if (!activeEditor || !activeEditor.file) {
-      return {
-        processedCount: 0,
-        uploadedCount: 0,
-        reusedCount: 0,
-        failedCount: 0,
-        replaced: false,
-      };
-    }
-
-    const md = await this.app.vault.read(activeEditor.file);
-    const imageReferences = collectLocalImageReferences(md, activeEditor.file, this.app);
-    const replaceMarkdown = options.replaceMarkdown ?? this.settings.replaceImageLinks;
-
-    if (imageReferences.length === 0) {
-      if (!options.silent) {
-        new Notice(i18next.t("service.notice_no_images_to_upload"));
-      }
-      return {
-        processedCount: 0,
-        uploadedCount: 0,
-        reusedCount: 0,
-        failedCount: 0,
-        markdown: md,
-        replaced: false,
-      };
-    }
-
-    const uploadedPermalinks = new Map<string, string>();
-    const replacements: { start: number; end: number; value: string }[] = [];
-    let uploadedCount = 0;
-    let reusedCount = 0;
-    let failedCount = 0;
-
-    for (const imageReference of imageReferences) {
-      try {
-        let permalink = uploadedPermalinks.get(imageReference.file.path);
-
-        if (!permalink) {
-          permalink = this.getCachedImagePermalink(imageReference.file);
-
-          if (permalink) {
-            this.cacheImageReference(imageReference.file, imageReference);
-            reusedCount++;
-          } else {
-            permalink = await this.uploadImage(imageReference.file);
-            this.cacheImagePermalink(imageReference.file, permalink, imageReference);
-            uploadedCount++;
-          }
-
-          uploadedPermalinks.set(imageReference.file.path, permalink);
-        }
-
-        replacements.push({
-          start: imageReference.start,
-          end: imageReference.end,
-          value: imageReference.replacement(permalink),
-        });
-      } catch (error) {
-        console.error("Error uploading image:", error);
-        failedCount++;
-      }
-    }
-
-    const updatedMarkdown =
-      replacements.length > 0
-        ? replacements
-            .sort((a, b) => b.start - a.start)
-            .reduce((markdown, replacement) => {
-              return markdown.slice(0, replacement.start) + replacement.value + markdown.slice(replacement.end);
-            }, md)
-        : md;
-
-    const shouldReplaceMarkdown = replaceMarkdown && failedCount === 0 && updatedMarkdown !== md;
-
-    if (shouldReplaceMarkdown) {
-      await this.app.vault.modify(activeEditor.file, updatedMarkdown);
-    }
-
-    if (!options.silent) {
-      if (failedCount > 0) {
-        new Notice(
-          i18next.t("service.notice_upload_images_partial", { count: replacements.length, failed: failedCount }),
-        );
-      } else {
-        new Notice(i18next.t("service.notice_upload_images_success", { count: replacements.length }));
-      }
-    }
-
-    return {
-      processedCount: replacements.length,
-      uploadedCount,
-      reusedCount,
-      failedCount,
-      markdown: updatedMarkdown,
-      replaced: shouldReplaceMarkdown,
-    };
+    return uploadImages(options, this.imageUploadContext());
   }
 
+  /**
+   * 上传单张图片并返回 permalink。
+   *
+   * 实现在 `./image-upload`——这里只负责拼出运行上下文。
+   */
   public async uploadImage(file: TFile): Promise<string> {
-    const fileData = await this.app.vault.readBinary(file);
-    const body = this.createMultipartBody(file.name, file.extension, fileData);
-    const attachment = (await requestUrl({
-      url: `${this.site.url}/apis/uc.api.storage.halo.run/v1alpha1/attachments/-/upload`,
-      method: "POST",
-      contentType: body.contentType,
-      headers: this.authHeaders,
-      body: body.data,
-    }).json) as Attachment;
-
-    const permalink = attachment.status?.permalink;
-
-    if (!permalink) {
-      throw new Error("Halo attachment response has no permalink");
-    }
-
-    if (permalink.startsWith("http://") || permalink.startsWith("https://")) {
-      return permalink;
-    }
-
-    return `${this.site.url}${permalink}`;
-  }
-
-  private getCachedImagePermalink(file: TFile): string | undefined {
-    const cacheEntry = this.settings.imageUploadCache[this.site.url]?.[file.path];
-
-    if (!cacheEntry || !this.isSameImageFile(file, cacheEntry)) {
-      return undefined;
-    }
-
-    return cacheEntry.permalink;
-  }
-
-  private cacheImagePermalink(file: TFile, permalink: string, imageReference: LocalImageReference): void {
-    const siteCache = this.settings.imageUploadCache[this.site.url] ?? {};
-    siteCache[file.path] = {
-      filePath: file.path,
-      linkType: imageReference.linkType,
-      size: file.stat.size,
-      mtime: file.stat.mtime,
-      permalink,
-      updatedAt: Date.now(),
-      wikiAlias: imageReference.wikiAlias,
-    };
-    this.settings.imageUploadCache[this.site.url] = siteCache;
-  }
-
-  private cacheImageReference(file: TFile, imageReference: LocalImageReference): void {
-    const siteCache = this.settings.imageUploadCache[this.site.url] ?? {};
-    const cacheEntry = siteCache[file.path];
-
-    if (!cacheEntry) {
-      return;
-    }
-
-    siteCache[file.path] = {
-      ...cacheEntry,
-      linkType: imageReference.linkType,
-      updatedAt: Date.now(),
-      wikiAlias: imageReference.wikiAlias,
-    };
-    this.settings.imageUploadCache[this.site.url] = siteCache;
-  }
-
-  private isSameImageFile(file: TFile, cacheEntry: ImageUploadCacheEntry): boolean {
-    return cacheEntry.size === file.stat.size && cacheEntry.mtime === file.stat.mtime;
-  }
-
-  private restoreCachedLocalImageLinks(markdown: string): string {
-    const markdownImageRegex = /!\[[^\]\n]*\]\(([^)\n]+)\)/g;
-    const wikiEmbedRegex = /!\[\[([^\]\n]+)\]\]/g;
-    const replacements: { start: number; end: number; value: string }[] = [];
-    let match = markdownImageRegex.exec(markdown);
-
-    while (match !== null) {
-      const target = parseMarkdownImageTarget(match[1]);
-
-      if (!target || !isRemotePath(target.path)) {
-        match = markdownImageRegex.exec(markdown);
-        continue;
-      }
-
-      const cacheEntry = this.getCachedLocalImageEntry(target.path);
-
-      if (!cacheEntry) {
-        match = markdownImageRegex.exec(markdown);
-        continue;
-      }
-
-      if (cacheEntry.linkType === "markdown") {
-        const targetOffset = match[0].indexOf(match[1]) + target.start;
-
-        replacements.push({
-          start: match.index + targetOffset,
-          end: match.index + targetOffset + target.rawPath.length,
-          value: formatMarkdownImagePath(cacheEntry.filePath),
-        });
-      } else {
-        replacements.push({
-          start: match.index,
-          end: match.index + match[0].length,
-          value: formatWikiImageEmbed(cacheEntry, getMarkdownImageAlt(match[0])),
-        });
-      }
-
-      match = markdownImageRegex.exec(markdown);
-    }
-
-    match = wikiEmbedRegex.exec(markdown);
-
-    while (match !== null) {
-      const linkText = match[1].trim();
-      const linkPath = decodeMarkdownPath(getLinkpath(linkText));
-
-      if (!isRemotePath(linkPath)) {
-        match = wikiEmbedRegex.exec(markdown);
-        continue;
-      }
-
-      const cacheEntry = this.getCachedLocalImageEntry(linkPath);
-
-      if (!cacheEntry) {
-        match = wikiEmbedRegex.exec(markdown);
-        continue;
-      }
-
-      replacements.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        value: formatWikiImageEmbed(cacheEntry, getWikiImageAlias(linkText)),
-      });
-
-      match = wikiEmbedRegex.exec(markdown);
-    }
-
-    return replacements
-      .sort((a, b) => b.start - a.start)
-      .reduce((updatedMarkdown, replacement) => {
-        return updatedMarkdown.slice(0, replacement.start) + replacement.value + updatedMarkdown.slice(replacement.end);
-      }, markdown);
-  }
-
-  private getCachedLocalImageEntry(permalink: string): ImageUploadCacheEntry | undefined {
-    const siteCache = this.settings.imageUploadCache[this.site.url] ?? {};
-    const normalizedPermalink = this.normalizePermalink(permalink);
-
-    for (const cacheEntry of Object.values(siteCache)) {
-      if (this.normalizePermalink(cacheEntry.permalink) !== normalizedPermalink) {
-        continue;
-      }
-
-      const file = this.app.vault.getAbstractFileByPath(cacheEntry.filePath);
-
-      if (file instanceof TFile && isImageFile(file) && this.isSameImageFile(file, cacheEntry)) {
-        return cacheEntry;
-      }
-    }
-
-    return undefined;
-  }
-
-  private normalizePermalink(permalink: string): string {
-    const absolutePermalink =
-      permalink.startsWith("http://") || permalink.startsWith("https://")
-        ? permalink
-        : `${this.site.url}${permalink.startsWith("/") ? "" : "/"}${permalink}`;
-
-    try {
-      const url = new URL(absolutePermalink);
-      return `${url.origin}${decodeURI(url.pathname)}${decodeURI(url.search)}${decodeURI(url.hash)}`;
-    } catch {
-      try {
-        return decodeURI(absolutePermalink);
-      } catch {
-        return absolutePermalink;
-      }
-    }
+    return uploadImage(file, this.imageUploadContext());
   }
 
   public async getCategoryNames(displayNames: string[]): Promise<string[]> {
@@ -780,31 +519,6 @@ class HaloService {
         return found ? found.spec.displayName : undefined;
       })
       .filter(Boolean) as string[];
-  }
-
-  private createMultipartBody(
-    filename: string,
-    extension: string,
-    fileData: ArrayBuffer,
-  ): { contentType: string; data: ArrayBuffer } {
-    const boundary = `----obsidian-halo-${randomUUID()}`;
-    const mimeType = IMAGE_MIME_TYPES[extension.toLowerCase()] || "application/octet-stream";
-    const safeFilename = filename.replace(/["\r\n]/g, "_");
-    const encoder = new TextEncoder();
-    const header = encoder.encode(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeFilename}"\r\nContent-Type: ${mimeType}\r\n\r\n`,
-    );
-    const footer = encoder.encode(`\r\n--${boundary}--\r\n`);
-    const body = new Uint8Array(header.length + fileData.byteLength + footer.length);
-
-    body.set(header, 0);
-    body.set(new Uint8Array(fileData), header.length);
-    body.set(footer, header.length + fileData.byteLength);
-
-    return {
-      contentType: `multipart/form-data; boundary=${boundary}`,
-      data: body.buffer,
-    };
   }
 }
 
