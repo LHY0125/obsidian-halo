@@ -4,6 +4,7 @@ import type { RequestUrlParam } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { resources } from "../../src/i18n";
 import HaloService from "../../src/service";
+import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
 import { McpError } from "../../src/transport/errors";
 import { createFakeClient } from "../helpers/mcp-mock";
 import {
@@ -26,57 +27,104 @@ beforeAll(async () => {
   await i18next.init({ lng: "en", fallbackLng: "en", resources, returnNull: false });
 });
 
-function mockUpdatePostRequests(raw: string): void {
+/**
+ * 读取与发布收口到 MCP 之后，服务层不该再发任何 REST 请求。
+ *
+ * 这里刻意不用 `mockReset()`：那只会让 `requestUrl` 返回 undefined，报错落在下游的 `.json` 上，
+ * 看不出是「不该发 REST」还是「桩没配对」。直接抛 —— 错误信息本身就是原因。
+ */
+function forbidRest(): void {
   requestUrlMock().mockImplementation((request: RequestUrlParam) => {
     const url = typeof request === "string" ? request : request.url;
 
-    if (url.endsWith("/posts/post-1")) {
-      return {
-        json: {
-          metadata: {
-            name: "post-1",
-          },
-          spec: {
-            categories: [],
-            cover: "",
-            excerpt: {
-              autoGenerate: true,
-              raw: "",
-            },
-            publish: false,
-            slug: "post-title",
-            tags: [],
-            title: "Post title",
-          },
-        },
-      };
-    }
+    throw new Error(`HaloService 不应再发 REST 请求: ${url}`);
+  });
+}
 
-    if (url.endsWith("/posts/post-1/draft?patched=true")) {
-      return {
-        json: {
-          metadata: {
-            annotations: {
-              "content.halo.run/patched-content": "",
-              "content.halo.run/patched-raw": raw,
-            },
-          },
-          spec: {
-            rawType: "markdown",
-          },
-        },
-      };
-    }
+/** 远端文章的**扁平**骨架 —— MCP 的 `halo_get_post` 与写工具返回的都是这个形状 */
+function remoteItem(name: string, overrides: Partial<McpPostItem> = {}): McpPostItem {
+  return {
+    name,
+    title: "Post title",
+    slug: "post-title",
+    excerpt: "",
+    excerptRaw: "",
+    autoGenerateExcerpt: true,
+    cover: "",
+    template: "",
+    pinned: false,
+    priority: 0,
+    publishTime: "",
+    allowComment: true,
+    published: false,
+    publishRequested: false,
+    visible: "PUBLIC",
+    categories: [],
+    tags: [],
+    ...overrides,
+  };
+}
 
-    if (url.includes("/categories") || url.includes("/tags")) {
-      return {
-        json: {
-          items: [],
-        },
-      };
-    }
+/** `halo_get_post` 的完整返回体 */
+function getPostResult(item: McpPostItem, raw = ""): McpGetPostResult {
+  return { item, content: { snapshotName: "snapshot-1", rawType: "markdown", raw }, truncated: false };
+}
 
-    throw new Error(`Unexpected request: ${url}`);
+interface FakeServiceOptions {
+  /** 按 name 造远端文章。用例可在这里计数 —— 发布重试用例正是靠它断言「重试前先重读」 */
+  itemFor?: (name: string) => McpPostItem;
+  /** 正文。只有 updatePost / pullPost 会读它 */
+  raw?: string;
+  categories?: McpCategoryItem[];
+  tags?: McpTagItem[];
+  /** 写工具（create / update）被调用时执行；抛错即模拟写入失败 */
+  onWrite?: (tool: string, args: Record<string, unknown>) => void;
+  onPublishState?: (args: Record<string, unknown>) => void;
+  /** 分类不存在时自动创建的返回项（`name` 即新建的 metadata.name） */
+  onCreateCategory?: (args: Record<string, unknown>) => string | undefined;
+  onCreateTag?: (args: Record<string, unknown>) => string | undefined;
+  /**
+   * 写工具的返回值，默认 `{}`。
+   *
+   * 可以覆盖是为了验证「写路径不消费返回体」：写工具没有 outputSchema，
+   * 回一句人读文案（字符串）或扁平对象都合理，两种都不该影响 frontmatter 的回写。
+   */
+  writeResult?: unknown;
+}
+
+/**
+ * 服务层测试的统一假客户端。
+ *
+ * 一条发布事务会调到的工具都在这里应答：`halo_get_post`（更新分支读一次，写成功后还会再读
+ * 一次）、`halo_create_post` / `halo_update_post`、`halo_set_post_publish_state`、
+ * `halo_list_categories` / `halo_list_tags`（回填 frontmatter 的显示名）。
+ * 漏答任何一个都会得到「Unexpected tool: xxx」—— 那正是本次迁移最容易漏的地方。
+ */
+function fakeService(options: FakeServiceOptions = {}) {
+  const itemFor = options.itemFor ?? ((name: string) => remoteItem(name));
+
+  return createFakeClient((name, args) => {
+    switch (name) {
+      case "halo_get_post":
+        return getPostResult(itemFor(String(args.name)), options.raw ?? "");
+      case "halo_list_categories":
+        return { items: options.categories ?? [] };
+      case "halo_list_tags":
+        return { items: options.tags ?? [] };
+      case "halo_create_category":
+        return { name: options.onCreateCategory?.(args) };
+      case "halo_create_tag":
+        return { name: options.onCreateTag?.(args) };
+      case "halo_create_post":
+      case "halo_update_post":
+        options.onWrite?.(name, args);
+        return options.writeResult ?? {};
+      case "halo_set_post_publish_state":
+        options.onPublishState?.(args);
+        return options.writeResult ?? {};
+      default:
+        throw new Error(`Unexpected tool: ${name}`);
+    }
   });
 }
 
@@ -99,101 +147,6 @@ function fakeUploads(permalinks: Record<string, string>) {
     }
 
     return { permalink };
-  });
-}
-
-/** Halo 远端 Post 的骨架。字段给全，发布尾段的 frontmatter 回写才不会读到 undefined */
-function makeRemotePost(name: string, spec: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    apiVersion: "content.halo.run/v1alpha1",
-    kind: "Post",
-    metadata: {
-      annotations: {},
-      name,
-    },
-    spec: {
-      allowComment: true,
-      categories: [],
-      cover: "",
-      excerpt: {
-        autoGenerate: true,
-        raw: "",
-      },
-      pinned: false,
-      priority: 0,
-      publish: false,
-      publishTime: "",
-      slug: "post-title",
-      tags: [],
-      template: "",
-      title: "Post title",
-      visible: "PUBLIC",
-      ...spec,
-    },
-  };
-}
-
-/**
- * 把 MCP 入参投影回 Post。
- *
- * 真实的 `halo_create_post` / `halo_update_post` 返回站点上的 Post，而不是入参回显；
- * 但服务层随后要读 `params.metadata.name` 与 `params.spec.*`，所以假客户端必须返回
- * **形状真实**的 Post —— 否则「name 从哪来」这类断言会在无关的地方失真
- * （例如 `changePostPublish` 悄悄拿到 undefined）。
- */
-function postFromToolArgs(args: Record<string, unknown>): Record<string, unknown> {
-  return makeRemotePost(String(args.name ?? ""), {
-    categories: args.categories ?? [],
-    tags: args.tags ?? [],
-    title: args.title ?? "",
-  });
-}
-
-/** 只认发布相关三个工具的假客户端；未知工具名直接抛错，与既有 `fakeUploads` 同风格 */
-function fakePublisher() {
-  return createFakeClient((name, args) => {
-    if (name === "halo_create_post" || name === "halo_update_post") {
-      return postFromToolArgs(args);
-    }
-
-    if (name === "halo_set_post_publish_state") {
-      return {};
-    }
-
-    throw new Error(`Unexpected tool: ${name}`);
-  });
-}
-
-/**
- * 发布路径的 REST 侧桩。
- *
- * 本任务结束时发布是**刻意的混合态**：写走 MCP，读仍走 REST（Task 5 才收口）。
- * 因此即使写入已由 MCP 驱动，`publishPost` 仍会发 REST 请求：`getPostResource`（更新分支），
- * 以及 `getCategoryDisplayNames` / `getTagDisplayNames`（两条分支都会走到，且在 try/catch
- * **之外**——桩里不给，`publishPost` 会直接抛出而不是弹失败提示）。
- */
-function mockPublishRest(post: () => Record<string, unknown>): void {
-  requestUrlMock().mockImplementation((request: RequestUrlParam) => {
-    const url = typeof request === "string" ? request : request.url;
-
-    if (url.includes("/categories") || url.includes("/tags")) {
-      return { json: { items: [] } };
-    }
-
-    if (url.endsWith("/draft?patched=true")) {
-      return {
-        json: {
-          metadata: { annotations: {} },
-          spec: { rawType: "markdown" },
-        },
-      };
-    }
-
-    if (url.includes("/posts/")) {
-      return { json: post() };
-    }
-
-    throw new Error(`Unexpected request: ${url}`);
   });
 }
 
@@ -463,7 +416,7 @@ describe("HaloService.uploadImages", () => {
 
 describe("HaloService.updatePost", () => {
   beforeEach(() => {
-    requestUrlMock().mockReset();
+    forbidRest();
   });
 
   test("restores cached local image links when image link replacement is disabled", async () => {
@@ -488,6 +441,8 @@ describe("HaloService.updatePost", () => {
       wikiImage,
       staleLogo,
     ]);
+    // 远端正文改由 MCP 的 halo_get_post 提供（原先走 REST 的 draft 快照）
+    const { client } = fakeService({ itemFor: () => remoteItem("post-1"), raw: remoteMarkdown });
     const service = new HaloService(
       app,
       createSettings({
@@ -537,6 +492,7 @@ describe("HaloService.updatePost", () => {
         },
       }),
       site,
+      client,
     );
 
     metadataCache.getFileCache.mockImplementation(() => ({
@@ -547,7 +503,6 @@ describe("HaloService.updatePost", () => {
         },
       },
     }));
-    mockUpdatePostRequests(remoteMarkdown);
 
     await service.updatePost();
 
@@ -568,6 +523,7 @@ describe("HaloService.updatePost", () => {
     const logo = createFile("images/logo.png", 10, 100);
     const remoteMarkdown = "![Logo](https://halo.example.com/uploads/logo.png)";
     const { app, contents, metadataCache } = createMockApp("local markdown", note, [logo]);
+    const { client } = fakeService({ itemFor: () => remoteItem("post-1"), raw: remoteMarkdown });
     const service = new HaloService(
       app,
       createSettings({
@@ -585,6 +541,7 @@ describe("HaloService.updatePost", () => {
         },
       }),
       site,
+      client,
     );
 
     metadataCache.getFileCache.mockImplementation(() => ({
@@ -595,17 +552,46 @@ describe("HaloService.updatePost", () => {
         },
       },
     }));
-    mockUpdatePostRequests(remoteMarkdown);
 
     await service.updatePost();
 
     expect(contents.get(note.path)).toBe(remoteMarkdown);
   });
+
+  test("远端读取失败时弹出可自查的提示，且不动本地笔记", async () => {
+    const note = createFile("post.md");
+    const { app, contents, vault, metadataCache } = createMockApp("local markdown", note, []);
+    // 上游把读取失败一律吞成 undefined，于是「网络不通」也被显示成「文章不存在」。
+    // 现在 getPost 失败即抛，调用点必须把真实原因带出来。
+    const { client } = createFakeClient(() => {
+      throw new McpError("network", { context: "MCP handshake" }, "connect ECONNREFUSED");
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { halo: { name: "post-1", site: site.url } },
+    }));
+
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    await service.updatePost();
+
+    const raised = notices.slice(seen);
+    expect(raised).toHaveLength(1);
+    // 这条断言钉的就是「别把网络故障说成文章不存在」
+    expect(raised[0]).toContain(i18next.t("transport.error.network"));
+    // 服务端原文也要出现，否则用户依然无从自查
+    expect(raised[0]).toContain("connect ECONNREFUSED");
+    // 与文案无关的判别器：读取失败时本地笔记必须原样不动
+    expect(vault.modify).not.toHaveBeenCalled();
+    expect(contents.get(note.path)).toBe("local markdown");
+  });
 });
 
 describe("HaloService.publishPost", () => {
   beforeEach(() => {
-    requestUrlMock().mockReset();
+    forbidRest();
   });
 
   test("retries draft update failures before showing publish failure", async () => {
@@ -613,32 +599,30 @@ describe("HaloService.publishPost", () => {
     const { app, fileManager, metadataCache } = createMockApp("published markdown", note, []);
     let updateAttempts = 0;
     let latestPostFetches = 0;
-    // 每次发起写入时远端已被拉取过几次。上游那条 version 断言（["1", "2"]）钉的就是这个性质：
+    // 每次发起写入时远端已被读取过几次。上游那条 version 断言（["1", "2"]）钉的就是这个性质：
     // **重试前先重新拉一次最新 Post**，而不是拿旧对象原样重放。
     const fetchesBeforeAttempt: number[] = [];
-    const { client } = createFakeClient((name, args) => {
-      if (name !== "halo_update_post") {
-        throw new Error(`Unexpected tool: ${name}`);
-      }
+    const { client } = fakeService({
+      // 计数点从 REST 桩挪到 halo_get_post：读取收口到 MCP 之后，「远端被读了几次」
+      // 就是它的调用次数
+      itemFor: (name) => {
+        latestPostFetches += 1;
+        return remoteItem(name);
+      },
+      onWrite: () => {
+        updateAttempts += 1;
+        fetchesBeforeAttempt.push(latestPostFetches);
 
-      updateAttempts += 1;
-      fetchesBeforeAttempt.push(latestPostFetches);
-
-      // 上游让 `PUT .../draft` 的第一次失败。MCP 之后 draft 那一步没有了，但
-      // 「重试包住整个发布事务」的语义不变，所以让唯一那次写入的首次调用失败。
-      if (updateAttempts === 1) {
-        throw new Error("The post draft is locked");
-      }
-
-      return postFromToolArgs(args);
+        // 上游让 `PUT .../draft` 的第一次失败。MCP 之后 draft 那一步没有了，但
+        // 「重试包住整个发布事务」的语义不变，所以让唯一那次写入的首次调用失败。
+        if (updateAttempts === 1) {
+          throw new Error("The post draft is locked");
+        }
+      },
     });
     const service = new HaloService(app, createSettings(), site, client);
 
     metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
-    mockPublishRest(() => {
-      latestPostFetches += 1;
-      return makeRemotePost("post-1");
-    });
 
     await service.publishPost();
 
@@ -653,18 +637,15 @@ describe("HaloService.publishPost", () => {
     const note = createFile("post.md");
     const { app, fileManager, metadataCache } = createMockApp("published markdown", note, []);
     let updateAttempts = 0;
-    const { client } = createFakeClient((name) => {
-      if (name !== "halo_update_post") {
-        throw new Error(`Unexpected tool: ${name}`);
-      }
-
-      updateAttempts += 1;
-      throw new McpError("unknown", { tool: name }, "The post draft is locked");
+    const { client } = fakeService({
+      onWrite: (tool) => {
+        updateAttempts += 1;
+        throw new McpError("unknown", { tool }, "The post draft is locked");
+      },
     });
     const service = new HaloService(app, createSettings(), site, client);
 
     metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
-    mockPublishRest(() => makeRemotePost("post-1"));
 
     const notices = capturedNotices();
     const seen = notices.length;
@@ -695,23 +676,15 @@ describe("HaloService.publishPost", () => {
     const note = createFile("post.md");
     const { app, fileManager, metadataCache } = createMockApp("published markdown", note, []);
     let stateAttempts = 0;
-    const { client, calls } = createFakeClient((name, args) => {
-      if (name === "halo_create_post" || name === "halo_update_post") {
-        return postFromToolArgs(args);
-      }
-
-      if (name === "halo_set_post_publish_state") {
+    const { client, calls } = fakeService({
+      onPublishState: () => {
         stateAttempts += 1;
 
         // 只有发布状态这一步抖动，写入全程成功
         if (stateAttempts < 3) {
-          throw new McpError("unknown", { tool: name }, "The publish state is locked");
+          throw new McpError("unknown", { tool: "halo_set_post_publish_state" }, "The publish state is locked");
         }
-
-        return {};
-      }
-
-      throw new Error(`Unexpected tool: ${name}`);
+      },
     });
     const service = new HaloService(app, createSettings(), site, client);
 
@@ -719,7 +692,6 @@ describe("HaloService.publishPost", () => {
     metadataCache.getFileCache.mockImplementation(() => ({
       frontmatter: { halo: { publish: true }, title: "Post title" },
     }));
-    mockPublishRest(() => makeRemotePost("post-1"));
 
     const notices = capturedNotices();
     const seen = notices.length;
@@ -757,8 +729,7 @@ describe("HaloService.publishPost", () => {
         title: "Post title",
       },
     }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     const publishedMarkdown = "published markdown ![Logo](https://halo.example.com/uploads/logo.png)";
@@ -774,15 +745,14 @@ describe("HaloService.publishPost", () => {
 
 describe("publishPost 走 MCP", () => {
   beforeEach(() => {
-    requestUrlMock().mockReset();
+    forbidRest();
   });
 
   test("新建文章时调 halo_create_post，且 rawType 显式传 markdown", async () => {
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.publishPost();
@@ -797,8 +767,7 @@ describe("publishPost 走 MCP", () => {
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.publishPost();
@@ -813,8 +782,7 @@ describe("publishPost 走 MCP", () => {
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.publishPost();
@@ -831,8 +799,7 @@ describe("publishPost 走 MCP", () => {
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.publishPost();
@@ -848,8 +815,7 @@ describe("publishPost 走 MCP", () => {
     metadataCache.getFileCache.mockImplementation(() => ({
       frontmatter: { halo: { publish: true }, title: "Post title" },
     }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.publishPost();
@@ -862,8 +828,7 @@ describe("publishPost 走 MCP", () => {
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.publishPost();
@@ -879,8 +844,7 @@ describe("publishPost 走 MCP", () => {
     metadataCache.getFileCache.mockImplementation(() => ({
       frontmatter: { halo: { publish: false }, title: "Post title" },
     }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     // publishByDefault 为 true 也不能覆盖显式的 false —— 「写了就听它的，没写才看默认值」
     const service = new HaloService(app, createSettings({ publishByDefault: true }), site, client);
 
@@ -894,8 +858,7 @@ describe("publishPost 走 MCP", () => {
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
-    mockPublishRest(() => makeRemotePost("post-1"));
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings({ publishByDefault: true }), site, client);
 
     await service.publishPost();
@@ -909,37 +872,16 @@ describe("publishPost 走 MCP", () => {
     const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
 
-    // 本会话实测 MCP 的文章表示是**扁平**的（见 src/service/post-mapping.ts 的说明），
-    // 而写工具没有 outputSchema、返回形状未经验证。这里故意让写工具返回扁平对象，
-    // 与紧随其后的 REST 读路径返回的嵌套 Post **形状不同** —— 两者不同正是本用例的判别力所在。
-    const { client, calls } = createFakeClient((name, args) => {
-      if (name === "halo_create_post") {
-        return { categories: [], name: args.name, slug: "", tags: [], title: args.title };
-      }
-
-      throw new Error(`Unexpected tool: ${name}`);
-    });
-
+    // 写工具都没有 outputSchema、返回形状未经验证，而服务层也不该消费它（写路径走 callToolVoid）。
+    // 这里让写工具回一个与远端真值**矛盾**的扁平对象：回写若取了它，title 会变成 "WRONG TITLE"。
+    // 判别力就来自这个矛盾 —— 名称取自随后那次 halo_get_post，而不是写入的返回体。
     let fetchedName = "";
-    requestUrlMock().mockImplementation((request: RequestUrlParam) => {
-      const url = typeof request === "string" ? request : request.url;
-
-      if (url.includes("/categories") || url.includes("/tags")) {
-        return { json: { items: [] } };
-      }
-
-      if (url.endsWith("/draft?patched=true")) {
-        return { json: { metadata: { annotations: {} }, spec: { rawType: "markdown" } } };
-      }
-
-      const match = /\/posts\/([^/?]+)$/.exec(url);
-
-      if (match) {
-        fetchedName = match[1];
-        return { json: makeRemotePost(match[1]) };
-      }
-
-      throw new Error(`Unexpected request: ${url}`);
+    const { client, calls } = fakeService({
+      writeResult: { categories: [], name: "WRONG", slug: "wrong", tags: [], title: "WRONG TITLE" },
+      itemFor: (name) => {
+        fetchedName = name;
+        return remoteItem(name);
+      },
     });
 
     let written: Record<string, unknown> | undefined;
@@ -986,15 +928,7 @@ describe("publishPost 走 MCP", () => {
     // 写工具都没有 outputSchema，「回一句人读确认文案」是合理形态。
     // 若写路径走 callToolJson（它要求返回体是可解析的 JSON 负载），这里会在
     // **服务端已经写成功之后**抛错 —— 触发整事务重试、用户看到「发布失败」。
-    const { client, calls } = createFakeClient((name) => {
-      if (name === "halo_create_post" || name === "halo_set_post_publish_state") {
-        return "Created post";
-      }
-
-      throw new Error(`Unexpected tool: ${name}`);
-    });
-
-    mockPublishRest(() => makeRemotePost("post-1"));
+    const { client, calls } = fakeService({ writeResult: "Created post" });
 
     let written: Record<string, unknown> | undefined;
     fileManager.processFrontMatter.mockImplementation(
@@ -1028,13 +962,13 @@ describe("publishPost 走 MCP", () => {
 
 describe("changePostPublish 走 MCP", () => {
   beforeEach(() => {
-    requestUrlMock().mockReset();
+    forbidRest();
   });
 
   test("publish 为 false 时调 halo_set_post_publish_state 并传 publish: false", async () => {
     const note = createFile("post.md");
     const { app } = createMockApp("", note, []);
-    const { client, calls } = fakePublisher();
+    const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
     await service.changePostPublish("abc", false);
@@ -1043,5 +977,277 @@ describe("changePostPublish 走 MCP", () => {
     expect(calls).toEqual([
       { args: { name: "abc", publish: false }, method: "callToolVoid", name: "halo_set_post_publish_state" },
     ]);
+  });
+});
+
+describe("getPost 走 MCP", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  test("一次取回元数据与正文：扁平字段被还原成嵌套结构", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client, calls } = fakeService({
+      itemFor: () => remoteItem("post-1", { categories: ["category-a"], title: "标题" }),
+      raw: "# 正文",
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    const result = await service.getPost("post-1");
+
+    expect(result.post.metadata.name).toBe("post-1");
+    expect(result.post.spec.title).toBe("标题");
+    expect(result.post.spec.categories).toEqual(["category-a"]);
+    expect(result.content.raw).toBe("# 正文");
+    expect(result.content.rawType).toBe("markdown");
+
+    // 参数必须钉住：HEAD 才是可编辑的最新快照（RELEASE 是已发布版本），RAW 才是原文
+    expect(calls).toEqual([
+      { args: { format: "RAW", name: "post-1", version: "HEAD" }, method: "callToolJson", name: "halo_get_post" },
+    ]);
+  });
+
+  test("服务端截断正文时拒绝返回，绝不把残缺正文当文章", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client } = createFakeClient((name) => {
+      if (name !== "halo_get_post") {
+        throw new Error(`Unexpected tool: ${name}`);
+      }
+
+      return { content: { raw: "前一半…", rawType: "markdown" }, item: remoteItem("post-1"), truncated: true };
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    // 截断的正文一旦写进本地文件就是静默损坏用户的笔记，必须抛，而不是「尽量给一份」
+    // 断言 detail 而不是 message：McpError 的 message 是 i18n 键，具体线索在 detail 里
+    const error = await service.getPost("post-1").then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(error).toBeInstanceOf(McpError);
+    expect((error as McpError).detail).toBe("content truncated: post-1");
+  });
+});
+
+describe("HaloService.pullPost", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  test("用远端正文建本地笔记，并回写 frontmatter（含分类显示名）", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, vault } = createMockApp("", note, []);
+    const { client } = fakeService({
+      categories: [{ name: "category-a", displayName: "技术思考" }],
+      itemFor: () => remoteItem("post-1", { categories: ["category-a"], title: "标题" }),
+      raw: "# 远端正文",
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+
+    await service.pullPost("post-1");
+
+    expect(vault.create).toHaveBeenCalledWith("标题.md", "# 远端正文");
+    expect(written?.title).toBe("标题");
+    // 显示名来自扁平的 displayName（REST 那边是 spec.displayName）
+    expect(written?.categories).toEqual(["技术思考"]);
+    expect((written?.halo as { name?: string } | undefined)?.name).toBe("post-1");
+  });
+
+  test("读取失败时不建文件，只弹一条带原因的提示", async () => {
+    const note = createFile("post.md");
+    const { app, vault } = createMockApp("", note, []);
+    const { client } = createFakeClient(() => {
+      throw new McpError("forbidden", { status: 403 });
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    await service.pullPost("post-1");
+
+    const raised = notices.slice(seen);
+    expect(raised).toHaveLength(1);
+    // 403 被说成「文章不存在」的话，用户会去站点上反复找那篇文章
+    expect(raised[0]).toContain(i18next.t("transport.error.forbidden"));
+    // 与文案无关的判别器：失败时绝不能在库里留下一个空文件
+    expect(vault.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("发布成功后的回读", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  test("回读失败不会被报成「发布失败」，frontmatter 仍用本地 params 回写", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
+    metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
+
+    let writeDone = false;
+    const { client, calls } = fakeService({
+      onWrite: () => {
+        writeDone = true;
+      },
+      // 新建分支只在**写成功之后**回读一次。让它在那之后失败，
+      // 模拟的就是「文章已经落库、回读时网络抖了一下」。
+      itemFor: (name) => {
+        if (writeDone) {
+          throw new McpError("network", { context: "tools/call halo_get_post" }, "socket hang up");
+        }
+
+        return remoteItem(name);
+      },
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    await service.publishPost();
+
+    // 写已经落库，用户必须看到成功 —— 报失败会让他重发一遍
+    expect(notices.slice(seen)).toEqual([i18next.t("service.notice_publish_success")]);
+
+    // 回读失败只是少了服务端归一化，frontmatter 仍要用本地 params 回写（不能整个跳过）
+    const createdName = calls.find((call) => call.name === "halo_create_post")?.args.name;
+    expect(createdName).toEqual(expect.any(String));
+    expect(written?.title).toBe("Post title");
+    expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
+  });
+});
+
+describe("分类与标签走 MCP", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  test("getCategories / getTags 读扁平的 name 与 displayName，并按 schema 上限取一页", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client, calls } = fakeService({
+      categories: [{ displayName: "技术思考", name: "category-a" }],
+      tags: [{ displayName: "Rust", name: "tag-a" }],
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    expect(await service.getCategories()).toEqual([{ displayName: "技术思考", name: "category-a" }]);
+    expect(await service.getTags()).toEqual([{ displayName: "Rust", name: "tag-a" }]);
+
+    // 100 是 schema 的 maximum：钉住它，将来 schema 变了或有人改成翻页时能看见
+    expect(calls).toEqual([
+      { args: { size: 100 }, method: "callToolJson", name: "halo_list_categories" },
+      { args: { size: 100 }, method: "callToolJson", name: "halo_list_tags" },
+    ]);
+  });
+
+  test("返回体缺 items 时回落成空数组，不抛错", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client } = createFakeClient(() => ({}));
+    const service = new HaloService(app, createSettings(), site, client);
+
+    expect(await service.getCategories()).toEqual([]);
+    expect(await service.getTags()).toEqual([]);
+  });
+
+  test("显示名已存在时按 displayName 命中现有 name，不重复创建，且保持入参顺序", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client, calls } = fakeService({
+      categories: [
+        { displayName: "技术思考", name: "category-a" },
+        { displayName: "协会进行时", name: "category-b" },
+      ],
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    // 顺序跟着入参走：上游会重排成「已存在在前、新建在后」，那会丢掉与入参的对应关系
+    expect(await service.getCategoryNames(["协会进行时", "技术思考"])).toEqual(["category-b", "category-a"]);
+    expect(calls.some((call) => call.name === "halo_create_category")).toBe(false);
+  });
+
+  test("分类不存在时本地生成 name 再创建，slug 走拼音", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const created: Record<string, unknown>[] = [];
+    const { client } = fakeService({
+      categories: [{ displayName: "技术思考", name: "category-a" }],
+      onCreateCategory: (args) => {
+        created.push(args);
+        return "category-new";
+      },
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    expect(await service.getCategoryNames(["新分类"])).toEqual(["category-new"]);
+
+    expect(created).toHaveLength(1);
+    // REST 的 metadata.generateName 在 MCP 没有等价物，name 改由客户端生成 ——
+    // 形态必须与站点现存数据（category-sc9pomuo）一致，否则一眼就能看出是外来货
+    expect(created[0].name).toMatch(/^category-[a-z0-9]{8}$/);
+    expect(created[0].displayName).toBe("新分类");
+    expect(created[0].slug).toBe("xin-fen-lei");
+    // priority 接着现有分类数排（现有 1 个）
+    expect(created[0].priority).toBe(1);
+  });
+
+  test("标签同构：走 halo_create_tag，且不带 priority（schema 里没有这个字段）", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const created: Record<string, unknown>[] = [];
+    const { client } = fakeService({
+      onCreateTag: (args) => {
+        created.push(args);
+        return "tag-new";
+      },
+      tags: [{ displayName: "Rust", name: "tag-a" }],
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    expect(await service.getTagNames(["Rust", "学习笔记"])).toEqual(["tag-a", "tag-new"]);
+
+    expect(created).toHaveLength(1);
+    expect(created[0]).toEqual({
+      displayName: "学习笔记",
+      name: expect.stringMatching(/^tag-[a-z0-9]{8}$/),
+      slug: "xue-xi-bi-ji",
+    });
+  });
+
+  test("getCategoryDisplayNames / getTagDisplayNames 读扁平的 displayName，未知 name 直接丢掉", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client } = fakeService({
+      categories: [{ displayName: "技术思考", name: "category-a" }],
+      tags: [{ displayName: "Rust", name: "tag-a" }],
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    expect(await service.getCategoryDisplayNames(["category-a", "category-missing"])).toEqual(["技术思考"]);
+    expect(await service.getTagDisplayNames(["tag-a"])).toEqual(["Rust"]);
+    // 入参缺席（frontmatter 没写 categories / tags）时给 undefined，不是空数组
+    expect(await service.getCategoryDisplayNames(undefined)).toBeUndefined();
   });
 });

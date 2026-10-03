@@ -36,6 +36,7 @@ export interface MockAppParts {
     getFirstLinkpathDest: ReturnType<typeof rs.fn>;
   };
   vault: {
+    create: ReturnType<typeof rs.fn>;
     getAbstractFileByPath: ReturnType<typeof rs.fn>;
     modify: ReturnType<typeof rs.fn>;
     read: ReturnType<typeof rs.fn>;
@@ -106,6 +107,16 @@ export function createMockApp(
   }
 
   const vault = {
+    // 拉取远端文章要新建本地笔记；登记进 contents / filesByPath，
+    // 之后 `read`、`getAbstractFileByPath` 就能像真 vault 一样看到它
+    create: rs.fn(async (path: string, data: string) => {
+      const file = createFile(path);
+
+      contents.set(path, data);
+      filesByPath.set(path, file);
+
+      return file;
+    }),
     getAbstractFileByPath: rs.fn((path: string) => filesByPath.get(path)),
     modify: rs.fn(async (file: TFile, updatedMarkdown: string) => {
       contents.set(file.path, updatedMarkdown);
@@ -134,6 +145,8 @@ export function createMockApp(
         activeEditor: {
           file: activeFile,
         },
+        // 拉取远端文章后要把它打开（`pullPost`）；测试只关心「有没有走到这一步」
+        getLeaf: rs.fn(() => ({ openFile: rs.fn(async () => undefined) })),
       },
     } as unknown as App,
     contents,

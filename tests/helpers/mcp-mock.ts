@@ -43,25 +43,25 @@ function assertJsonPayload(value: unknown, name: string): void {
  *
  * 本次调用**先记录再求值**：responder 抛错时该调用仍留在 `calls` 里，
  * 否则「失败的那一次没有打 MCP」这类断言会假阳性。
+ *
+ * responder 一律 `await`：不 await 的话，**async responder 的 rejection 会被吞掉** ——
+ * 调用看起来成功，而同一个 responder 交给 `callToolJson` 却会正确地抛。
+ * 「写入失败」的用例于是变成静默的假绿，且两个入口对同一份 responder 行为不一致。
  */
 export function createFakeClient(responder: (name: string, args: Record<string, unknown>) => unknown): FakeMcpClient {
   const calls: FakeToolCall[] = [];
 
-  const record = (name: string, args: Record<string, unknown> = {}) => {
-    calls.push({ name, args, method: "callToolJson" });
-    return responder(name, args);
-  };
-
   const client = {
     callToolJson: async (name: string, args: Record<string, unknown> = {}) => {
-      const value = record(name, args);
+      calls.push({ name, args, method: "callToolJson" });
+      const value = await responder(name, args);
       assertJsonPayload(value, name);
       return value;
     },
     callToolVoid: async (name: string, args: Record<string, unknown> = {}) => {
       // responder 仍然执行（故仍可用来模拟工具级失败），但返回值一概不参与判定
       calls.push({ name, args, method: "callToolVoid" });
-      responder(name, args);
+      await responder(name, args);
     },
   } as unknown as McpClient;
 

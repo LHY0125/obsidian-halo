@@ -181,10 +181,11 @@ export class McpClient {
   }
 
   /**
-   * 调用工具并解包成实际负载。
+   * 调用工具并解包成实际负载。**读路径用这个方法。**
    *
-   * 业务代码一律用这个方法，**不要**直接用 `callTool()` —— 后者返回的是
-   * 未解包的 MCP 外壳，会让每个调用点都重复一遍「检查 isError / 取 structuredContent」。
+   * 业务代码一律用 `callToolJson`（读）或 `callToolVoid`（写），**不要**直接用 `callTool()` ——
+   * 后者返回的是未解包的 MCP 外壳，会让每个调用点都重复一遍「检查 isError / 取 structuredContent」。
+   * 读写的分工见 `callToolVoid` 的说明。
    */
   public async callToolJson<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
     const result = await this.callTool<McpToolCallResult>(name, args);

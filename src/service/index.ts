@@ -1,6 +1,6 @@
-import type { Category, Content, Post, Snapshot, Tag } from "@halo-dev/api-client";
+import type { Content, Post } from "@halo-dev/api-client";
 import i18next from "i18next";
-import { type App, Notice, type TFile, requestUrl } from "obsidian";
+import { type App, Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
@@ -14,6 +14,14 @@ import {
   uploadImages,
 } from "./image-upload";
 import { type HaloPostFrontmatter, applyPostFrontmatter } from "./local-content";
+import {
+  type McpCategoryItem,
+  type McpGetPostResult,
+  type McpTagItem,
+  generateResourceName,
+  toContent,
+  toPost,
+} from "./post-mapping";
 
 const PUBLISH_RETRY_COUNT = 3;
 const PUBLISH_RETRY_DELAY_MS = 500;
@@ -28,8 +36,6 @@ class HaloService {
    * 而测试要断言的是「调了哪个工具、传了什么参数」，不是「发了什么 HTTP 请求」。
    */
   private readonly client: McpClient;
-  private readonly headers: Record<string, string> = {};
-  private readonly authHeaders: Record<string, string> = {};
 
   constructor(app: App, settings: HaloSetting, site: HaloSite, client?: McpClient) {
     this.app = app;
@@ -39,15 +45,6 @@ class HaloService {
     if (!this.settings.imageUploadCache) {
       this.settings.imageUploadCache = {};
     }
-
-    this.authHeaders = {
-      Authorization: `Bearer ${this.site.token}`,
-    };
-
-    this.headers = {
-      "Content-Type": "application/json",
-      ...this.authHeaders,
-    };
 
     this.client = client ?? new McpClient({ endpoint: mcpEndpointOf(this.site), token: this.site.mcpToken });
   }
@@ -62,43 +59,43 @@ class HaloService {
     };
   }
 
-  public async getPost(name: string): Promise<{ post: Post; content: Content } | undefined> {
-    try {
-      const post = await this.getPostResource(name);
-      const snapshot = await this.getPostDraft(name);
+  /**
+   * 读取一篇文章的元数据与可编辑正文。
+   *
+   * 与上游的差异（刻意的）：
+   * - 上游要发两次请求（post 资源 + draft 快照），MCP 的 `halo_get_post` 一次返回两者；
+   * - 上游把所有失败都吞成 `undefined`，导致网络故障被显示成「文章不存在」。现在失败即抛，
+   *   由调用方决定文案。
+   */
+  public async getPost(name: string): Promise<{ post: Post; content: Content }> {
+    const result = await this.client.callToolJson<McpGetPostResult>("halo_get_post", {
+      name,
+      version: "HEAD",
+      format: "RAW",
+    });
 
-      const { "content.halo.run/patched-content": patchedContent, "content.halo.run/patched-raw": patchedRaw } =
-        snapshot.metadata.annotations || {};
-
-      const { rawType } = snapshot.spec || {};
-
-      const content: Content = {
-        content: patchedContent,
-        raw: patchedRaw,
-        rawType,
-      };
-
-      return Promise.resolve({
-        post,
-        content,
-      });
-    } catch (error) {
-      return Promise.resolve(undefined);
+    if (result.truncated) {
+      // 绝不能把截断的正文当完整文章写进本地文件 —— 那是静默损坏用户的笔记
+      throw new McpError("unknown", { tool: "halo_get_post" }, `content truncated: ${name}`);
     }
+
+    return { post: toPost(result.item), content: toContent(result.content) };
   }
 
-  private async getPostResource(name: string): Promise<Post> {
-    return (await requestUrl({
-      url: `${this.site.url}/apis/uc.api.content.halo.run/v1alpha1/posts/${name}`,
-      headers: this.headers,
-    }).json) as Post;
-  }
-
-  private async getPostDraft(name: string): Promise<Snapshot> {
-    return (await requestUrl({
-      url: `${this.site.url}/apis/uc.api.content.halo.run/v1alpha1/posts/${name}/draft?patched=true`,
-      headers: this.headers,
-    }).json) as Snapshot;
+  /**
+   * 读一篇文章，失败时弹提示并返回 `undefined`。
+   *
+   * 存在的理由：`getPost()` 现在失败即抛，而 `updatePost` / `pullPost` 都不该把异常直接
+   * 放给命令回调 —— Obsidian 只会把它记进控制台，用户什么都看不到。两处的处置完全一致，
+   * 收在这里还能保证失败文案只有一处定义。
+   */
+  private async readPostOrNotify(name: string): Promise<{ post: Post; content: Content } | undefined> {
+    try {
+      return await this.getPost(name);
+    } catch (error) {
+      new Notice(this.readFailureMessage(error));
+      return undefined;
+    }
   }
 
   public async publishPost(options: { markdown?: string } = {}): Promise<void> {
@@ -172,7 +169,7 @@ class HaloService {
         // 两个分支刻意用 if/else 而不是 if + 提前 return：发布状态那步必须对**两条**分支都生效，
         // 提前 return 会让更新分支跳过它（上游就是这个形状，不是随手写的）。
         if (remotePostName) {
-          const latestPost = await this.getPostResource(remotePostName);
+          const latestPost = (await this.getPost(remotePostName)).post;
 
           params = applyPostFrontmatter(latestPost, {
             activeFile,
@@ -227,7 +224,7 @@ class HaloService {
         return params;
       });
 
-      params = (await this.getPost(params.metadata.name))?.post || params;
+      params = await this.refreshPostAfterWrite(params);
     } catch (error) {
       new Notice(this.publishFailureMessage(error));
       return;
@@ -251,6 +248,22 @@ class HaloService {
     });
 
     new Notice(i18next.t("service.notice_publish_success"));
+  }
+
+  /**
+   * 写成功后再读一次，拿服务端归一化过的字段（slug、publishTime 等）。
+   *
+   * 这次读**必须自己吞掉失败**：它在 `publishPost` 的 catch 作用域里，一旦把异常放出去，
+   * 「东西已经写进 Halo 了，只是回读时网络抖了一下」会被报成「发布失败」——
+   * 用户重发一遍，而重发不会再建一篇（`remotePostName` 已回填）但会白跑一趟并收到错误提示。
+   * 读失败就沿用本地构造的 params：少了服务端归一化，发布本身依然是成功的。
+   */
+  private async refreshPostAfterWrite(params: Post): Promise<Post> {
+    try {
+      return (await this.getPost(params.metadata.name)).post;
+    } catch {
+      return params;
+    }
   }
 
   public async changePostPublish(name: string, publish: boolean): Promise<void> {
@@ -300,24 +313,45 @@ class HaloService {
   }
 
   /**
-   * 发布失败的提示文案。
+   * 把 `McpError.detail` 接到提示语后面。
    *
-   * 必须把 `McpError.detail` 一起显示：工具级失败（HTTP 200 + `isError: true`）的全部线索都在那里，
-   * 只弹「发布失败，请重试」会让用户完全无从自查。
+   * 必须显示：工具级失败（HTTP 200 + `isError: true`）的全部线索都在那里，只弹一句泛泛的
+   * 提示会让用户完全无从自查。
    *
    * 判据用**真值**而非 `??`——`detail` 合法地可以是空串（服务端失败了但没给原因），
    * `detail ?? fallback` 挡不住空串，只会留下一个孤零零的分隔符。
    *
    * 拼接用换行而非标点：detail 是服务端原文、未经本地化，标点却需要翻译。
    */
-  private publishFailureMessage(error: unknown): string {
-    const message = i18next.t("service.error_publish_failed");
-
+  private withErrorDetail(message: string, error: unknown): string {
     if (error instanceof McpError && error.detail) {
       return `${message}\n${error.detail}`;
     }
 
     return message;
+  }
+
+  /** 发布失败的提示文案 */
+  private publishFailureMessage(error: unknown): string {
+    return this.withErrorDetail(i18next.t("service.error_publish_failed"), error);
+  }
+
+  /**
+   * 读取失败的提示文案。
+   *
+   * 与上游的差异（刻意的）：上游把 `getPost()` 的所有失败都吞成 `undefined`，于是密钥过期、
+   * MCP 端点配错、网络不通全都被显示成「文章不存在」，用户照着这句话怎么查都查不对。
+   * 现在 `getPost()` 失败即抛，这里用 `McpError` 自带的 `key` + `params` 还原出**具体**原因
+   * （`transport.error.*` 本就是面向用户的文案）。
+   *
+   * 非 `McpError` 的意外错误才回落到「文章不存在」—— 那正是这句话本来就对应的情形。
+   */
+  private readFailureMessage(error: unknown): string {
+    if (error instanceof McpError) {
+      return this.withErrorDetail(i18next.t(error.key, error.params), error);
+    }
+
+    return i18next.t("service.error_post_not_found");
   }
 
   private async withPublishRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -340,20 +374,26 @@ class HaloService {
     });
   }
 
-  public async getCategories(): Promise<Category[]> {
-    const data = await requestUrl({
-      url: `${this.site.url}/apis/content.halo.run/v1alpha1/categories`,
-      headers: this.headers,
+  /**
+   * 列出站点分类（扁平表示，见 `post-mapping.ts`）。
+   *
+   * `size: 100` 既是 schema 的上限（`maximum: 100`），也是**刻意写死的**：
+   * 站上现有 8 个分类，一页足够。但一旦分类数超过 100，这里会**静默漏掉后面的**——
+   * 返回体里的 `hasNext` / `totalPages` 那时必须用起来改成分页。
+   */
+  public async getCategories(): Promise<McpCategoryItem[]> {
+    const result = await this.client.callToolJson<{ items?: McpCategoryItem[] }>("halo_list_categories", {
+      size: 100,
     });
-    return Promise.resolve(data.json.items);
+
+    return result.items ?? [];
   }
 
-  public async getTags(): Promise<Tag[]> {
-    const data = await requestUrl({
-      url: `${this.site.url}/apis/content.halo.run/v1alpha1/tags`,
-      headers: this.headers,
-    });
-    return Promise.resolve(data.json.items);
+  /** 列出站点标签。`size` 的取舍同 `getCategories`。 */
+  public async getTags(): Promise<McpTagItem[]> {
+    const result = await this.client.callToolJson<{ items?: McpTagItem[] }>("halo_list_tags", { size: 100 });
+
+    return result.items ?? [];
   }
 
   public async updatePost(): Promise<void> {
@@ -370,10 +410,10 @@ class HaloService {
       return;
     }
 
-    const post = await this.getPost(matterData.halo.name);
+    // 失败时 readPostOrNotify 已经弹过提示（含失败原因）
+    const post = await this.readPostOrNotify(matterData.halo.name);
 
     if (!post) {
-      new Notice(i18next.t("service.error_post_not_found"));
       return;
     }
 
@@ -402,10 +442,10 @@ class HaloService {
   }
 
   public async pullPost(name: string): Promise<void> {
-    const post = await this.getPost(name);
+    // 失败时 readPostOrNotify 已经弹过提示（含失败原因）
+    const post = await this.readPostOrNotify(name);
 
     if (!post) {
-      new Notice(i18next.t("service.error_post_not_found"));
       return;
     }
 
@@ -450,101 +490,89 @@ class HaloService {
     return uploadImage(file, this.imageUploadContext());
   }
 
+  /**
+   * 把显示名数组解析成 `metadata.name` 数组，缺失的**自动创建**。
+   *
+   * 与上游的差异（刻意的）：
+   * - 上游用 `metadata.generateName` 让服务端造 name，MCP 没有等价物 → 本地生成（`generateResourceName`）；
+   * - 上游并行创建（`Promise.all`），改成**顺序创建**：创建是有副作用的写操作，
+   *   顺序化让失败定位更清楚，也不会把同一批里的撞名藏进并发里；
+   * - 上游把结果重排成「已存在的在前、新建的在后」，那会丢掉与入参的顺序对应关系。这里**保持入参顺序**。
+   *
+   * 显示名已存在的那一项不会重复创建 —— 判等用 `displayName` 精确匹配（与上游一致）。
+   * 新建项的 `priority` 接在现有分类之后（`all.length + index`），只影响主题侧的排序。
+   */
   public async getCategoryNames(displayNames: string[]): Promise<string[]> {
-    const allCategories = await this.getCategories();
+    const all = await this.getCategories();
+    const names: string[] = [];
 
-    const notExistDisplayNames = displayNames.filter(
-      (name) => !allCategories.find((item) => item.spec.displayName === name),
-    );
+    for (const [index, displayName] of displayNames.entries()) {
+      const existing = all.find((item) => item.displayName === displayName);
 
-    const promises = notExistDisplayNames.map((name, index) =>
-      requestUrl({
-        url: `${this.site.url}/apis/content.halo.run/v1alpha1/categories`,
-        method: "POST",
-        contentType: "application/json",
-        headers: this.headers,
-        body: JSON.stringify({
-          spec: {
-            displayName: name,
-            slug: slugify(name, { trim: true }),
-            description: "",
-            cover: "",
-            template: "",
-            priority: allCategories.length + index,
-            children: [],
-          },
-          apiVersion: "content.halo.run/v1alpha1",
-          kind: "Category",
-          metadata: { name: "", generateName: "category-" },
-        }),
-      }),
-    );
+      if (existing) {
+        names.push(existing.name);
+        continue;
+      }
 
-    const newCategories = await Promise.all(promises);
+      const created = await this.client.callToolJson<{ name?: string }>("halo_create_category", {
+        name: generateResourceName("category"),
+        displayName,
+        slug: slugify(displayName, { trim: true }),
+        priority: all.length + index,
+      });
 
-    const existNames = displayNames
-      .map((name) => {
-        const found = allCategories.find((item) => item.spec.displayName === name);
-        return found ? found.metadata.name : undefined;
-      })
-      .filter(Boolean) as string[];
+      // 服务端没回 name 时这一项只能丢掉：让整批发布失败比少一个分类更糟
+      if (created?.name) {
+        names.push(created.name);
+      }
+    }
 
-    return [...existNames, ...newCategories.map((item) => item.json.metadata.name)];
+    return names;
   }
 
   public async getCategoryDisplayNames(names?: string[]): Promise<string[]> {
     const categories = await this.getCategories();
     return names
       ?.map((name) => {
-        const found = categories.find((item) => item.metadata.name === name);
-        return found ? found.spec.displayName : undefined;
+        const found = categories.find((item) => item.name === name);
+        return found ? found.displayName : undefined;
       })
       .filter(Boolean) as string[];
   }
 
+  /** 与 `getCategoryNames` 同构；差异只有两处：走 `halo_create_tag`、不带 `priority`。 */
   public async getTagNames(displayNames: string[]): Promise<string[]> {
-    const allTags = await this.getTags();
+    const all = await this.getTags();
+    const names: string[] = [];
 
-    const notExistDisplayNames = displayNames.filter((name) => !allTags.find((item) => item.spec.displayName === name));
+    for (const displayName of displayNames) {
+      const existing = all.find((item) => item.displayName === displayName);
 
-    const promises = notExistDisplayNames.map((name) =>
-      requestUrl({
-        url: `${this.site.url}/apis/content.halo.run/v1alpha1/tags`,
-        method: "POST",
-        contentType: "application/json",
-        headers: this.headers,
-        body: JSON.stringify({
-          spec: {
-            displayName: name,
-            slug: slugify(name, { trim: true }),
-            color: "#ffffff",
-            cover: "",
-          },
-          apiVersion: "content.halo.run/v1alpha1",
-          kind: "Tag",
-          metadata: { name: "", generateName: "tag-" },
-        }),
-      }),
-    );
+      if (existing) {
+        names.push(existing.name);
+        continue;
+      }
 
-    const newTags = await Promise.all(promises);
+      const created = await this.client.callToolJson<{ name?: string }>("halo_create_tag", {
+        name: generateResourceName("tag"),
+        displayName,
+        slug: slugify(displayName, { trim: true }),
+      });
 
-    const existNames = displayNames
-      .map((name) => {
-        const found = allTags.find((item) => item.spec.displayName === name);
-        return found ? found.metadata.name : undefined;
-      })
-      .filter(Boolean) as string[];
+      if (created?.name) {
+        names.push(created.name);
+      }
+    }
 
-    return [...existNames, ...newTags.map((item) => item.json.metadata.name)];
+    return names;
   }
 
   public async getTagDisplayNames(names?: string[]): Promise<string[]> {
     const tags = await this.getTags();
     return names
       ?.map((name) => {
-        const found = tags.find((item) => item.metadata.name === name);
-        return found ? found.spec.displayName : undefined;
+        const found = tags.find((item) => item.name === name);
+        return found ? found.displayName : undefined;
       })
       .filter(Boolean) as string[];
   }
