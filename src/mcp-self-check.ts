@@ -2,8 +2,21 @@ import { McpError } from "./transport/errors";
 import { McpClient } from "./transport/mcp-client";
 
 /**
- * 阶段 0/1 依赖的 MCP 工具。
- * 只列本设计用到的内容创作类工具；评论与主题设置等运维类工具刻意不在其中。
+ * 自检与契约测试共同断言的工具集。站点侧少掉任何一个，插件都会在**对应的那条路径上**静默失效，
+ * 所以这份清单必须覆盖全部被调用的工具 —— 漏一个，防线就在那个工具上开了口子。
+ *
+ * 成分（逐条核对过，三类）：
+ * - **当前代码实际调用（9 个）**：文章读/建/改、发布状态、分类与标签的列举及创建、附件上传。
+ * - **设计预留（3 个）**：`halo_recycle_post`、`halo_restore_post`、`halo_search_content` ——
+ *   回收站与全文检索尚未接进命令，但站点侧若撤下它们，同样说明工具集已经变了，提前炸出来更好。
+ * - **上游遗留（1 个）**：`halo_list_posts` —— 当前代码并不调用它（已用全量 grep 核过，
+ *   拉取文章的选择列表走的是 `post-selection-model.ts` 的 REST 路径，不在 MCP 上）。
+ *   作为既有清单的一部分保留，不因为这次改造没用到就删。
+ *
+ * 评论、独立页面、主题设置等运维类工具刻意不在其中。
+ *
+ * 清单不敢靠「看起来对」：2026-10-04 对真实站点拉过一次 `tools/list`（`halo-mcp-server` 1.2.0，
+ * 共 44 个工具），这 13 项**逐条命中、missing 为空**。契约测试 `pnpm test:contract` 是它的自动化版本。
  */
 export const REQUIRED_TOOLS: readonly string[] = [
   "halo_get_post",
