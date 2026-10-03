@@ -905,7 +905,7 @@ git commit -m "feat(transport): 支持 tools/list 与 tools/call"
 
 **Files:**
 
-- Modify: `src/settings.ts`, `src/site-editing-modal.ts`, `src/i18n/locales/en.json`, `src/i18n/locales/zh-cn.json`, `src/i18n/locales/zh-tw.json`
+- Modify: `src/settings.ts`, `src/site-editing-modal.ts`, `src/i18n/locales/en.json`, `src/i18n/locales/zh-cn.json`, `src/i18n/locales/zh-tw.json`, `tests/service/index.test.ts`
 - Test: `tests/settings.test.ts`（追加到上游已有文件）
 
 **Interfaces:**
@@ -1160,13 +1160,57 @@ export function migrateSettings(raw: unknown): MigrationResult {
 
 > 键路径必须三份完全一致（`site_editing_modal.settings.mcpToken.name` / `.description`），否则切换语言时会回落到 fallback 或显示原始键名。
 
+- [ ]  **Step 3d: 修正被新必填字段影响的两处既有代码**
+
+给 `HaloSite` 增加**必填**字段 `mcpToken: string`（与上游 `token` 的写法一致，全字段必填）会连带影响两处既有代码，必须一并改，否则本任务不绿：
+
+1. **`tests/settings.test.ts` 的既有用例会运行时失败。** 它的 `"normalizes a site without changing other fields"` 用 `toEqual` 断言精确形状，而 `normalizeSite` 现在会多输出 `mcpToken`：
+
+```typescript
+  test("normalizes a site without changing other fields", () => {
+    expect(
+      normalizeSite({
+        name: "Blog",
+        url: "https://halo.example.com/",
+        token: "token",
+        mcpToken: "",
+        default: true,
+      }),
+    ).toEqual({
+      name: "Blog",
+      url: "https://halo.example.com",
+      token: "token",
+      mcpToken: "",
+      default: true,
+    });
+  });
+```
+
+> `toEqual` 递归比较全部自有属性，多出一个 `mcpToken` 就不相等；`toMatchObject` 只要求期望对象是子集，多出的键不影响。**不要改用 `toMatchObject` 绕过**——这条既有断言的意义正是证明 `normalizeSite` 不引入意外的字段变化，如实把新字段写进输入与期望即可。
+
+2. **`tests/service/index.test.ts` 的站点字面量会类型报错。** 它顶部的 `const site: HaloSite = ...`（约 33-38 行）缺新必填字段。rstest 不做类型检查，所以测试仍会绿——属潜伏的类型错误，必须补上：
+
+```typescript
+const site: HaloSite = {
+  name: "Halo",
+  url: "https://halo.example.com",
+  token: "token",
+  mcpToken: "",
+  default: true,
+};
+```
+
+> `HaloService` 不使用 `mcpToken`，填空串即可——这里只为满足类型，不要为它编造值。
+
+改完跑一次 `pnpm test` 与 `pnpm exec tsc --noEmit`，确认既有用例仍绿、且 `src/transport/**` 与 `tests/**` 无新增类型错误（`@halo-dev/api-client` 的既存报错与本任务无关，不必处理）。
+
 - [ ]  **Step 4: 运行测试确认通过**
 
 ```bash
 pnpm test tests/settings.test.ts
 ```
 
-预期：PASS（上游既有用例 + 新增 9 个：`mcpEndpointOf` 1 个，`migrateSettings` 8 个）。
+预期：PASS。`tests/settings.test.ts` 内为 3 个既有用例（已按 Step 3d 更新）+ 9 个新增用例（`mcpEndpointOf` 1 个，`migrateSettings` 8 个）；全套测试全绿。
 
 - [ ]  **Step 5: 提交**
 
