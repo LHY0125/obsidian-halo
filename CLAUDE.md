@@ -14,11 +14,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **REST + PAT 只剩一条路**（上传超过 7 MiB 的图片），现状见 `README.md` 的「当前进度与凭据要求」。
 
 - 设计文档：`docs/superpowers/specs/2026-10-03-obsidian-halo-mcp-reshape-design.md`
-- 实现计划：`docs/superpowers/plans/2026-10-03-bootstrap-and-mcp-transport.md`
+- 阶段 0 / 传输层计划：`docs/superpowers/plans/2026-10-03-bootstrap-and-mcp-transport.md`
+- **本次切换（发布链路整体改走 MCP）的实现计划**：`docs/superpowers/plans/2026-10-03-mcp-pipeline-cutover.md`
 
-**接手前先读这两份**——计划里记录了三条实测出来的 MCP 协议硬约束（`Accept` 必须含 `text/event-stream`、必须先 `initialize`、无 session），弄错任何一条都只会得到「400 且响应体为空」，看不到原因。其余协议约束见下方「MCP 协议硬约束」一节。
+**接手前先读这三份**——计划里记录了三条实测出来的 MCP 协议硬约束（`Accept` 必须含 `text/event-stream`、必须先 `initialize`、无 session），弄错任何一条都只会得到「400 且响应体为空」，看不到原因。其余协议约束见下方「MCP 协议硬约束」一节。
 
-**站点侧前置条件**：Halo **≥ 2.26**，且已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)；在后台「工具 → MCP 服务」创建的访问密钥以 `hmcp_` 开头，并需为它勾选文章 / 分类 / 标签 / 附件 / 全文检索相关工具。
+**站点侧前置条件**：Halo **≥ 2.26**，且已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)；在后台「工具 → MCP 服务」创建的访问密钥以 `hmcp_` 开头，并需为它勾选**文章 / 回收站（回收与恢复）/ 分类 / 标签 / 附件 / 全文检索**相关工具。（这份清单必须与 `src/mcp-self-check.ts` 的 `REQUIRED_TOOLS` 逐组对齐 —— **它才是自检断言的权威**；文档列少了，用户照做后自检会误报「缺少工具」。）
 
 ## 常用命令
 
@@ -51,7 +52,7 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 ### 业务层 — `src/service/` 与 `src/transport/`
 
-后端已从「直连 REST API」切到 MCP，`src/service/index.ts` 现在只做**编排**（`HaloService`，约 765 行），
+后端已从「直连 REST API」切到 MCP。原先那个「单类 1085 行、装下全部 REST 业务逻辑」的 `src/service/index.ts` 现在**只剩编排**（`HaloService`），
 具体职责拆在同级文件与 `src/transport/` 里：
 
 | 文件 | 唯一职责 |
