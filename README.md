@@ -11,7 +11,7 @@
 | 仍走 REST + PAT 的两条路 | 原因 |
 |---|---|
 | 上传**超过 7 MiB** 的图片 | MCP 的 `halo_upload_attachment` 上限就是 7 MiB，超出才回退 REST |
-| 「从 Halo 拉取文章」的**选文列表** | `src/post-selection-model.ts` 仍在用 `uc.api.content.halo.run` 列举文章；选定之后的正文读取已走 MCP |
+| 「从 Halo 拉取文档」的**选文列表** | `src/post-selection-model.ts` 仍在用 `uc.api.content.halo.run` 列举文章；选定之后的正文读取已走 MCP |
 
 - **`hmcp_` 访问密钥（必需）**：发布、更新、拉取正文、上传小图、连通性自检全靠它。
   在站点编辑弹窗里填 `mcpToken`。

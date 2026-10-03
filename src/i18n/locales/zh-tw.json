@@ -77,7 +77,7 @@
       },
       "token": {
         "name": "個人存取權杖（僅回退用）",
-        "description": "僅在兩條 REST 路徑上需要：上傳超過 7 MiB 的圖片，以及「從 Halo 拉取文章」的選文清單。hmcp 金鑰在 REST API 上無效，兩者是不同憑證。"
+        "description": "僅在兩條 REST 路徑上需要：上傳超過 7 MiB 的圖片，以及「從 Halo 拉取文件」的選文清單。hmcp 金鑰在 REST API 上無效，兩者是不同憑證。"
       },
       "mcpToken": {
         "name": "MCP 存取金鑰",
