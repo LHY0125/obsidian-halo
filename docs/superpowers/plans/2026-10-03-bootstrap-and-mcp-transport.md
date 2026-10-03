@@ -1746,7 +1746,8 @@ git commit -m "feat: 新增 MCP 连通性自检命令与配置迁移提示"
 创建 `tests/contract/mcp-contract.test.ts`：
 
 ```typescript
-import { describe, expect, it } from "@rstest/core";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { requestUrl } from "obsidian";
 import { runSelfCheck } from "../../src/mcp-self-check";
 
 /**
@@ -1761,7 +1762,38 @@ const endpoint = process.env.HALO_MCP_ENDPOINT;
 const token = process.env.HALO_MCP_TOKEN;
 const enabled = Boolean(endpoint && token);
 
+const rq = requestUrl as unknown as ReturnType<typeof rs.fn>;
+
+/**
+ * 把被 mock 掉的 requestUrl 换成真发 HTTP 的适配器。
+ *
+ * 必须这么做：`tests/setup.ts` 全局 mock 掉了整个 `obsidian` 模块，其中 `requestUrl`
+ * 是个裸 `rs.fn()`（返回 undefined）。不替换的话 `McpClient.post()` 会在读
+ * `response.status` 时抛 TypeError，本测试永远到不了网络——那它就不是契约测试了。
+ *
+ * 只替换这一个函数而不是改 `tests/setup.ts`：`requestUrl` 是 Electron 运行时才有的 API，
+ * Node 测试环境里没有真货，它是唯一无法真实存在的边界。换上 fetch 之后，`McpClient`、
+ * `unwrap`、错误归一化、`runSelfCheck` 全部走真实代码路径。
+ */
+function useRealHttp(): void {
+  rq.mockImplementation(
+    async (param: { url: string; method?: string; headers?: Record<string, string>; body?: string }) => {
+      const response = await fetch(param.url, {
+        method: param.method ?? "GET",
+        headers: param.headers,
+        body: param.body,
+      });
+
+      return { status: response.status, text: await response.text() };
+    },
+  );
+}
+
 describe("MCP 契约（真实站点）", () => {
+  beforeEach(() => {
+    rq.mockReset();
+  });
+
   it(
     "必需工具全部存在，且服务端为 halo-mcp-server",
     async () => {
@@ -1769,6 +1801,8 @@ describe("MCP 契约（真实站点）", () => {
         // 未配置环境变量时静默跳过：契约测试是可选验证，不阻塞常规开发与 CI
         return;
       }
+
+      useRealHttp();
 
       const report = await runSelfCheck(endpoint as string, token as string);
 
@@ -1783,6 +1817,8 @@ describe("MCP 契约（真实站点）", () => {
 ```
 
 > 这里**刻意用运行期守卫而不是 `describe.skipIf`**：rstest 对 `skipIf` 的支持不确定，而"缺少环境变量就静默 return"在任何测试运行器上都成立，也不会因为跳过机制失效而误报失败。
+>
+> **`useRealHttp()` 是这条测试成立的前提，不是锦上添花。** 少了它，`beforeEach` 的 `mockReset()` 会把 `requestUrl` 留在"返回 undefined"的裸 mock 状态，`McpClient.post()` 抛 TypeError，`runSelfCheck` 把它塞进 `report.error`，断言随即失败——**而失败现象看起来像"站点坏了"，实际是测试根本没发请求**。这个坑是执行阶段实测踩到的：站点本身完全健康（initialize 返回 200、44 个工具、13 项必需工具齐全、`missing: []`）。
 
 - [ ]  **Step 2: 加一条便捷脚本**
 
@@ -1812,11 +1848,23 @@ pnpm test:contract
 
 - [ ]  **Step 4: 有条件时对真实站点跑一次**
 
+需要**两个**环境变量同时存在（`enabled` 要求二者皆有）——只给 endpoint 会让测试静默跳过，看起来"通过"其实什么都没验：
+
 ```bash
-HALO_MCP_ENDPOINT=https://blog.liuhangyv.top/mcp pnpm test:contract
+HALO_MCP_ENDPOINT=https://blog.liuhangyv.top/mcp \
+HALO_MCP_TOKEN="$HALO_MCP_TOKEN" \
+pnpm test:contract
 ```
 
-预期：PASS。若 FAIL，说明站点侧工具授权或版本与本设计前提不符，**先解决再继续**。
+预期：PASS。
+
+**若 FAIL，先分辨是哪一类，别直接当成站点问题**：
+
+| 症状 | 含义 |
+|---|---|
+| 断言落在 `report.error` 上，`error.kind` 为 `network`/`unknown` | **测试根本没发出请求** —— 多半是 `useRealHttp()` 没装，或被 `beforeEach` 的 `mockReset()` 清掉了 |
+| `expect(report.missing).toEqual([])` 失败 | 才是真正的契约漂移：站点侧工具授权少了 |
+| `expect(report.server?.name)` 失败 | 站点上装的不是官方 MCP Server 插件 |
 
 - [ ]  **Step 5: 写 README 前置条件**
 
