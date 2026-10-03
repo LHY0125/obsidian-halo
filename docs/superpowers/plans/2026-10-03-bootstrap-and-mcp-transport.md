@@ -59,7 +59,12 @@
 
 ---
 
-## Task 1: 引入上游源码并改名为 halo-mcp
+## Task 1: 改名为 halo-mcp 并打通构建
+
+> **基座已完成（2026-10-03），本任务不再需要引入上游源码。** 仓库已 fork 到
+> `LHY0125/obsidian-halo` 并接好两个 remote：`origin` = 我们的 fork（推送目标）、
+> `upstream` = 官方源（只作参考）。上游 v1.2.0 的**完整历史与源码已在 `main` 上**，
+> 我们的三个文档提交线性叠在其之上。因此本任务只剩改名、加 `.gitignore`、打通构建。
 
 **Files:**
 
@@ -68,19 +73,26 @@
 
 **Interfaces:**
 
-- Consumes: 无（起点）
-- Produces: 一个能 `pnpm build` 产出 `main.js` 的仓库，插件 id 为 `halo-mcp`；上游历史可用 `git log 1.2.0` 访问，后续可 cherry-pick
+- Consumes: 已就位的 fork（`origin`）与上游源码树
+- Produces: 一个能 `pnpm build` 产出 `main.js` 且插件 id 为 `halo-mcp` 的仓库；`git log 1.2.0` 可访问上游历史，`upstream/main` 可用于拉取未来更新
 
-- [ ]  **Step 1: 挂上游 remote 并取回 v1.2.0**
+- [ ]  **Step 1: 核对基座状态**
 
 ```bash
 cd D:/Code/doing_exercises/programs/Obsidian-Halo
-git remote add upstream https://github.com/halo-sigs/obsidian-halo.git
-git fetch upstream --tags
-git merge --allow-unrelated-histories -m "chore: 引入上游 v1.2.0 作为改造基座" 1.2.0
+git remote -v
+git log --oneline -4
+git status --short
 ```
 
-预期：合并成功，出现 `src/`、`package.json`、`rslib.config.ts` 等上游文件，且我们已有的 `docs/` 保留。
+预期：
+
+- `origin` 指向 `git@github.com:LHY0125/obsidian-halo.git`（fetch 与 push 都是它）
+- `upstream` 指向 `https://github.com/halo-sigs/obsidian-halo.git`
+- `git log` 的第四行是 `Release 1.2.0`，其上是我们的三个 `docs:` 提交
+- 工作区干净
+
+若不符，先停下核对再继续——**不要**试图重新引入源码，基座已经在了。
 
 - [ ]  **Step 2: 确认 i18n 资源形态**
 
