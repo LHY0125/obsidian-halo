@@ -2,7 +2,7 @@ import i18next from "i18next";
 import { Notice, Plugin, moment } from "obsidian";
 import { resources } from "./i18n";
 import { addHaloIcon } from "./icons";
-import { runSelfCheck } from "./mcp-self-check";
+import { describeSelfCheckError, runSelfCheck } from "./mcp-self-check";
 import { openPostSelectionModal } from "./post-selection-model";
 import HaloService from "./service";
 import {
@@ -150,9 +150,11 @@ export default class HaloPlugin extends Plugin {
         const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
 
         if (report.error) {
+          const { key, params } = describeSelfCheckError(report.error);
+
           new Notice(
             i18next.t("command.mcp_self_check.error_failed", {
-              message: i18next.t(report.error.key, report.error.params),
+              message: i18next.t(key, params),
             }),
           );
           return;
@@ -188,12 +190,20 @@ export default class HaloPlugin extends Plugin {
     this.settings = settings;
 
     if (notices.length > 0) {
-      new SettingsMigrationModal(this.app, notices[0], (switchToDraft) => {
-        if (switchToDraft) {
-          this.settings.publishByDefault = false;
-          this.saveSettings();
-        }
-      }).open();
+      // 弹窗依赖布局，推迟到布局就绪后再开：onload 期间 workspace 尚未就绪，
+      // 此时打开 Modal 不符合 Obsidian 惯例。onLayoutReady 在布局已就绪时会立即执行回调。
+      this.app.workspace.onLayoutReady(() => {
+        new SettingsMigrationModal(this.app, notices[0], (switchToDraft) => {
+          if (switchToDraft) {
+            this.settings.publishByDefault = false;
+          }
+          // 必须放在 if 之外：migrateSettings() 盖上的 settingsVersion 只有经 saveData()
+          // 才会落到 data.json。若只在「切草稿」这一支落盘，选「保持不变」的用户下次启动时
+          // fromVersion 仍是 0，提示会一次次重复弹出 —— 等于告诉用户他的回答没生效。
+          // 注意这里刻意不等 await：onDecide 是同步回调，落盘是浮空 Promise，不阻塞弹窗关闭。
+          void this.saveSettings();
+        }).open();
+      });
     }
   }
 
