@@ -1165,33 +1165,34 @@ describe("发布成功后的回读", () => {
     expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
   });
 
-  test("收尾的显示名解析失败时，不抛出、frontmatter 仍用本地值回写", async () => {
+  test("写后读失败时，分类/标签字段保持用户原值，不被 metadata name 覆盖", async () => {
     const note = createFile("post.md");
     const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({
-      frontmatter: { categories: ["技术思考"], title: "Post title" },
+      frontmatter: { categories: ["技术思考"], tags: ["Rust"], title: "Post title" },
     }));
 
     let writeDone = false;
     const { client, calls } = createFakeClient((name, args) => {
-      // 写之前那次列分类必须成功（否则发布根本不会开始），写之后那次才失败 ——
+      // 写之前那两次列举必须成功（否则发布根本不会开始），写之后那两次才失败 ——
       // 这正是「文章已经写进 Halo 了，只是收尾读时又网络抖了一下」。
-      if (name === "halo_list_categories" && writeDone) {
-        throw new McpError("network", { context: "tools/call halo_list_categories" }, "socket hang up");
+      if (writeDone && (name === "halo_list_categories" || name === "halo_list_tags")) {
+        throw new McpError("network", { context: `tools/call ${name}` }, "socket hang up");
       }
 
       switch (name) {
         case "halo_list_categories":
-          return { items: [] };
         case "halo_list_tags":
           return { items: [] };
         case "halo_create_category":
           return { name: "category-new" };
+        case "halo_create_tag":
+          return { name: "tag-new" };
         case "halo_create_post":
           writeDone = true;
           return {};
         case "halo_get_post":
-          return getPostResult(remoteItem(String(args.name), { categories: ["category-new"] }), "");
+          return getPostResult(remoteItem(String(args.name), { categories: ["category-new"], tags: ["tag-new"] }), "");
         default:
           throw new Error(`Unexpected tool: ${name}`);
       }
@@ -1200,7 +1201,9 @@ describe("发布成功后的回读", () => {
     let written: Record<string, unknown> | undefined;
     fileManager.processFrontMatter.mockImplementation(
       (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
-        written = {};
+        // 模拟真实的 processFrontMatter：回调拿到的是**笔记里已有的** frontmatter，
+        // 没被赋值的键保持原样（title 特意给一个旧值，这样「标题被回写」才验得出来）
+        written = { categories: ["技术思考"], tags: ["Rust"], title: "旧标题" };
         callback(written);
       },
     );
@@ -1217,10 +1220,16 @@ describe("发布成功后的回读", () => {
 
     const createdName = calls.find((call) => call.name === "halo_create_post")?.args.name;
     expect(createdName).toEqual(expect.any(String));
+    // 其余字段照常回写 —— 证明整次回写没有被跳过
     expect(written?.title).toBe("Post title");
     expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
-    // 回落到本地的 metadata.name 列表，而不是整个跳过这次回写
-    expect(written?.categories).toEqual(["category-new"]);
+
+    // 这两个字段保持笔记里的**显示名**：解析不出显示名时干脆不写。
+    // 落回 metadata.name（category-new / tag-new）会更糟 —— `getCategoryNames` 只按
+    // displayName 精确匹配，下次发布会把它当成新的显示名去找、找不到就建到站点上，
+    // 正是 CLAUDE.md 警告的「垃圾标签永久留存」。
+    expect(written?.categories).toEqual(["技术思考"]);
+    expect(written?.tags).toEqual(["Rust"]);
   });
 });
 

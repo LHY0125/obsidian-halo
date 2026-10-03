@@ -233,24 +233,28 @@ class HaloService {
 
     // 显示名解析是**写成功之后**的收尾读，和 `refreshPostAfterWrite` 同一类：必须自己吞掉失败。
     // 让异常逃出去的话，用户什么都看不到（Obsidian 只把未捕获异常记进控制台）、frontmatter
-    // 也不会回写 —— 而文章其实已经写进 Halo 了。回落到本地的 `metadata.name` 列表即可：
-    // 最差只是 frontmatter 里暂时留着 name，下次发布时会被重新解析回显示名。
-    const postCategories = await this.displayNamesOrFallback(
-      () => this.getCategoryDisplayNames(params.spec.categories),
-      params.spec.categories,
-    );
-    const postTags = await this.displayNamesOrFallback(
-      () => this.getTagDisplayNames(params.spec.tags),
-      params.spec.tags,
-    );
+    // 也不会回写 —— 而文章其实已经写进 Halo 了。失败时返回 `undefined`，下面的回写据此**跳过**
+    // 这两个字段（刻意不落回任何值，理由见那里）。
+    const postCategories = await this.resolveDisplayNames(() => this.getCategoryDisplayNames(params.spec.categories));
+    const postTags = await this.resolveDisplayNames(() => this.getTagDisplayNames(params.spec.tags));
 
     this.app.fileManager.processFrontMatter(activeFile, (frontmatter) => {
       frontmatter.title = params.spec.title;
       frontmatter.slug = params.spec.slug;
       frontmatter.cover = params.spec.cover;
       frontmatter.excerpt = params.spec.excerpt.autoGenerate ? undefined : params.spec.excerpt.raw;
-      frontmatter.categories = postCategories;
-      frontmatter.tags = postTags;
+      // 这两个字段**解析成功才写**，失败时保持笔记原值 —— 它们与其他字段不同：
+      // 承载的是**显示名**，而消费方 `getCategoryNames()` / `getTagNames()` 只按 displayName
+      // 精确匹配。落回 `params.spec` 里的 metadata.name（`category-sc9pomuo`）看着像"不丢信息"，
+      // 实际会**反过来咬人**：下次发布会拿它当新的显示名去找、找不到就建到站点上，
+      // 正是 CLAUDE.md 警告的「垃圾标签永久留存」。
+      // 留原值最差只是显示名旧了一点，下次发布会被重新解析 —— 不写比写个下游不认识的值更安全。
+      if (postCategories) {
+        frontmatter.categories = postCategories;
+      }
+      if (postTags) {
+        frontmatter.tags = postTags;
+      }
       frontmatter.halo = {
         site: this.site.url,
         name: params.metadata.name,
@@ -278,21 +282,22 @@ class HaloService {
   }
 
   /**
-   * 解析显示名，失败时回落到本地已知的值。
+   * 解析显示名，**失败时返回 `undefined`**。
    *
-   * 与 `refreshPostAfterWrite` 是同一类：都发生在**写成功之后**，因此都必须自己吞掉失败 ——
+   * 与 `refreshPostAfterWrite` 同属**写成功之后**的收尾读，因此必须自己吞掉失败 ——
    * 这两处一旦把异常放出去，用户看到的是「什么都没发生」，而文章已经在 Halo 上了。
-   * 回落值就是 `params.spec` 上的 `metadata.name` 列表：它是同一份数据的另一种表示，
-   * 拿来写回 frontmatter 不会丢信息，只是暂时不是显示名。
+   *
+   * 失败时刻意**不提供回落值**，而是把「解析不出来」这件事原样交给调用方：调用方据此跳过
+   * 该字段的回写。返回一个下游不认识的值（`params.spec` 里的 metadata.name）比不写更糟 ——
+   * 消费方按 displayName 匹配，写入 name 会在下次发布时造出垃圾分类/标签，见 `publishPost`。
+   *
+   * 注意 `undefined` 与 `[]` 是两回事：前者是「解析不出来」，后者是「确实一个都没有」。
    */
-  private async displayNamesOrFallback(
-    read: () => Promise<string[] | undefined>,
-    fallback: string[] | undefined,
-  ): Promise<string[] | undefined> {
+  private async resolveDisplayNames(read: () => Promise<string[] | undefined>): Promise<string[] | undefined> {
     try {
       return await read();
     } catch {
-      return fallback;
+      return undefined;
     }
   }
 
