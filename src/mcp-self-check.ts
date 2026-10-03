@@ -1,4 +1,4 @@
-import type { McpError } from "./transport/errors";
+import { McpError } from "./transport/errors";
 import { McpClient } from "./transport/mcp-client";
 
 /**
@@ -58,4 +58,23 @@ export async function runSelfCheck(endpoint: string, token: string): Promise<Sel
       error: error as McpError,
     };
   }
+}
+
+/**
+ * 把任意抛出物归一化为可本地化的 { key, params }；非 McpError 时回落到通用文案。
+ *
+ * 存在的理由：`runSelfCheck` 里那句 `error as McpError` 是未校验的断言，一旦逃出来的不是
+ * McpError（例如 initialize 返回体缺 serverInfo），调用方直接读 `.key` 会把 undefined
+ * 渲染进 Notice —— 用户得到一条空白提示，而这个按钮的全部职责就是告诉用户哪儿不对。
+ *
+ * 分层：本函数**不 import i18next**，只产 key/params，由 UI 边界用 i18next.t(key, params) 解析。
+ */
+export function describeSelfCheckError(error: unknown): {
+  key: string;
+  params: Record<string, string | number>;
+} {
+  if (error instanceof McpError) {
+    return { key: error.key, params: error.params };
+  }
+  return { key: "common.error_connection_failed", params: {} };
 }
