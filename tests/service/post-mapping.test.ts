@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { type McpPostItem, generateResourceName, toContent, toPost } from "src/service/post-mapping";
 
 /**
@@ -128,5 +128,47 @@ describe("generateResourceName", () => {
   it("两次调用不重复", () => {
     const names = new Set(Array.from({ length: 200 }, () => generateResourceName("tag")));
     expect(names.size).toBe(200);
+  });
+
+  it("字符集与长度：大量调用下只用字母表内的字符，且恒为 8 位", () => {
+    // 拒绝采样只该**丢弃**越界字节，不能顺手少取或多取 —— 长度由 while 循环兜住
+    for (const name of Array.from({ length: 2_000 }, () => generateResourceName("tag"))) {
+      expect(name).toMatch(/^tag-[a-z0-9]{8}$/);
+    }
+  });
+
+  it("随机性来自 crypto，而不是 Math.random", () => {
+    const mathRandom = rs.spyOn(Math, "random").mockReturnValue(0);
+
+    try {
+      // 仍走 Math.random 的实现会产出恒定的 "tag-aaaaaaaa"（两次调用就重复，且恰好是那个值）
+      const names = new Set(Array.from({ length: 8 }, () => generateResourceName("tag")));
+      expect(names.size).toBeGreaterThan(1);
+      expect(names.has("tag-aaaaaaaa")).toBe(false);
+    } finally {
+      mathRandom.mockRestore();
+    }
+  });
+
+  it("拒绝采样：越界字节被丢弃，而不是取模映射（分布无偏的关键）", () => {
+    // 252 = 7 × 36，正好是阈值：>= 252 的字节必须**丢弃**。
+    // 取模实现会把 252 映射成 'a'（252 % 36 === 0）、255 映射成 'd'（255 % 36 === 3），
+    // 于是期望值会变成 "9adabcde"；拒绝采样则跳过这两个字节、依次取用后面的 0..6。
+    // 251 是最后一个**被接受**的字节（251 % 36 === 35 → '9'），所以这一条同时钉住了阈值的两侧。
+    const scripted = [251, 252, 255, 0, 1, 2, 3, 4, 5, 6];
+    let cursor = 0;
+    const getRandomValues = rs.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((array: Uint8Array) => {
+      for (let index = 0; index < array.length; index++) {
+        array[index] = scripted[Math.min(cursor++, scripted.length - 1)];
+      }
+
+      return array;
+    });
+
+    try {
+      expect(generateResourceName("tag")).toBe("tag-9abcdefg");
+    } finally {
+      getRandomValues.mockRestore();
+    }
   });
 });

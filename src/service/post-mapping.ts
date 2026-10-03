@@ -116,20 +116,40 @@ export function toContent(content: McpGetPostResult["content"]): Content {
 }
 
 /**
- * 生成 Halo 风格的资源 name。
+ * 生成 Halo 风格的资源 `name`：前缀 + 8 位小写字母数字，与站点现存数据
+ * （`category-sc9pomuo` / `tag-tnpxywrp`）同形。36^8 ≈ 2.8e12，撞名概率可忽略。
  *
- * REST 有 `metadata.generateName` 让服务端造 name，**MCP 没有等价物**——
- * `halo_create_category` / `halo_create_tag` 的 inputSchema 里 `name` 是 required，
- * 所以这一步搬到了客户端。
- * 形态与站点现存数据 (`category-sc9pomuo` / `tag-tnpxywrp`) 保持一致：前缀 + 8 位小写字母数字。
- * 36^8 ≈ 2.8e12，撞名概率可忽略。
+ * 为什么在客户端造：REST 有 `metadata.generateName` 让服务端造 name，**MCP 没有等价物** ——
+ * `halo_create_category` / `halo_create_tag` 的 inputSchema 里 `name` 是 required。
+ *
+ * 用 `crypto.getRandomValues` 而非 `Math.random`：这个 name 是服务端的唯一标识，
+ * 撞名会被服务端拒绝；CSPRNG 成本为零且不依赖引擎自身的 PRNG 质量。
+ * 注意它**不是机密** —— 不参与任何鉴权（授权来自 `mcpToken`），也不出现在公开 URL 里
+ * （分类 permalink 用的是 `slug`）。这一改动是为了「唯一」，不是为了「不可预测」。
+ *
+ * 用拒绝采样而非 `byte % 36`：256 不是 36 的整数倍，取模会让字母表前 4 个字符偏多。
  */
 export function generateResourceName(prefix: "category" | "tag"): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  // 252 = 7 × 36，故 0..251 能均匀映射到 36 个字符；其余字节（252..255）丢弃
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  const bytes = new Uint8Array(8);
   let suffix = "";
 
-  for (let index = 0; index < 8; index++) {
-    suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  while (suffix.length < 8) {
+    crypto.getRandomValues(bytes);
+
+    for (const byte of bytes) {
+      if (byte >= limit) {
+        continue;
+      }
+
+      suffix += alphabet[byte % alphabet.length];
+
+      if (suffix.length === 8) {
+        break;
+      }
+    }
   }
 
   return `${prefix}-${suffix}`;
