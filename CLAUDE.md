@@ -77,7 +77,7 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
   发布状态那一步必须留在重试闭包**内**：移出去会同时丢掉重试覆盖与「建文章成功、发布状态失败」的自愈回填。
 - 分类/标签**不存在会自动创建**，slug 用 `transliteration` 转拼音（所以中文标题的 permalink 是拼音）。副作用：一次手误的标签名会在站点上永久留下垃圾标签。
 - 分类/标签的**显示名解析失败要跳过该字段的回写**，绝不落回 `metadata.name`：消费方按 displayName 精确匹配，写入 name 会在下次发布时造出垃圾分类/标签。注意 `getCategoryDisplayNames()` / `getTagDisplayNames()` 返回 `undefined`（无从解析）与 `[]`（确实没有）是两回事，签名已如实标注。
-- **两处 `size` 上限都还没实现翻页，但两者的提示行为不同 —— 别把它们混为一谈**：`HaloService.getCategories()` / `getTags()`（分类、标签）写死 `size: 100`（schema 上限）且**没有任何提示**，超过 100 会**静默**漏掉后面的；而 `post-selection-model.ts` 的 `fetchSelectablePosts()`（拉取弹窗的文章列表）虽然同样只取一页，却会在 `hasNext` 为真时弹 `post_selection_modal.notice_truncated`，**明确告诉用户列表不完整**。两处都仍需用起返回体里的 `hasNext` / `totalPages` 才算真正翻页。站点现有 74 篇文章，一页够用。
+- **两处 `size` 上限都还没实现翻页，但两者的提示行为不同 —— 别把它们混为一谈**：`HaloService.getCategories()` / `getTags()`（分类、标签）写死 `size: 100`（schema 上限）且**没有任何提示**，超过 100 会**静默**漏掉后面的；而 `post-selection-model.ts` 的 `fetchSelectablePosts()`（拉取弹窗的文章列表）虽然同样只取一页，却会在 `hasNext` 为真时弹 `post_selection_modal.notice_truncated`，**明确告诉用户列表不完整**。两处都**只取一页**：`fetchSelectablePosts()` 会读 `hasNext`，但**只用它提示列表不完整**，不据此取下一页；真正的**翻页**（按 `hasNext` / `totalPages` 再取一页）两处都还没实现。站点现有 74 篇文章，一页够用。
 - **选择器列表项的三个字段是可选契约**：`halo_list_posts` 的 item `required` 只有 `["published","publishRequested","recycled","categories","tags"]`，`name` / `title` / `slug` 都不在其中。所以 `toSelectablePosts()` 会剔除缺 `name` 的项（无法拉取）、把缺 `title` 的回落成 `name`（否则一行空白）。
 
 ### MCP 协议硬约束
@@ -132,8 +132,9 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 `src/utils/markdown.ts`（配置过的 markdown-it 实例，`html` / `breaks` / `linkify` / `typographer` 全开 + `markdown-it-anchor`）
 **现在没有任何地方引用它** —— `grep -rn "utils/markdown" src tests` **零命中**（连注释都没有）。
 它是死代码，与 `src/utils/yaml.ts` 同类；清理前先确认没有外部引用（`markdown-it` / `markdown-it-anchor` 两个依赖只为它存在）。
-（复核时注意区分**路径**与**符号名**：`grep -rn "markdownIt" src tests` 会命中 `service/index.ts:331` 的**一句注释** ——
-它说的是「客户端跑 `markdownIt.render()` 的结果不是读者看到的 HTML」，不是对本模块的引用。）
+（复核时注意区分**路径**与**符号名**：`grep -rn "markdownIt" src tests` 共 **4 处** ——
+`src/service/index.ts:331` 的一句注释（说的是「客户端跑 `markdownIt.render()` 的结果不是读者看到的 HTML」），
+加上死模块自身的 `src/utils/markdown.ts:4` / `:12` / `:14`。**无任何一处是 import**，故它确是死代码。）
 
 **关键事实：客户端渲染结果不是读者看到的东西。** Halo 存储的 `rawType` 是 `markdown`，前台 HTML 由 Halo 服务端自己的管线生成（实测线上页面的 mermaid 被渲染成 `<div class="bytemd-mermaid"><svg>`，裸 markdown-it 不可能产出该结构）。所以在插件里换渲染器对前台显示无效——要改渲染得改 Halo 侧的插件或主题。
 
