@@ -11,6 +11,7 @@
     "test": "rstest run",
     "test:watch": "rstest watch",
     "test:coverage": "rstest run --coverage",
+    "test:contract": "rstest run --include \"tests/contract/**/*.test.ts\"",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
     "check": "biome check --write src/"
   },

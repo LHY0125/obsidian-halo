@@ -1,5 +1,32 @@
 # Obsidian plugin for Halo
 
+> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，改造方向是把发布后端从直连 REST API
+> 切换为 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
+
+## 前置条件
+
+- 站点 Halo 版本 **≥ 2.26**
+- 站点已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)
+- 在 Halo 后台「工具 → MCP 服务」创建一个访问密钥（以 `hmcp_` 开头），
+  并为其勾选文章、独立页面、分类、标签、附件、全文检索相关工具
+- 可选：若需上传超过 7 MiB 的图片，另需一个 Halo 个人访问令牌（PAT，需附件管理权限）。
+  `hmcp_` 密钥在 REST API 上无效，两者不可互换
+
+## 插件的两个凭据
+
+| 凭据 | 用途 | 是否必需 |
+|---|---|---|
+| `hmcp_` 访问密钥 | 所有 MCP 操作 | 必需 |
+| 个人访问令牌（PAT） | 仅 >7 MiB 图片的 REST 回退上传 | 可选 |
+
+## 连通性自检
+
+在 Obsidian 命令面板执行 `Halo: MCP 连通性自检`，它会握手并检查所需工具是否齐备。
+
+## License
+
+GPL-3.0（沿用上游）
+
 This plugin allows you to publish your Obsidian documents to [Halo](https://github.com/halo-dev/halo).
 
 [中文文档](./README.zh-CN.md)
