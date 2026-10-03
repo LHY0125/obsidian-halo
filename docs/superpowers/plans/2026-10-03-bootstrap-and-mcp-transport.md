@@ -69,7 +69,7 @@
 
 **Files:**
 
-- Modify: `manifest.json`, `package.json`, `README.md`
+- Modify: `manifest.json`, `package.json`
 
 **Interfaces:**
 
@@ -1125,7 +1125,7 @@ export function migrateSettings(raw: unknown): MigrationResult {
 pnpm test tests/settings.test.ts
 ```
 
-预期：PASS（上游既有用例 + 新增 8 个）。
+预期：PASS（上游既有用例 + 新增 9 个：`mcpEndpointOf` 1 个，`migrateSettings` 8 个）。
 
 - [ ]  **Step 5: 提交**
 
