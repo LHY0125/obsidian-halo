@@ -42,7 +42,19 @@ function forbidRest(): void {
   });
 }
 
-/** 远端文章的**扁平**骨架 —— MCP 的 `halo_get_post` 与写工具返回的都是这个形状 */
+/**
+ * 远端文章的**扁平**骨架 —— MCP 的 `halo_get_post` 与写工具返回的都是这个形状。
+ *
+ * 后半句是**核对过的**，不是推测：2026-10-04 对真实站点拉了一次 `tools/list`（44 个工具
+ * **全部**声明了 `outputSchema`），`halo_create_post` / `halo_update_post` 的
+ * `outputSchema.properties` 列的就是这套扁平字段（`name` / `slug` / `excerptRaw` /
+ * `publishRequested` …），与 `halo_get_post` 的 `item` **同名同形**。
+ * 也就是说「写工具也回扁平 post」是服务端声明的契约，而不只是观察到的个例。
+ *
+ * 但要说清写路径与它的关系：`halo_update_post` / `halo_create_post` 走 `callToolVoid`，
+ * 返回值一概不消费（写与读解耦，见 `transport/mcp-client.ts`）。所以这个形状对写路径只是
+ * 「服务端确实这么回」，**不是「我们依赖它」** —— 最新的 Post 一律由随后的 `getPost()` 取。
+ */
 function remoteItem(name: string, overrides: Partial<McpPostItem> = {}): McpPostItem {
   return {
     name,

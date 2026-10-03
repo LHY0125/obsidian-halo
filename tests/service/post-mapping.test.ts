@@ -19,7 +19,10 @@ import { type McpPostItem, generateResourceName, toContent, toPost } from "src/s
 const ITEM: McpPostItem = {
   name: "real-ip-always-there-and-forgery",
   title: "真实 IP 一直在",
-  slug: "real-ip-always-there-and-forgery",
+  // slug **刻意取得与 name 不同**：两者若字节相同，下面 `post.spec.slug` 的那条断言就分不清
+  // 「正确映射了 slug」与「误映射成 name」—— 而字段名写错正是本文件唯一能挡住的东西
+  // （tsc 看不见，见文首说明）。断言用的是 `toBe`（精确相等），所以前缀关系不影响判别力。
+  slug: "real-ip-always-there",
   excerpt: "摘要",
   excerptRaw: "摘要",
   autoGenerateExcerpt: false,
@@ -41,8 +44,9 @@ describe("toPost", () => {
     const post = toPost(ITEM);
     expect(post.metadata.name).toBe("real-ip-always-there-and-forgery");
     expect(post.spec.title).toBe("真实 IP 一直在");
-    // slug 最要紧：它既流进 halo_update_post，也回写进 frontmatter
-    expect(post.spec.slug).toBe("real-ip-always-there-and-forgery");
+    // slug 最要紧：它既流进 halo_update_post，也回写进 frontmatter。
+    // 期望值刻意不等于 fixture 的 name —— 取错成 item.name 时这条必须红。
+    expect(post.spec.slug).toBe("real-ip-always-there");
     expect(post.spec.cover).toBe("/upload/a.webp");
     expect(post.spec.visible).toBe("PUBLIC");
     expect(post.spec.pinned).toBe(true);

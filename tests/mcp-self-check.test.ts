@@ -57,10 +57,26 @@ describe("runSelfCheck", () => {
     expect(report.error?.kind).toBe("unauthorized");
   });
 
-  it("REQUIRED_TOOLS 覆盖阶段 0/1 依赖的工具，且不含运维类工具", () => {
-    expect(REQUIRED_TOOLS).toContain("halo_create_post");
-    expect(REQUIRED_TOOLS).toContain("halo_set_post_publish_state");
-    expect(REQUIRED_TOOLS).toContain("halo_upload_attachment");
+  it("REQUIRED_TOOLS 覆盖代码实际调用的每个工具，且不含运维类工具", () => {
+    // 逐个点名，而不是抽查三个：这 9 个是 `src/` 里真的会调用的工具（grep `callTool` 可复核）。
+    // 漏掉任何一个，运行时 `callTool` 会抛 missing-tool，而自检却报「一切正常」——
+    // 那正是这份清单存在的意义所在。
+    const calledByCode = [
+      "halo_get_post",
+      "halo_create_post",
+      "halo_update_post",
+      "halo_set_post_publish_state",
+      "halo_list_categories",
+      "halo_create_category",
+      "halo_list_tags",
+      "halo_create_tag",
+      "halo_upload_attachment",
+    ];
+
+    for (const tool of calledByCode) {
+      expect(REQUIRED_TOOLS).toContain(tool);
+    }
+
     expect(REQUIRED_TOOLS).not.toContain("halo_list_comments");
     expect(REQUIRED_TOOLS).not.toContain("halo_update_theme_setting_group");
   });
