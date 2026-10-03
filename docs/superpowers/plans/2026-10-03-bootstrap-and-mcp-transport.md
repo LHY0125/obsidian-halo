@@ -1789,16 +1789,26 @@ describe("MCP 契约（真实站点）", () => {
 在 `package.json` 的 `scripts` 中加入（其余脚本不动）：
 
 ```json
-"test:contract": "rstest run tests/contract"
+"test:contract": "rstest run --include \"tests/contract/**/*.test.ts\""
 ```
 
-- [ ]  **Step 3: 验证契约测试在无 token 时被跳过**
+> **必须用 `--include`，不能把路径当位置参数。** 实测（rstest 0.10.6）：
+>
+> | 调用 | 结果 |
+> |---|---|
+> | `rstest run tests/contract` | **`No test files found, exiting with code 1`** —— 脚本直接失败 |
+> | `rstest run --include "tests/transport/**/*.test.ts"` | 只跑该目录，27 个通过（说明 `--include` **覆盖** `rstest.config.ts` 的 `include`，不是追加） |
+> | `rstest run` | 全套 50 个通过 |
+>
+> `run` 的位置参数不是文件路径过滤器。照原样写会让这条便捷脚本永远失败——而它偏偏是本计划里**唯一真正打真实端点**的检查。
+
+- [ ]  **Step 3: 验证契约测试在缺少环境变量时的行为**
 
 ```bash
 pnpm test:contract
 ```
 
-预期：PASS 或 0 个用例被执行（跳过），**不得**因缺少环境变量而报错。
+预期：**1 个用例被执行且通过**（运行期守卫在缺环境变量时直接 return），退出码 0；**不得**报错，也不得出现 `No test files found`。
 
 - [ ]  **Step 4: 有条件时对真实站点跑一次**
 
