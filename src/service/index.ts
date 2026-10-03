@@ -513,14 +513,32 @@ class HaloService {
     // 处置与 `publishPost` 的收尾读一致 —— 解析不出来就**跳过**这两个字段（保持笔记原值）、
     // 其余照常回写。区别在这处要**弹一次提示**：更新文档的**主目的**就是把远端状态同步进笔记，
     // 这两个字段没同步上属于主目的未完全达成，不能默默咽掉（发布那处主目的已完成，故不弹）。
+    //
+    // 两个字段**各自** try，而不是合用一个 —— 合用时失败语义是错的：若分类取到了、标签抛了，
+    // `postCategories` 已经赋值并会被写进 frontmatter，可提示语说的却是「取不到的字段保持原样」，
+    // 与事实不符（可复现路径：同一个密钥被勾了列举分类、没勾列举标签）。分开之后，被跳过的字段
+    // 恰好等于真正失败的那些，提示语也就对得上了。`pullPost` 那处同构。
+    //
+    // 提示**只弹一次**：两处失败通常同因（都是这个密钥的授权问题），弹两遍同样的文案只会让用户
+    // 以为出了两个问题。故只留第一个错误作为原因。
     let postCategories: string[] | undefined;
     let postTags: string[] | undefined;
+    let taxonomyError: unknown;
 
     try {
       postCategories = await this.getCategoryDisplayNames(post.post.spec.categories);
+    } catch (error) {
+      taxonomyError = error;
+    }
+
+    try {
       postTags = await this.getTagDisplayNames(post.post.spec.tags);
     } catch (error) {
-      new Notice(this.taxonomyFailureMessage(error));
+      taxonomyError = taxonomyError ?? error;
+    }
+
+    if (taxonomyError) {
+      new Notice(this.taxonomyFailureMessage(taxonomyError));
     }
 
     const raw = this.settings.replaceImageLinks
@@ -565,14 +583,26 @@ class HaloService {
     // 新笔记没有「原值」可保留，跳过赋值的观测结果就是「这两个键不存在」。这不会误伤远端：
     // 发布时 `if (matterData?.categories)` 不成立，更新分支的 `spec.categories` 会保留服务端
     // 已有的分类，而不是把它们清空。
+    //
+    // 两个字段各自 try、提示只弹一次 —— 理由与 `updatePost` 那处完全相同（见那里的说明）。
     let postCategories: string[] | undefined;
     let postTags: string[] | undefined;
+    let taxonomyError: unknown;
 
     try {
       postCategories = await this.getCategoryDisplayNames(post.post.spec.categories);
+    } catch (error) {
+      taxonomyError = error;
+    }
+
+    try {
       postTags = await this.getTagDisplayNames(post.post.spec.tags);
     } catch (error) {
-      new Notice(this.taxonomyFailureMessage(error));
+      taxonomyError = taxonomyError ?? error;
+    }
+
+    if (taxonomyError) {
+      new Notice(this.taxonomyFailureMessage(taxonomyError));
     }
 
     const file = await this.app.vault.create(`${post.post.spec.title}.md`, `${post.content.raw}`);
@@ -663,14 +693,28 @@ class HaloService {
     return names;
   }
 
-  public async getCategoryDisplayNames(names?: string[]): Promise<string[]> {
+  /**
+   * 把分类的 `metadata.name` 数组还原成显示名数组。
+   *
+   * **`undefined` 是独立的一档，不是「空结果」**：入参缺席（笔记或远端本就没有 categories）
+   * 时返回 `undefined`，含义是「无从解析」；`[]` 才表示「确实一个都没有」。两者绝不可互换 ——
+   * `publishPost` / `updatePost` / `pullPost` 都用真值判断决定要不要回写 frontmatter，
+   * 一旦这里对缺席入参改成返回 `[]`，那道守卫就恒真，会把笔记里现有的分类**静默清空**。
+   *
+   * 所以签名如实标成 `string[] | undefined`：此前写的是 `Promise<string[]>`，真值却可能是
+   * `undefined`（末尾那个 `as string[]` 断言恰好把它盖住了），接口与实现不一致 ——
+   * 谁照着签名「修正」成返回 `[]`，就会踩上面那个坑，而 tsc 与测试都不会因此变红。
+   */
+  public async getCategoryDisplayNames(names?: string[]): Promise<string[] | undefined> {
+    if (!names) {
+      return undefined;
+    }
+
     const categories = await this.getCategories();
+
     return names
-      ?.map((name) => {
-        const found = categories.find((item) => item.name === name);
-        return found ? found.displayName : undefined;
-      })
-      .filter(Boolean) as string[];
+      .map((name) => categories.find((item) => item.name === name)?.displayName)
+      .filter((displayName): displayName is string => Boolean(displayName));
   }
 
   /** 与 `getCategoryNames` 同构；差异只有两处：走 `halo_create_tag`、不带 `priority`。 */
@@ -703,14 +747,17 @@ class HaloService {
     return names;
   }
 
-  public async getTagDisplayNames(names?: string[]): Promise<string[]> {
+  /** 与 `getCategoryDisplayNames` 同构，包含 `undefined` 与 `[]` 的那条区分（理由见那里）。 */
+  public async getTagDisplayNames(names?: string[]): Promise<string[] | undefined> {
+    if (!names) {
+      return undefined;
+    }
+
     const tags = await this.getTags();
+
     return names
-      ?.map((name) => {
-        const found = tags.find((item) => item.name === name);
-        return found ? found.displayName : undefined;
-      })
-      .filter(Boolean) as string[];
+      .map((name) => tags.find((item) => item.name === name)?.displayName)
+      .filter((displayName): displayName is string => Boolean(displayName));
   }
 }
 

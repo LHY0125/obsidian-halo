@@ -77,7 +77,7 @@
       },
       "token": {
         "name": "个人访问令牌（仅回退用）",
-        "description": "仅用于上传超过 7 MiB 的图片。hmcp 密钥在 REST API 上无效，两者是不同凭据。"
+        "description": "仅在两条 REST 路径上需要：上传超过 7 MiB 的图片，以及「从 Halo 拉取文章」的选文列表。hmcp 密钥在 REST API 上无效，两者是不同凭据。"
       },
       "mcpToken": {
         "name": "MCP 访问密钥",
@@ -119,9 +119,9 @@
     "notice_no_images_to_upload": "没有需要上传的本地图片",
     "notice_upload_images_success": "已处理 {{count}} 张图片",
     "notice_upload_images_partial": "已处理 {{count}} 张图片，{{failed}} 张失败",
-    "error_term_not_applied": "「{{name}}」未能应用到文章上：站点没有返回它的资源名。文章已在缺少它的情况下发布，请在 Halo 后台手动添加后重新发布。",
+    "error_term_not_applied": "「{{name}}」未能应用到文章上：站点没有返回它的资源名。文章将在缺少它的情况下发布，请在 Halo 后台手动添加后重新发布。",
     "error_image_too_large": "图片「{{name}}」超过 {{limit}} MiB，且该站点没有配置个人访问令牌（PAT），无法上传：MCP 的 base64 上传有这个硬上限，回退的 REST 上传则需要 PAT。请压缩这张图片，或在站点设置里补一个 PAT。",
-    "notice_taxonomy_not_resolved": "分类/标签的名称没能从站点取到，这两个字段保持笔记原样（未写入）。其余内容已照常写入；稍后重试本次操作即可补上。"
+    "notice_taxonomy_not_resolved": "分类/标签的名称没能从站点取到，取不到的字段保持笔记原样（未写入）。其余内容已照常写入；稍后重试本次操作即可补上。"
   },
   "common": {
     "error_connection_failed": "连接失败",

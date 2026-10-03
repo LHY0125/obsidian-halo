@@ -77,7 +77,7 @@
       },
       "token": {
         "name": "個人存取權杖（僅回退用）",
-        "description": "僅用於上傳超過 7 MiB 的圖片。hmcp 金鑰在 REST API 上無效，兩者是不同憑證。"
+        "description": "僅在兩條 REST 路徑上需要：上傳超過 7 MiB 的圖片，以及「從 Halo 拉取文章」的選文清單。hmcp 金鑰在 REST API 上無效，兩者是不同憑證。"
       },
       "mcpToken": {
         "name": "MCP 存取金鑰",
@@ -119,9 +119,9 @@
     "notice_no_images_to_upload": "沒有需要上傳的本地圖片",
     "notice_upload_images_success": "已處理 {{count}} 張圖片",
     "notice_upload_images_partial": "已處理 {{count}} 張圖片，{{failed}} 張失敗",
-    "error_term_not_applied": "「{{name}}」未能套用到文章上：站點沒有回傳它的資源名稱。文章已在缺少它的情況下發佈，請在 Halo 後台手動新增後重新發佈。",
+    "error_term_not_applied": "「{{name}}」未能套用到文章上：站點沒有回傳它的資源名稱。文章將在缺少它的情況下發佈，請在 Halo 後台手動新增後重新發佈。",
     "error_image_too_large": "圖片「{{name}}」超過 {{limit}} MiB，且該站點沒有設定個人存取權杖（PAT），無法上傳：MCP 的 base64 上傳有這個硬上限，回退的 REST 上傳則需要 PAT。請壓縮這張圖片，或在站點設定裡補一個 PAT。",
-    "notice_taxonomy_not_resolved": "分類/標籤的名稱沒能從站點取得，這兩個欄位保持筆記原樣（未寫入）。其餘內容已照常寫入；稍後重試本次操作即可補上。"
+    "notice_taxonomy_not_resolved": "分類/標籤的名稱沒能從站點取得，取不到的欄位保持筆記原樣（未寫入）。其餘內容已照常寫入；稍後重試本次操作即可補上。"
   },
   "common": {
     "error_connection_failed": "連接失敗",
