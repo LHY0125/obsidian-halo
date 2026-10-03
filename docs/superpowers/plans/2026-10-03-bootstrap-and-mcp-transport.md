@@ -1864,7 +1864,7 @@ pnpm test:contract
 
 - [ ]  **Step 4: 有条件时对真实站点跑一次**
 
-需要**两个**环境变量同时存在（`enabled` 要求二者皆有）——只给 endpoint 会让测试静默跳过，看起来"通过"其实什么都没验：
+需要**两个**环境变量同时存在（`enabled` 要求二者皆有）——只给其中一个**会向 stderr 打一行点名缺失变量的告警**（R13 之后），两个都不给才是预期跳过、保持静默。两种情况都输出 1 passed、什么都没验：
 
 ```bash
 HALO_MCP_ENDPOINT=https://blog.liuhangyv.top/mcp \
@@ -1922,8 +1922,8 @@ pnpm test:contract
 HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
 ```
 
-它对真实站点断言必需的 13 个工具都在。**两个环境变量缺任何一个都会静默跳过**（输出 1 passed，
-但什么都没验证），请确认两者都设了。
+它对真实站点断言必需的 13 个工具都在。**两个都不设**：这是预期的跳过，保持静默（输出 1 passed，
+但什么都没验证）。**只设了一个**：会向 stderr 打一行点名缺失变量的告警。无论如何请确认两者都设了。
 
 ## License
 
