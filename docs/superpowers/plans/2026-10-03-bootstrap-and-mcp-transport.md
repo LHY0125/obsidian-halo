@@ -1804,11 +1804,15 @@ describe("MCP 契约（真实站点）", () => {
       if (!enabled) {
         // 两个变量都缺 → 这是预期的跳过（可选验证，不阻塞常规开发与 CI）
         // 只缺一个 → 几乎肯定是配置失误，必须让人看见，否则只会得到"1 passed 但什么都没验"
+        //
+        // 用 process.stderr.write 而非 console.warn：rstest 拦截 console，且**通过的测试其 console
+        // 输出默认被吞掉**——console.warn 在 `pnpm test:contract` 这条默认路径上根本看不见，告警会
+        // 形同虚设。写 stderr 绕过这层拦截，且无需 CLI 开关、也不用改全局测试配置。
         if (Boolean(endpoint) !== Boolean(token)) {
-          console.warn(
+          process.stderr.write(
             `[mcp-contract] 本次未做任何断言：HALO_MCP_ENDPOINT 与 HALO_MCP_TOKEN 必须同时设置，当前缺少 ${
               endpoint ? "HALO_MCP_TOKEN" : "HALO_MCP_ENDPOINT"
-            }。`,
+            }。\n`,
           );
         }
         return;
