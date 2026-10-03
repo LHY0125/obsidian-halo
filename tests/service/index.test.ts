@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, rs, test } from "@rstest/core";
+import { beforeAll, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
 import type { RequestUrlParam } from "obsidian";
 import * as obsidianRuntime from "obsidian";
+import { resources } from "../../src/i18n";
 import HaloService from "../../src/service";
 import { McpError } from "../../src/transport/errors";
 import { createFakeClient } from "../helpers/mcp-mock";
@@ -12,6 +13,18 @@ import {
   requestUrlMock,
   TEST_SITE as site,
 } from "../helpers/obsidian-mocks";
+
+/**
+ * 按生产路径初始化 i18n（`main.ts` 的 onload 就是这么做的）。
+ *
+ * 不初始化的话 `i18next.t()` 返回 **undefined**，于是每条 `Notice` 的文本都是 undefined——
+ * 「发布成功」与「发布失败」再也分不出来，notice 断言会退化成
+ * 「弹了一条 notice」甚至 `expect(undefined).toBe(undefined)` 这种零判别力的形式。
+ * 参数与 `main.ts` 保持一致（`returnNull: false`）。
+ */
+beforeAll(async () => {
+  await i18next.init({ lng: "en", fallbackLng: "en", resources, returnNull: false });
+});
 
 function mockUpdatePostRequests(raw: string): void {
   requestUrlMock().mockImplementation((request: RequestUrlParam) => {
@@ -676,6 +689,64 @@ describe("HaloService.publishPost", () => {
     expect(raised[0]).toContain(i18next.t("service.error_publish_failed"));
     // 服务端原文必须一起显示，否则用户拿着「发布失败，请重试」无从自查
     expect(raised[0]).toContain("The post draft is locked");
+  });
+
+  test("发布状态调用瞬时失败时会被重试，而不是直接报发布失败", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("published markdown", note, []);
+    let stateAttempts = 0;
+    const { client, calls } = createFakeClient((name, args) => {
+      if (name === "halo_create_post" || name === "halo_update_post") {
+        return postFromToolArgs(args);
+      }
+
+      if (name === "halo_set_post_publish_state") {
+        stateAttempts += 1;
+
+        // 只有发布状态这一步抖动，写入全程成功
+        if (stateAttempts < 3) {
+          throw new McpError("unknown", { tool: name }, "The publish state is locked");
+        }
+
+        return {};
+      }
+
+      throw new Error(`Unexpected tool: ${name}`);
+    });
+    const service = new HaloService(app, createSettings(), site, client);
+
+    // frontmatter 没有 halo.name（首次走新建分支），但明确 publish: true 以触发发布状态调用
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { halo: { publish: true }, title: "Post title" },
+    }));
+    mockPublishRest(() => makeRemotePost("post-1"));
+
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    // 两次退避 500 + 1000 = 1500ms
+    rs.useFakeTimers();
+
+    try {
+      const pending = service.publishPost();
+      await rs.advanceTimersByTimeAsync(5_000);
+      await pending;
+    } finally {
+      rs.useRealTimers();
+    }
+
+    expect(stateAttempts).toBe(3);
+    // 自愈：首次建文章后 remotePostName 已回填，两次重试都走更新分支 —— 不会再建出第二篇
+    expect(calls.filter((call) => call.name === "halo_create_post")).toHaveLength(1);
+    expect(calls.filter((call) => call.name === "halo_update_post")).toHaveLength(2);
+
+    // 重试把发布状态那步救回来了，所以只有一条成功提示，没有失败提示
+    const raised = notices.slice(seen);
+    expect(raised).toHaveLength(1);
+    expect(raised[0]).toBe(i18next.t("service.notice_publish_success"));
+    expect(raised).not.toContain(i18next.t("service.error_publish_failed"));
+    // 与文案无关的判别器：发布真的走完了才会回写 frontmatter（失败分支在那之前就 return 了）
+    expect(fileManager.processFrontMatter).toHaveBeenCalledTimes(1);
   });
 
   test("publishes the provided markdown instead of rereading the local note", async () => {

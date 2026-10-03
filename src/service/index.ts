@@ -165,10 +165,12 @@ class HaloService {
       tagNames = await this.getTagNames(matterData.tags);
     }
 
-    const remotePostName = matterData?.halo?.name;
+    let remotePostName = matterData?.halo?.name;
 
     try {
       params = await this.withPublishRetry(async () => {
+        // 两个分支刻意用 if/else 而不是 if + 提前 return：发布状态那步必须对**两条**分支都生效，
+        // 提前 return 会让更新分支跳过它（上游就是这个形状，不是随手写的）。
         if (remotePostName) {
           const latestPost = await this.getPostResource(remotePostName);
 
@@ -182,33 +184,40 @@ class HaloService {
 
           // 上游原本分两步写（PUT post + PUT draft 快照），MCP 的 update_post 带 raw
           // 即同时更新元数据与可编辑内容，两次请求合成一次。
-          return this.client.callToolJson<Post>("halo_update_post", this.toUpdateArgs(params, raw));
+          params = await this.client.callToolJson<Post>("halo_update_post", this.toUpdateArgs(params, raw));
+        } else {
+          if (!params.metadata.name) {
+            params.metadata.name = randomUUID();
+          }
+
+          params = applyPostFrontmatter(params, {
+            activeFile,
+            categoryNames,
+            matterData,
+            tagNames,
+            useActiveFileDefaults: true,
+          });
+
+          params = await this.client.callToolJson<Post>("halo_create_post", this.toCreateArgs(params, raw));
+
+          // 这行回填是重试的**自愈机制**，不能删：首次建文章成功后若发布状态那步瞬时失败，
+          // 重试时 remotePostName 已是真值 → 走「更新」分支，而不是再建一篇重复文章。
+          // 因此发布状态调用必须留在本闭包内 —— 移出去会同时丢掉这层自愈和它的重试覆盖。
+          remotePostName = params.metadata.name;
         }
 
-        if (!params.metadata.name) {
-          params.metadata.name = randomUUID();
+        // 发布状态独立于内容：上游用 changePostPublish，MCP 是 set_post_publish_state。
+        // 优先级与上游一致——frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
+        // 只有没写时才看 publishByDefault。
+        // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
+        if (matterData?.halo?.hasOwnProperty("publish")) {
+          await this.changePostPublish(params.metadata.name, Boolean(matterData.halo.publish));
+        } else if (this.settings.publishByDefault) {
+          await this.changePostPublish(params.metadata.name, true);
         }
 
-        params = applyPostFrontmatter(params, {
-          activeFile,
-          categoryNames,
-          matterData,
-          tagNames,
-          useActiveFileDefaults: true,
-        });
-
-        return this.client.callToolJson<Post>("halo_create_post", this.toCreateArgs(params, raw));
+        return params;
       });
-
-      // 发布状态独立于内容：上游用 changePostPublish，MCP 是 set_post_publish_state。
-      // 优先级与上游一致——frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
-      // 只有没写时才看 publishByDefault。
-      // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
-      if (matterData?.halo?.hasOwnProperty("publish")) {
-        await this.changePostPublish(params.metadata.name, Boolean(matterData.halo.publish));
-      } else if (this.settings.publishByDefault) {
-        await this.changePostPublish(params.metadata.name, true);
-      }
 
       params = (await this.getPost(params.metadata.name))?.post || params;
     } catch (error) {
