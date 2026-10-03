@@ -267,6 +267,17 @@ describe("parseToolResult", () => {
     expect(parsed.total).toBe(74);
   });
 
+  it("structuredContent 与 content 文本矛盾时取 structuredContent", () => {
+    // 上一条的 fixture 两条通道语义相同（都是 total:74），删掉 structuredContent 分支后
+    // 回落解析会得到同一个值，因此它判不出优先级。这条让两条通道互相矛盾。
+    const conflict = {
+      content: [{ type: "text", text: '{"total":9}' }],
+      isError: false,
+      structuredContent: { total: 74 },
+    };
+    expect(parseToolResult<{ total: number }>(conflict, "halo_list_posts").total).toBe(74);
+  });
+
   it("structuredContent 缺席时回落解析 content[0].text", () => {
     const withoutStructured = {
       content: [{ type: "text", text: '{"total":9}' }],
@@ -274,6 +285,19 @@ describe("parseToolResult", () => {
     };
     const parsed = parseToolResult<{ total: number }>(withoutStructured, "halo_list_posts");
     expect(parsed.total).toBe(9);
+  });
+
+  it("回落时只取首个文本块，不拼接末块摘要", () => {
+    // 走回落路径的用例此前全是单块，把「取首块」改成「拼接全部块」不会让任何用例失败。
+    // 此处形状对齐真实响应：首块是负载、末块是人读摘要，拼接后不是合法 JSON。
+    const multiBlock = {
+      content: [
+        { type: "text", text: '{"total":9}' },
+        { type: "text", text: "Listed 1 posts" },
+      ],
+      isError: false,
+    };
+    expect(parseToolResult<{ total: number }>(multiBlock, "halo_list_posts").total).toBe(9);
   });
 
   it("isError 为 true 时抛 McpError，且 detail 带上服务端原文", () => {
