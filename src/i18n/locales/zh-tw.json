@@ -129,7 +129,7 @@
       "protocol": "MCP 協定錯誤：伺服器回傳 400 且回應內容為空。通常是握手順序錯誤（未先 initialize），或請求標頭 Accept 未同時包含 application/json 與 text/event-stream。",
       "unauthorized": "MCP 金鑰無效或已失效。請到 Halo 後台「工具 → MCP 服務」核對存取金鑰。",
       "forbidden": "該 MCP 金鑰未被授權呼叫此工具。請到 Halo 後台「工具 → MCP 服務」為該金鑰勾選所需工具。",
-      "gateway": "站點回傳 HTML 而非 JSON，疑似被閘道（ESA/WAF）攔截。請確認站點可達且 WAF 未攔截該請求。",
+      "gateway": "站點回傳了 HTML 而非 JSON。可能是被閘道（ESA/WAF）攔截，也可能是未啟用 MCP Server 外掛、或端點位址不對 —— 後者 Halo 會回主題的 404 頁面，同樣是 HTML。請確認站點可達、外掛已啟用，且端點為 <站點>/mcp。",
       "missing-tool": "站點未提供 MCP 工具「{{tool}}」（目前可用 {{count}} 個）。請確認站點 Halo 版本 ≥ 2.26 且已啟用 MCP Server 外掛，並檢查該金鑰的工具授權。",
       "network": "無法連線 MCP 端點。請檢查站點位址與網路。",
       "unknown": "MCP 請求失敗。請檢查站點設定與 Halo 後台。"

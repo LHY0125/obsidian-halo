@@ -129,7 +129,7 @@
       "protocol": "MCP 协议错误：服务端返回 400 且响应体为空。通常是握手顺序错误（未先 initialize），或请求头 Accept 未同时包含 application/json 与 text/event-stream。",
       "unauthorized": "MCP 密钥无效或已失效。请到 Halo 后台「工具 → MCP 服务」核对访问密钥。",
       "forbidden": "该 MCP 密钥未被授权调用此工具。请到 Halo 后台「工具 → MCP 服务」为该密钥勾选所需工具。",
-      "gateway": "站点返回了 HTML 而非 JSON，疑似被网关（ESA/WAF）拦截。请确认站点可达且 WAF 未拦截该请求。",
+      "gateway": "站点返回了 HTML 而非 JSON。可能是被网关（ESA/WAF）拦截，也可能是未启用 MCP Server 插件、或端点地址不对 —— 后者 Halo 会回主题的 404 页面，同样是 HTML。请确认站点可达、插件已启用，且端点为 <站点>/mcp。",
       "missing-tool": "站点未提供 MCP 工具「{{tool}}」（当前可用 {{count}} 个）。请确认站点 Halo 版本 ≥ 2.26 且已启用 MCP Server 插件，并检查该密钥的工具授权。",
       "network": "无法连接 MCP 端点。请检查站点地址与网络。",
       "unknown": "MCP 请求失败。请检查站点配置与 Halo 后台。"

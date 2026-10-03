@@ -129,7 +129,7 @@
       "protocol": "MCP protocol error: the server returned HTTP 400 with an empty body. This usually means the handshake order is wrong (initialize must come first), or the Accept header is missing text/event-stream.",
       "unauthorized": "The MCP key is invalid or has expired. Check the access key under Tools -> MCP Service in the Halo console.",
       "forbidden": "This MCP key is not authorized to call that tool. Grant the tool to the key under Tools -> MCP Service in the Halo console.",
-      "gateway": "The site returned HTML instead of JSON, which usually means a gateway (ESA/WAF) intercepted the request. Confirm the site is reachable and the WAF is not blocking it.",
+      "gateway": "The site returned HTML instead of JSON. Either a gateway (ESA/WAF) blocked the request, or the MCP Server plugin is not enabled / the endpoint is wrong — Halo then answers with its theme's 404 page, which is also HTML. Confirm the site is reachable, the plugin is enabled, and <site>/mcp is the correct endpoint.",
       "missing-tool": "The site does not provide the MCP tool \"{{tool}}\" ({{count}} tool(s) available). Confirm the site runs Halo >= 2.26 with the MCP Server plugin enabled, and check this key's tool grants.",
       "network": "Could not reach the MCP endpoint. Check the site URL and your network.",
       "unknown": "The MCP request failed. Check the site configuration and the Halo console."
