@@ -1,25 +1,25 @@
 import type { Attachment, Category, Content, Post, Snapshot, Tag } from "@halo-dev/api-client";
 import i18next from "i18next";
-import { type App, Notice, TFile, getLinkpath, normalizePath, requestUrl } from "obsidian";
+import { type App, Notice, TFile, getLinkpath, requestUrl } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import markdownIt from "src/utils/markdown";
 import { slugify } from "transliteration";
 import { type HaloSetting, type HaloSite, type ImageUploadCacheEntry, isSameSiteUrl, normalizeSite } from "../settings";
-
-interface LocalImageReference {
-  file: TFile;
-  linkType: "markdown" | "wiki";
-  start: number;
-  end: number;
-  replacement: (permalink: string) => string;
-  wikiAlias?: string;
-}
-
-interface MarkdownImageTarget {
-  path: string;
-  rawPath: string;
-  start: number;
-}
+import {
+  type HaloPostFrontmatter,
+  IMAGE_MIME_TYPES,
+  type LocalImageReference,
+  applyPostFrontmatter,
+  collectLocalImageReferences,
+  decodeMarkdownPath,
+  formatMarkdownImagePath,
+  formatWikiImageEmbed,
+  getMarkdownImageAlt,
+  getWikiImageAlias,
+  isImageFile,
+  isRemotePath,
+  parseMarkdownImageTarget,
+} from "./local-content";
 
 interface UploadImagesResult {
   processedCount: number;
@@ -30,37 +30,8 @@ interface UploadImagesResult {
   replaced: boolean;
 }
 
-interface HaloPostFrontmatter {
-  title?: string;
-  slug?: string;
-  excerpt?: string;
-  cover?: string;
-  categories?: string[];
-  tags?: string[];
-  halo?: {
-    site?: string;
-    name?: string;
-    publish?: boolean;
-  };
-}
-
-const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
 const PUBLISH_RETRY_COUNT = 3;
 const PUBLISH_RETRY_DELAY_MS = 500;
-
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  avif: "image/avif",
-  bmp: "image/bmp",
-  gif: "image/gif",
-  ico: "image/x-icon",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  png: "image/png",
-  svg: "image/svg+xml",
-  tif: "image/tiff",
-  tiff: "image/tiff",
-  webp: "image/webp",
-};
 
 class HaloService {
   private readonly site: HaloSite;
@@ -197,7 +168,7 @@ class HaloService {
       params = await this.withPublishRetry(async () => {
         if (remotePostName) {
           const latestPost = await this.getPostResource(remotePostName);
-          params = this.applyPostFrontmatter(latestPost, {
+          params = applyPostFrontmatter(latestPost, {
             activeFile,
             categoryNames,
             matterData,
@@ -233,7 +204,7 @@ class HaloService {
             params.metadata.name = randomUUID();
           }
 
-          params = this.applyPostFrontmatter(params, {
+          params = applyPostFrontmatter(params, {
             activeFile,
             categoryNames,
             matterData,
@@ -308,68 +279,6 @@ class HaloService {
       contentType: "application/json",
       headers: this.headers,
     });
-  }
-
-  private applyPostFrontmatter(
-    post: Post,
-    options: {
-      activeFile: TFile;
-      categoryNames?: string[];
-      matterData?: HaloPostFrontmatter;
-      tagNames?: string[];
-      useActiveFileDefaults: boolean;
-    },
-  ): Post {
-    const { activeFile, categoryNames, matterData, tagNames, useActiveFileDefaults } = options;
-    const nextPost: Post = {
-      ...post,
-      metadata: {
-        ...post.metadata,
-        annotations: {
-          ...post.metadata.annotations,
-        },
-      },
-      spec: {
-        ...post.spec,
-        categories: [...(post.spec.categories || [])],
-        excerpt: {
-          ...post.spec.excerpt,
-        },
-        htmlMetas: [...(post.spec.htmlMetas || [])],
-        tags: [...(post.spec.tags || [])],
-      },
-    };
-
-    if (matterData?.title) {
-      nextPost.spec.title = matterData.title;
-    } else if (useActiveFileDefaults) {
-      nextPost.spec.title = activeFile.basename;
-    }
-
-    if (matterData?.slug) {
-      nextPost.spec.slug = matterData.slug;
-    } else if (useActiveFileDefaults) {
-      nextPost.spec.slug = slugify(nextPost.spec.title, { trim: true });
-    }
-
-    if (matterData?.excerpt) {
-      nextPost.spec.excerpt.raw = matterData.excerpt;
-      nextPost.spec.excerpt.autoGenerate = false;
-    }
-
-    if (matterData?.cover) {
-      nextPost.spec.cover = matterData.cover;
-    }
-
-    if (categoryNames) {
-      nextPost.spec.categories = categoryNames;
-    }
-
-    if (tagNames) {
-      nextPost.spec.tags = tagNames;
-    }
-
-    return nextPost;
   }
 
   private createPostContent(raw: string, rawType = "markdown"): Content {
@@ -506,7 +415,7 @@ class HaloService {
     }
 
     const md = await this.app.vault.read(activeEditor.file);
-    const imageReferences = this.collectLocalImageReferences(md, activeEditor.file);
+    const imageReferences = collectLocalImageReferences(md, activeEditor.file, this.app);
     const replaceMarkdown = options.replaceMarkdown ?? this.settings.replaceImageLinks;
 
     if (imageReferences.length === 0) {
@@ -670,9 +579,9 @@ class HaloService {
     let match = markdownImageRegex.exec(markdown);
 
     while (match !== null) {
-      const target = this.parseMarkdownImageTarget(match[1]);
+      const target = parseMarkdownImageTarget(match[1]);
 
-      if (!target || !this.isRemotePath(target.path)) {
+      if (!target || !isRemotePath(target.path)) {
         match = markdownImageRegex.exec(markdown);
         continue;
       }
@@ -690,13 +599,13 @@ class HaloService {
         replacements.push({
           start: match.index + targetOffset,
           end: match.index + targetOffset + target.rawPath.length,
-          value: this.formatMarkdownImagePath(cacheEntry.filePath),
+          value: formatMarkdownImagePath(cacheEntry.filePath),
         });
       } else {
         replacements.push({
           start: match.index,
           end: match.index + match[0].length,
-          value: this.formatWikiImageEmbed(cacheEntry, this.getMarkdownImageAlt(match[0])),
+          value: formatWikiImageEmbed(cacheEntry, getMarkdownImageAlt(match[0])),
         });
       }
 
@@ -707,9 +616,9 @@ class HaloService {
 
     while (match !== null) {
       const linkText = match[1].trim();
-      const linkPath = this.decodeMarkdownPath(getLinkpath(linkText));
+      const linkPath = decodeMarkdownPath(getLinkpath(linkText));
 
-      if (!this.isRemotePath(linkPath)) {
+      if (!isRemotePath(linkPath)) {
         match = wikiEmbedRegex.exec(markdown);
         continue;
       }
@@ -724,7 +633,7 @@ class HaloService {
       replacements.push({
         start: match.index,
         end: match.index + match[0].length,
-        value: this.formatWikiImageEmbed(cacheEntry, this.getWikiImageAlias(linkText)),
+        value: formatWikiImageEmbed(cacheEntry, getWikiImageAlias(linkText)),
       });
 
       match = wikiEmbedRegex.exec(markdown);
@@ -748,20 +657,12 @@ class HaloService {
 
       const file = this.app.vault.getAbstractFileByPath(cacheEntry.filePath);
 
-      if (file instanceof TFile && this.isImageFile(file) && this.isSameImageFile(file, cacheEntry)) {
+      if (file instanceof TFile && isImageFile(file) && this.isSameImageFile(file, cacheEntry)) {
         return cacheEntry;
       }
     }
 
     return undefined;
-  }
-
-  private formatMarkdownImagePath(path: string): string {
-    if (/[\s()<>]/.test(path)) {
-      return `<${path}>`;
-    }
-
-    return path;
   }
 
   private normalizePermalink(permalink: string): string {
@@ -780,26 +681,6 @@ class HaloService {
         return absolutePermalink;
       }
     }
-  }
-
-  private formatWikiImageEmbed(cacheEntry: ImageUploadCacheEntry, fallbackAlias = ""): string {
-    const alias = cacheEntry.wikiAlias || fallbackAlias;
-
-    if (!alias) {
-      return `![[${cacheEntry.filePath}]]`;
-    }
-
-    return `![[${cacheEntry.filePath}|${alias.replace(/\|/g, "\\|")}]]`;
-  }
-
-  private getMarkdownImageAlt(markdownImage: string): string {
-    const altEnd = markdownImage.indexOf("](");
-
-    if (!markdownImage.startsWith("![") || altEnd <= 2) {
-      return "";
-    }
-
-    return markdownImage.slice(2, altEnd).replace(/\\]/g, "]");
   }
 
   public async getCategoryNames(displayNames: string[]): Promise<string[]> {
@@ -899,161 +780,6 @@ class HaloService {
         return found ? found.spec.displayName : undefined;
       })
       .filter(Boolean) as string[];
-  }
-
-  private collectLocalImageReferences(markdown: string, sourceFile: TFile): LocalImageReference[] {
-    const references: LocalImageReference[] = [];
-    const markdownImageRegex = /!\[[^\]\n]*\]\(([^)\n]+)\)/g;
-    const wikiEmbedRegex = /!\[\[([^\]\n]+)\]\]/g;
-
-    let match = markdownImageRegex.exec(markdown);
-
-    while (match !== null) {
-      const target = this.parseMarkdownImageTarget(match[1]);
-
-      if (!target || this.isRemotePath(target.path)) {
-        match = markdownImageRegex.exec(markdown);
-        continue;
-      }
-
-      const file = this.resolveImageFile(target.path, sourceFile);
-
-      if (!file) {
-        match = markdownImageRegex.exec(markdown);
-        continue;
-      }
-
-      const targetOffset = match[0].indexOf(match[1]) + target.start;
-
-      references.push({
-        file,
-        linkType: "markdown",
-        start: match.index + targetOffset,
-        end: match.index + targetOffset + target.rawPath.length,
-        replacement: (permalink) => permalink,
-      });
-
-      match = markdownImageRegex.exec(markdown);
-    }
-
-    match = wikiEmbedRegex.exec(markdown);
-
-    while (match !== null) {
-      const linkText = match[1].trim();
-      const linkPath = this.decodeMarkdownPath(getLinkpath(linkText));
-
-      if (this.isRemotePath(linkPath)) {
-        match = wikiEmbedRegex.exec(markdown);
-        continue;
-      }
-
-      const file = this.resolveImageFile(linkPath, sourceFile);
-
-      if (!file) {
-        match = wikiEmbedRegex.exec(markdown);
-        continue;
-      }
-
-      references.push({
-        file,
-        linkType: "wiki",
-        start: match.index,
-        end: match.index + match[0].length,
-        replacement: (permalink) => `![${this.getWikiImageAlt(linkText)}](${permalink})`,
-        wikiAlias: this.getWikiImageAlias(linkText),
-      });
-
-      match = wikiEmbedRegex.exec(markdown);
-    }
-
-    return references;
-  }
-
-  private parseMarkdownImageTarget(rawTarget: string): MarkdownImageTarget | undefined {
-    const trimmedStart = rawTarget.search(/\S/);
-
-    if (trimmedStart === -1) {
-      return undefined;
-    }
-
-    const trimmed = rawTarget.trim();
-
-    if (trimmed.startsWith("<")) {
-      const end = trimmed.indexOf(">");
-
-      if (end <= 1) {
-        return undefined;
-      }
-
-      const rawPath = trimmed.slice(1, end);
-      return {
-        rawPath,
-        path: this.decodeMarkdownPath(rawPath),
-        start: trimmedStart + 1,
-      };
-    }
-
-    return {
-      rawPath: trimmed,
-      path: this.decodeMarkdownPath(trimmed),
-      start: trimmedStart,
-    };
-  }
-
-  private decodeMarkdownPath(path: string): string {
-    try {
-      return decodeURIComponent(path);
-    } catch {
-      return path;
-    }
-  }
-
-  private resolveImageFile(path: string, sourceFile: TFile): TFile | undefined {
-    const linkPath = getLinkpath(path);
-    const linkDestination = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourceFile.path);
-
-    if (linkDestination && this.isImageFile(linkDestination)) {
-      return linkDestination;
-    }
-
-    const normalizedPath = normalizePath(linkPath.replace(/^\/+/, ""));
-    const absoluteFile = this.app.vault.getAbstractFileByPath(normalizedPath);
-
-    if (absoluteFile instanceof TFile && this.isImageFile(absoluteFile)) {
-      return absoluteFile;
-    }
-
-    const sourceDirectory = sourceFile.parent?.path || "";
-    const relativePath = normalizePath(`${sourceDirectory}/${linkPath}`);
-    const relativeFile = this.app.vault.getAbstractFileByPath(relativePath);
-
-    if (relativeFile instanceof TFile && this.isImageFile(relativeFile)) {
-      return relativeFile;
-    }
-
-    return undefined;
-  }
-
-  private isImageFile(file: TFile): boolean {
-    return IMAGE_EXTENSIONS.has(file.extension.toLowerCase());
-  }
-
-  private isRemotePath(path: string): boolean {
-    return /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//") || path.startsWith("#");
-  }
-
-  private getWikiImageAlt(linkText: string): string {
-    const alias = this.getWikiImageAlias(linkText);
-
-    if (!alias || /^\d+(x\d+)?$/.test(alias)) {
-      return "";
-    }
-
-    return alias.replace(/]/g, "\\]");
-  }
-
-  private getWikiImageAlias(linkText: string): string {
-    return linkText.split("|").slice(1).join("|").trim();
   }
 
   private createMultipartBody(
