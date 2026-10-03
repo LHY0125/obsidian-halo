@@ -1,6 +1,6 @@
 # Obsidian plugin for Halo
 
-> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，正在把发布后端从直连 REST API
+> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，发布后端已从直连 REST API
 > 迁移到 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
 
 ## 当前进度与凭据要求
