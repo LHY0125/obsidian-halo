@@ -130,7 +130,8 @@ export default class HaloPlugin extends Plugin {
         const post = await openPostSelectionModal(this, site);
 
         const service = new HaloService(this.app, this.settings, site);
-        await service.pullPost(post.post.metadata.name);
+        // 选择器给的是扁平条目（MCP 的表示），不再是 REST 的 `post.post.metadata.name`
+        await service.pullPost(post.name);
       },
     });
 
