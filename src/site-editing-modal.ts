@@ -11,7 +11,7 @@ export function openSiteEditingModal(
   return new Promise((resolve, reject) => {
     const modal = new SiteEditingModal(
       plugin,
-      site || { name: "", url: "", default: false, token: "" },
+      site || { name: "", url: "", default: false, token: "", mcpToken: "" },
       index,
       (site, index) => {
         resolve({
@@ -69,6 +69,15 @@ export class SiteEditingModal extends Modal {
         .addText((text) =>
           text.setValue(this.currentSite.token).onChange((value) => {
             this.currentSite.token = value;
+          }),
+        );
+
+      new Setting(contentEl)
+        .setName(i18next.t("site_editing_modal.settings.mcpToken.name"))
+        .setDesc(i18next.t("site_editing_modal.settings.mcpToken.description"))
+        .addText((text) =>
+          text.setValue(this.currentSite.mcpToken).onChange((value) => {
+            this.currentSite.mcpToken = value.trim();
           }),
         );
 

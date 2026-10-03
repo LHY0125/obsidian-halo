@@ -62,8 +62,12 @@
         "description": "Halo 的站点地址"
       },
       "token": {
-        "name": "个人令牌",
-        "description": "可以在个人资料中创建，需要包含文章管理的相关权限"
+        "name": "个人访问令牌（仅回退用）",
+        "description": "仅用于上传超过 7 MiB 的图片。hmcp 密钥在 REST API 上无效，两者是不同凭据。"
+      },
+      "mcpToken": {
+        "name": "MCP 访问密钥",
+        "description": "以 hmcp_ 开头，在 Halo 后台「工具 → MCP 服务」创建"
       },
       "default": {
         "name": "是否设置为默认",

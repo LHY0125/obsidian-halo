@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, rs, test } from "@rstest/core";
 import type { App, RequestUrlParam } from "obsidian";
 import { TFile, requestUrl } from "obsidian";
 import HaloService from "../../src/service";
-import type { HaloSetting, HaloSite } from "../../src/settings";
+import { CURRENT_SETTINGS_VERSION, type HaloSetting, type HaloSite } from "../../src/settings";
 
 interface RequestUrlMock {
   mock: {
@@ -34,11 +34,13 @@ const site: HaloSite = {
   name: "Halo",
   url: "https://halo.example.com",
   token: "token",
+  mcpToken: "",
   default: true,
 };
 
 function createSettings(overrides: Partial<HaloSetting> = {}): HaloSetting {
   return {
+    settingsVersion: CURRENT_SETTINGS_VERSION,
     sites: [site],
     publishByDefault: false,
     replaceImageLinks: true,

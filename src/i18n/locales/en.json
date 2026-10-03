@@ -62,8 +62,12 @@
         "description": "Halo site URL"
       },
       "token": {
-        "name": "Personal Access Token",
-        "description": "Can be created in user profile, need permissions for managing posts"
+        "name": "Personal Access Token (fallback only)",
+        "description": "Only used to upload images larger than 7 MiB. The hmcp key does not work on the REST API, so this is a separate credential."
+      },
+      "mcpToken": {
+        "name": "MCP access key",
+        "description": "Starts with hmcp_, created in Halo console at Tools -> MCP Service"
       },
       "default": {
         "name": "Set as default",

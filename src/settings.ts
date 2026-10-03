@@ -6,7 +6,10 @@ import { HaloSitesModal } from "./sites-modal";
 export interface HaloSite {
   name: string;
   url: string;
+  /** Halo 个人访问令牌（PAT）。仅用于 >7MiB 图片的 REST 回退上传，MCP 路径不使用 */
   token: string;
+  /** MCP 访问密钥，以 hmcp_ 开头。与 token 是两种不同凭据，不可互换 */
+  mcpToken: string;
   default: boolean;
 }
 
@@ -20,7 +23,10 @@ export interface ImageUploadCacheEntry {
   wikiAlias?: string;
 }
 
+export const CURRENT_SETTINGS_VERSION = 1;
+
 export interface HaloSetting {
+  settingsVersion: number;
   sites: HaloSite[];
   publishByDefault: boolean;
   replaceImageLinks: boolean;
@@ -28,6 +34,7 @@ export interface HaloSetting {
 }
 
 export const DEFAULT_SETTINGS: HaloSetting = {
+  settingsVersion: CURRENT_SETTINGS_VERSION,
   sites: [],
   publishByDefault: false,
   replaceImageLinks: true,
@@ -38,10 +45,54 @@ export function normalizeSiteUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");
 }
 
+/** 站点 URL 与 MCP 端点的推导规则：<url 去尾斜杠>/mcp */
+export function mcpEndpointOf(site: HaloSite): string {
+  return `${normalizeSiteUrl(site.url)}/mcp`;
+}
+
 export function normalizeSite(site: HaloSite): HaloSite {
   return {
     ...site,
     url: normalizeSiteUrl(site.url),
+    mcpToken: site.mcpToken ?? "",
+  };
+}
+
+export interface MigrationNotice {
+  key: "publishByDefault-true";
+}
+
+export interface MigrationResult {
+  settings: HaloSetting;
+  notices: MigrationNotice[];
+}
+
+/**
+ * 把任意来源的原始设置迁移到当前版本。
+ *
+ * 纯函数：不读磁盘、不弹窗、不写盘，便于测试。
+ * 只产出 notices，绝不静默修改用户已有的值 —— 默认值变更对已装用户无效，
+ * 静默覆盖用户配置是难以察觉的坏行为。
+ */
+export function migrateSettings(raw: unknown): MigrationResult {
+  const source = (raw ?? {}) as Partial<HaloSetting> & { settingsVersion?: number };
+  const merged = Object.assign({}, DEFAULT_SETTINGS, source);
+  const notices: MigrationNotice[] = [];
+
+  const fromVersion = typeof source.settingsVersion === "number" ? source.settingsVersion : 0;
+
+  if (fromVersion < CURRENT_SETTINGS_VERSION && merged.publishByDefault === true) {
+    notices.push({ key: "publishByDefault-true" });
+  }
+
+  return {
+    settings: {
+      ...merged,
+      settingsVersion: CURRENT_SETTINGS_VERSION,
+      sites: (merged.sites ?? []).map(normalizeSite),
+      imageUploadCache: { ...(merged.imageUploadCache ?? {}) },
+    },
+    notices,
   };
 }
 

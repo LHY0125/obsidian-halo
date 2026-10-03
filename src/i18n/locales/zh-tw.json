@@ -62,8 +62,12 @@
         "description": "Halo 的網站地址"
       },
       "token": {
-        "name": "個人密鑰",
-        "description": "可以在個人資料中創建,需要包含文章管理的相關權限"
+        "name": "個人存取權杖（僅回退用）",
+        "description": "僅用於上傳超過 7 MiB 的圖片。hmcp 金鑰在 REST API 上無效，兩者是不同憑證。"
+      },
+      "mcpToken": {
+        "name": "MCP 存取金鑰",
+        "description": "以 hmcp_ 開頭，在 Halo 後台「工具 → MCP 服務」建立"
       },
       "default": {
         "name": "是否設置為默認",
