@@ -2,7 +2,6 @@ import i18next from "i18next";
 import { type App, Notice, TFile, getLinkpath, requestUrl } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import type { HaloSetting, HaloSite, ImageUploadCacheEntry } from "../settings";
-import { McpError } from "../transport/errors";
 import type { McpClient } from "../transport/mcp-client";
 import {
   type LocalImageReference,
@@ -40,8 +39,32 @@ export interface UploadImagesResult {
   replaced: boolean;
 }
 
+/**
+ * 服务层错误：`key` + `params` 交给 UI 层用 `i18next.t()` 还原成**用户可见文案**。
+ *
+ * 为什么不用 `McpError`：它要求一个 `McpErrorKind`，而这是**本地前置条件**不满足
+ * （图片超过 MCP 的 7 MiB 上限、站点又没配 PAT），不是传输层故障。`McpErrorKind` 是冻结的，
+ * 硬塞进 `unknown` 只会让用户看到泛泛的「MCP 请求失败」——而这句本该告诉他去配 PAT。
+ * `key` / `params` 的形态刻意与 `McpError` 一致，UI 层按同一套规则渲染。
+ */
+export class ImageUploadError extends Error {
+  readonly key: string;
+
+  constructor(
+    key: string,
+    readonly params: Record<string, string | number> = {},
+  ) {
+    super(key);
+    this.name = "ImageUploadError";
+    this.key = key;
+  }
+}
+
 /** MCP base64 上传的硬上限：7 MiB。恰好等于它仍走 MCP，超出才回退 REST。 */
 export const MCP_UPLOAD_MAX_BYTES = 7 * 1024 * 1024;
+
+/** `MCP_UPLOAD_MAX_BYTES` 的 MiB 表示。提示语里说「7 MiB」比说 7340032 字节有用 */
+export const MCP_UPLOAD_MAX_MIB = MCP_UPLOAD_MAX_BYTES / 1024 / 1024;
 
 /** 单个 `String.fromCharCode` 调用的参数个数上限，避免 7 MiB 数组撑爆调用栈 */
 const BASE64_CHUNK_SIZE = 0x8000;
@@ -318,7 +341,12 @@ export async function uploadImage(file: TFile, ctx: ImageUploadContext): Promise
 
   if (data.byteLength > MCP_UPLOAD_MAX_BYTES) {
     if (!ctx.site.token) {
-      throw new McpError("unknown", { size: data.byteLength });
+      // 如实说清「为什么」与「怎么办」：用户据此判断是该压缩图片，还是去站点补一个 PAT。
+      // 泛泛的「请求失败」会让他以为是网络问题，反复重试同一张永远传不上去的图。
+      throw new ImageUploadError("service.error_image_too_large", {
+        limit: MCP_UPLOAD_MAX_MIB,
+        name: file.name,
+      });
     }
 
     return uploadImageViaRest(file, data, ctx);
@@ -401,6 +429,13 @@ export async function uploadImages(
     } catch (error) {
       console.error("Error uploading image:", error);
       failedCount++;
+
+      // 带可操作原因的失败逐条说出来：汇总提示只给一个数字，用户对着「N 张失败」无从下手。
+      // **刻意不受 `silent` 约束** —— silent 管的是常规汇总（成功/部分成功），不是「为什么失败」；
+      // 发布流程正是以 silent 调用它，而那里的中止提示同样只报数字，这个原因更需要被说出来。
+      if (error instanceof ImageUploadError) {
+        new Notice(i18next.t(error.key, error.params));
+      }
     }
   }
 

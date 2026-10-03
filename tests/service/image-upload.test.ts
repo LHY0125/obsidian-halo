@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { App, TFile } from "obsidian";
-import { MCP_UPLOAD_MAX_BYTES, toBase64, uploadImage } from "../../src/service/image-upload";
+import { ImageUploadError, MCP_UPLOAD_MAX_BYTES, toBase64, uploadImage } from "../../src/service/image-upload";
 import type { HaloSetting, HaloSite } from "../../src/settings";
-import { McpError } from "../../src/transport/errors";
 import { createFakeClient } from "../helpers/mcp-mock";
 import { createFile, createMockApp, createSettings, requestUrlMock } from "../helpers/obsidian-mocks";
 
@@ -93,8 +92,13 @@ describe("uploadImage（≤7 MiB 走 MCP，>7 MiB 回退 REST）", () => {
 
     const error = await uploadImage(file, { app, settings, site, client }).catch((thrown: unknown) => thrown);
 
-    expect(error).toBeInstanceOf(McpError);
-    expect(error).toMatchObject({ params: { size: MCP_UPLOAD_MAX_BYTES + 1 } });
+    // 关键不是「抛了错」，而是这句错**能指路**：带上文件名与上限，UI 才说得出
+    // 「压缩图片」还是「去站点补一个 PAT」。泛泛的错误只会让用户以为是网络问题、反复重试。
+    expect(error).toBeInstanceOf(ImageUploadError);
+    expect(error).toMatchObject({
+      key: "service.error_image_too_large",
+      params: { limit: 7, name: "a.png" },
+    });
 
     expect(uploads.mock.calls).toHaveLength(0);
     expect(calls).toHaveLength(0);

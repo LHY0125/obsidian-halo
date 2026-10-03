@@ -184,7 +184,8 @@ class HaloService {
           //
           // 用 callToolVoid 而非 callToolJson，两条不假设都写在这一处：
           // ① 不假设返回体是 **Post 形状** —— MCP 的文章表示是扁平的，扁平无法直接当 Post 读；
-          // ② 不假设返回体**可解析** —— 写工具都没有 outputSchema，回人读确认文案或空体都合理。
+          // ② 不假设返回体**可解析** —— 写路径不**需要**响应负载（写与读解耦），因此也不依赖
+          //    它的形状：回人读确认文案或空体都合理。
           // 违反任一条的后果都不是「取值取错」而是「服务端已写成功、本地却抛错」：
           // 抛错会触发整事务重试（新建分支会拿同一个 name 再建一次，被重名拒绝），
           // 用户看到「发布失败」而文章其实已经写好了。最新的 Post 由下面的 getPost() 取。
@@ -230,8 +231,18 @@ class HaloService {
       return;
     }
 
-    const postCategories = await this.getCategoryDisplayNames(params.spec.categories);
-    const postTags = await this.getTagDisplayNames(params.spec.tags);
+    // 显示名解析是**写成功之后**的收尾读，和 `refreshPostAfterWrite` 同一类：必须自己吞掉失败。
+    // 让异常逃出去的话，用户什么都看不到（Obsidian 只把未捕获异常记进控制台）、frontmatter
+    // 也不会回写 —— 而文章其实已经写进 Halo 了。回落到本地的 `metadata.name` 列表即可：
+    // 最差只是 frontmatter 里暂时留着 name，下次发布时会被重新解析回显示名。
+    const postCategories = await this.displayNamesOrFallback(
+      () => this.getCategoryDisplayNames(params.spec.categories),
+      params.spec.categories,
+    );
+    const postTags = await this.displayNamesOrFallback(
+      () => this.getTagDisplayNames(params.spec.tags),
+      params.spec.tags,
+    );
 
     this.app.fileManager.processFrontMatter(activeFile, (frontmatter) => {
       frontmatter.title = params.spec.title;
@@ -263,6 +274,25 @@ class HaloService {
       return (await this.getPost(params.metadata.name)).post;
     } catch {
       return params;
+    }
+  }
+
+  /**
+   * 解析显示名，失败时回落到本地已知的值。
+   *
+   * 与 `refreshPostAfterWrite` 是同一类：都发生在**写成功之后**，因此都必须自己吞掉失败 ——
+   * 这两处一旦把异常放出去，用户看到的是「什么都没发生」，而文章已经在 Halo 上了。
+   * 回落值就是 `params.spec` 上的 `metadata.name` 列表：它是同一份数据的另一种表示，
+   * 拿来写回 frontmatter 不会丢信息，只是暂时不是显示名。
+   */
+  private async displayNamesOrFallback(
+    read: () => Promise<string[] | undefined>,
+    fallback: string[] | undefined,
+  ): Promise<string[] | undefined> {
+    try {
+      return await read();
+    } catch {
+      return fallback;
     }
   }
 
@@ -521,9 +551,15 @@ class HaloService {
         priority: all.length + index,
       });
 
-      // 服务端没回 name 时这一项只能丢掉：让整批发布失败比少一个分类更糟
+      // `halo_create_category` 的 `outputSchema.required` 只有 `["hideFromList"]` —— `name` 是
+      // **可选**的，服务端不回它是契约允许的。但绝不能把这一项静默丢掉：文章会少一个分类，
+      // 尾部的回写还会用 `getCategoryDisplayNames()` 把 frontmatter 里的分类名一并抹掉，
+      // 用户看到的却是「发布成功」。也不编一个 name（那会指向一个不存在的资源），
+      // 如实告诉用户哪一项没应用上。
       if (created?.name) {
         names.push(created.name);
+      } else {
+        new Notice(i18next.t("service.error_term_not_applied", { name: displayName }));
       }
     }
 
@@ -559,8 +595,11 @@ class HaloService {
         slug: slugify(displayName, { trim: true }),
       });
 
+      // 同 `getCategoryNames`：服务端不回 `name` 时如实提示，既不静默丢掉也不编造
       if (created?.name) {
         names.push(created.name);
+      } else {
+        new Notice(i18next.t("service.error_term_not_applied", { name: displayName }));
       }
     }
 

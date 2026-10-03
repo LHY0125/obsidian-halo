@@ -4,6 +4,7 @@ import type { RequestUrlParam } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { resources } from "../../src/i18n";
 import HaloService from "../../src/service";
+import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
 import { McpError } from "../../src/transport/errors";
 import { createFakeClient } from "../helpers/mcp-mock";
@@ -86,8 +87,9 @@ interface FakeServiceOptions {
   /**
    * 写工具的返回值，默认 `{}`。
    *
-   * 可以覆盖是为了验证「写路径不消费返回体」：写工具没有 outputSchema，
-   * 回一句人读文案（字符串）或扁平对象都合理，两种都不该影响 frontmatter 的回写。
+   * 可以覆盖是为了验证「写路径不消费返回体」：写路径不**需要**响应负载（写与读解耦），
+   * 因此也不依赖它的形状 —— 回一句人读文案（字符串）或扁平对象都合理，
+   * 两种都不该影响 frontmatter 的回写。
    */
   writeResult?: unknown;
 }
@@ -408,6 +410,32 @@ describe("HaloService.uploadImages", () => {
       expect(contents.get(note.path)).toBe(markdown);
       expect(vault.modify).not.toHaveBeenCalled();
       expect(consoleError).toHaveBeenCalledWith("Error uploading image:", expect.any(Error));
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("超限图片失败时弹出可操作的原因，而不是只报一个数字", async () => {
+    const note = createFile("post.md");
+    const big = createFile("big.png");
+    // 站点没配 PAT + 图片超过 MCP 的 7 MiB 上限：这条路径本地就能判定，不必发任何请求
+    const noPatSite = { ...site, token: "" };
+    const { app } = createMockApp("![Big](big.png)", note, [big], {
+      readBinary: async () => new ArrayBuffer(MCP_UPLOAD_MAX_BYTES + 1),
+    });
+    const consoleError = rs.spyOn(console, "error").mockImplementation(() => undefined);
+    const { client } = createFakeClient(() => ({}));
+    const service = new HaloService(app, createSettings(), noPatSite, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    try {
+      const result = await service.uploadImages({ silent: true });
+
+      expect(result.failedCount).toBe(1);
+      // silent 只压常规汇总，「为什么失败」必须说出来 —— 否则用户只看到「1 张失败」，
+      // 无从判断是该压缩图片，还是该去站点补一个 PAT
+      expect(notices.slice(seen)).toEqual([i18next.t("service.error_image_too_large", { limit: 7, name: "big.png" })]);
     } finally {
       consoleError.mockRestore();
     }
@@ -872,7 +900,7 @@ describe("publishPost 走 MCP", () => {
     const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
 
-    // 写工具都没有 outputSchema、返回形状未经验证，而服务层也不该消费它（写路径走 callToolVoid）。
+    // 写路径不**需要**响应负载（写与读解耦），所以返回什么形状都不该被消费 —— 服务层走 callToolVoid。
     // 这里让写工具回一个与远端真值**矛盾**的扁平对象：回写若取了它，title 会变成 "WRONG TITLE"。
     // 判别力就来自这个矛盾 —— 名称取自随后那次 halo_get_post，而不是写入的返回体。
     let fetchedName = "";
@@ -925,7 +953,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { halo: { publish: true }, title: "Post title" },
     }));
 
-    // 写工具都没有 outputSchema，「回一句人读确认文案」是合理形态。
+    // 写路径不**需要**响应负载（写与读解耦），「回一句人读确认文案」是合理形态。
     // 若写路径走 callToolJson（它要求返回体是可解析的 JSON 负载），这里会在
     // **服务端已经写成功之后**抛错 —— 触发整事务重试、用户看到「发布失败」。
     const { client, calls } = fakeService({ writeResult: "Created post" });
@@ -1136,6 +1164,64 @@ describe("发布成功后的回读", () => {
     expect(written?.title).toBe("Post title");
     expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
   });
+
+  test("收尾的显示名解析失败时，不抛出、frontmatter 仍用本地值回写", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { categories: ["技术思考"], title: "Post title" },
+    }));
+
+    let writeDone = false;
+    const { client, calls } = createFakeClient((name, args) => {
+      // 写之前那次列分类必须成功（否则发布根本不会开始），写之后那次才失败 ——
+      // 这正是「文章已经写进 Halo 了，只是收尾读时又网络抖了一下」。
+      if (name === "halo_list_categories" && writeDone) {
+        throw new McpError("network", { context: "tools/call halo_list_categories" }, "socket hang up");
+      }
+
+      switch (name) {
+        case "halo_list_categories":
+          return { items: [] };
+        case "halo_list_tags":
+          return { items: [] };
+        case "halo_create_category":
+          return { name: "category-new" };
+        case "halo_create_post":
+          writeDone = true;
+          return {};
+        case "halo_get_post":
+          return getPostResult(remoteItem(String(args.name), { categories: ["category-new"] }), "");
+        default:
+          throw new Error(`Unexpected tool: ${name}`);
+      }
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    await service.publishPost();
+
+    // 写已经落库 —— 收尾读失败既不能被报成「发布失败」，更不能把异常放出去：
+    // 放出去的话 Obsidian 只把它记进控制台，用户什么都看不到，frontmatter 也不会回写。
+    expect(notices.slice(seen)).toEqual([i18next.t("service.notice_publish_success")]);
+
+    const createdName = calls.find((call) => call.name === "halo_create_post")?.args.name;
+    expect(createdName).toEqual(expect.any(String));
+    expect(written?.title).toBe("Post title");
+    expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
+    // 回落到本地的 metadata.name 列表，而不是整个跳过这次回写
+    expect(written?.categories).toEqual(["category-new"]);
+  });
 });
 
 describe("分类与标签走 MCP", () => {
@@ -1234,6 +1320,34 @@ describe("分类与标签走 MCP", () => {
       name: expect.stringMatching(/^tag-[a-z0-9]{8}$/),
       slug: "xue-xi-bi-ji",
     });
+  });
+
+  test("创建分类但服务端没回 name 时弹出提示，而不是静默丢掉这一项", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    // `halo_create_category` 的 outputSchema.required 只有 ["hideFromList"] —— 不回 name 是契约允许的
+    const { client } = fakeService({ onCreateCategory: () => undefined });
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    expect(await service.getCategoryNames(["新分类"])).toEqual([]);
+
+    // 静默丢掉的话：文章少一个分类，尾部的回写还会把 frontmatter 里的分类名一并抹掉，
+    // 而用户看到的是「发布成功」
+    expect(notices.slice(seen)).toEqual([i18next.t("service.error_term_not_applied", { name: "新分类" })]);
+  });
+
+  test("创建标签但服务端没回 name 时同样弹出提示（同构的那一份也不能漏）", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client } = fakeService({ onCreateTag: () => undefined });
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    expect(await service.getTagNames(["学习笔记"])).toEqual([]);
+    expect(notices.slice(seen)).toEqual([i18next.t("service.error_term_not_applied", { name: "学习笔记" })]);
   });
 
   test("getCategoryDisplayNames / getTagDisplayNames 读扁平的 displayName，未知 name 直接丢掉", async () => {

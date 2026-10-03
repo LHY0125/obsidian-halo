@@ -118,7 +118,9 @@
     "error_upload_images_failed_publish_aborted": "有 {{failed}} 张图片上传失败，已取消发布",
     "notice_no_images_to_upload": "没有需要上传的本地图片",
     "notice_upload_images_success": "已处理 {{count}} 张图片",
-    "notice_upload_images_partial": "已处理 {{count}} 张图片，{{failed}} 张失败"
+    "notice_upload_images_partial": "已处理 {{count}} 张图片，{{failed}} 张失败",
+    "error_term_not_applied": "「{{name}}」未能应用到文章上：站点没有返回它的资源名。文章已在缺少它的情况下发布，请在 Halo 后台手动添加后重新发布。",
+    "error_image_too_large": "图片「{{name}}」超过 {{limit}} MiB，且该站点没有配置个人访问令牌（PAT），无法上传：MCP 的 base64 上传有这个硬上限，回退的 REST 上传则需要 PAT。请压缩这张图片，或在站点设置里补一个 PAT。"
   },
   "common": {
     "error_connection_failed": "连接失败",

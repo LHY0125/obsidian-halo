@@ -55,8 +55,8 @@ export function assertToolSucceeded(result: McpToolCallResult | undefined, tool:
  * ② 成功时优先取 `structuredContent`（已解析），它缺席才回落解析 `content[0].text`；
  * ③ `content` 是文本块**数组**——首块是负载，末块是人读摘要，拼接全部会得到非法 JSON。
  *
- * 注意本函数**要求返回体是可解析的 JSON 负载**（①②③ 之外还要能 parse）。写工具没有
- * `outputSchema`、返回值也一概不用，它们必须走 `callToolVoid` 而不是这里。
+ * 注意本函数**要求返回体是可解析的 JSON 负载**（①②③ 之外还要能 parse）。写路径不**需要**
+ * 响应负载（写与读解耦），返回值一概不用，因此它们必须走 `callToolVoid` 而不是这里。
  */
 export function parseToolResult<T>(result: McpToolCallResult | undefined, tool: string): T {
   assertToolSucceeded(result, tool);
@@ -196,8 +196,8 @@ export class McpClient {
    * 调用工具，只取副作用，**不解析返回体**。
    *
    * 与 `callToolJson` 的区别是硬性的：后者要求返回体是可解析的 JSON 负载，parse 失败即抛。
-   * 写工具（`halo_create_post` / `halo_update_post` / `halo_set_post_publish_state`）既没有
-   * `outputSchema`、返回值我们也一概不用，若它们回的是人读确认文案或空体，`callToolJson`
+   * 写工具（`halo_create_post` / `halo_update_post` / `halo_set_post_publish_state`）的返回值
+   * 我们一概不用（写与读解耦，不需要响应负载），若它们回的是人读确认文案或空体，`callToolJson`
    * 会在**服务端已经写成功之后**抛错——触发整事务重试、让用户看到「发布失败」而文章其实已存在。
    * 故写路径一律走本方法。
    */

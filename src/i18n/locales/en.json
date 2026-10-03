@@ -118,7 +118,9 @@
     "error_upload_images_failed_publish_aborted": "{{failed}} image(s) failed to upload. Publishing was aborted.",
     "notice_no_images_to_upload": "No local images to upload",
     "notice_upload_images_success": "Processed {{count}} image(s)",
-    "notice_upload_images_partial": "Processed {{count}} image(s), {{failed}} failed"
+    "notice_upload_images_partial": "Processed {{count}} image(s), {{failed}} failed",
+    "error_term_not_applied": "\"{{name}}\" could not be applied to the post: the site did not return its resource name. The post was published without it — add it in the Halo console, then publish again.",
+    "error_image_too_large": "\"{{name}}\" exceeds {{limit}} MiB and this site has no personal access token configured, so it cannot be uploaded: MCP base64 uploads have that hard limit, and the REST fallback needs a PAT. Compress the image, or add a PAT in the site settings."
   },
   "common": {
     "error_connection_failed": "Connection failed",

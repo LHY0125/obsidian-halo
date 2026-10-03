@@ -9,6 +9,12 @@ import { type McpPostItem, generateResourceName, toContent, toPost } from "src/s
  *
  * 显式标注类型而不是靠推断：`visible: "PUBLIC"` 会被推断成 `string`，而接口里它是字面量联合
  * —— 标注后由上下文定型，才写得出 `"PUBLIC"`。
+ *
+ * ⚠️ **本文件是 `post-mapping.ts` 唯一的字段名校验**：该模块 `import type { Post }` 的
+ * `@halo-dev/api-client` 解析不了（`moduleResolution: "node"` 忽略 `exports`），`Post` 退化成
+ * `any`，于是 tsc **看不见** `item.slugg` 这类拼写错误，也看不见漏映射。所以：
+ * ① 每个被映射的字段都要有断言；② fixture 里的值必须与回落默认值（`""` / `[]` / `{}`）**不同**，
+ * 否则「取错字段 → undefined」与「字段缺失 → 默认值」不可区分，断言没有判别力。
  */
 const ITEM: McpPostItem = {
   name: "real-ip-always-there-and-forgery",
@@ -35,11 +41,20 @@ describe("toPost", () => {
     const post = toPost(ITEM);
     expect(post.metadata.name).toBe("real-ip-always-there-and-forgery");
     expect(post.spec.title).toBe("真实 IP 一直在");
+    // slug 最要紧：它既流进 halo_update_post，也回写进 frontmatter
+    expect(post.spec.slug).toBe("real-ip-always-there-and-forgery");
+    expect(post.spec.cover).toBe("/upload/a.webp");
     expect(post.spec.visible).toBe("PUBLIC");
     expect(post.spec.pinned).toBe(true);
     expect(post.spec.priority).toBe(3);
     expect(post.spec.allowComment).toBe(false);
     expect(post.spec.publishTime).toBe("2026-10-01T12:10:43.104320897Z");
+  });
+
+  it("template 原样搬运", () => {
+    // fixture 里 template 是空串，与「字段名写错 → undefined → 回落空串」同形，断言不出东西；
+    // 换成非空值才验得出映射本身没写错
+    expect(toPost({ ...ITEM, template: "custom.html" }).spec.template).toBe("custom.html");
   });
 
   it("excerpt 还原成 {autoGenerate, raw} 结构", () => {
@@ -61,6 +76,12 @@ describe("toPost", () => {
     expect(post.spec.visible).toBe("PUBLIC");
     expect(post.spec.categories).toEqual([]);
     expect(post.spec.tags).toEqual([]);
+    // 漏掉任何一个被映射的字段都会是一条静默的 undefined —— tsc 看不见，只能靠这几行
+    expect(post.spec.slug).toBe("");
+    expect(post.spec.cover).toBe("");
+    expect(post.spec.template).toBe("");
+    expect(post.spec.htmlMetas).toEqual([]);
+    expect(post.metadata.annotations).toEqual({});
   });
 
   it("publish 取 publishRequested（发布意图），而不是写死 false", () => {

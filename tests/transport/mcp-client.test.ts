@@ -415,7 +415,7 @@ describe("McpClient.callToolVoid", () => {
   }
 
   it("返回体是人读确认文案（非 JSON）时不抛错", async () => {
-    // 写工具没有 outputSchema，回一句人读确认文案是合理形态。
+    // 写路径不**需要**响应负载（写与读解耦），回一句人读确认文案是合理形态。
     // 若走 callToolJson，这里会 parse 失败并抛错 —— 而那一刻服务端其实已经写成功了。
     const { calls, thrown } = await callVoid({
       content: [{ type: "text", text: "Created post abc" }],
