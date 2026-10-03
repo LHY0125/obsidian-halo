@@ -184,7 +184,13 @@ class HaloService {
 
           // 上游原本分两步写（PUT post + PUT draft 快照），MCP 的 update_post 带 raw
           // 即同时更新元数据与可编辑内容，两次请求合成一次。
-          params = await this.client.callToolJson<Post>("halo_update_post", this.toUpdateArgs(params, raw));
+          //
+          // 只取副作用，**不消费返回体**：MCP 的文章表示是扁平的（见 src/service/post-mapping.ts），
+          // 而写工具没有 outputSchema、返回形状未经验证。把返回值赋回 `params` 会让后续的
+          // `params.metadata.name` / `params.spec.title` 读成 undefined —— 轻则发布失败，
+          // 重则把空 title / 空 slug 回写进用户的笔记。最新的 Post 由下面的 getPost() 取，
+          // 那条路有适配器把扁平还原成 { metadata, spec }。
+          await this.client.callToolJson("halo_update_post", this.toUpdateArgs(params, raw));
         } else {
           if (!params.metadata.name) {
             params.metadata.name = randomUUID();
@@ -198,7 +204,8 @@ class HaloService {
             useActiveFileDefaults: true,
           });
 
-          params = await this.client.callToolJson<Post>("halo_create_post", this.toCreateArgs(params, raw));
+          // 同上：不消费返回体。name 用的是本地生成的 randomUUID()，不依赖响应体形状。
+          await this.client.callToolJson("halo_create_post", this.toCreateArgs(params, raw));
 
           // 这行回填是重试的**自愈机制**，不能删：首次建文章成功后若发布状态那步瞬时失败，
           // 重试时 remotePostName 已是真值 → 走「更新」分支，而不是再建一篇重复文章。

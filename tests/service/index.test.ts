@@ -903,6 +903,78 @@ describe("publishPost 走 MCP", () => {
     const state = calls.find((call) => call.name === "halo_set_post_publish_state");
     expect(state?.args).toEqual({ name: expect.any(String), publish: true });
   });
+
+  test("写工具返回扁平对象时，frontmatter 回写仍拿到正确的 name 与 title", async () => {
+    const note = createFile("post.md");
+    const { app, fileManager, metadataCache } = createMockApp("hello world", note, []);
+    metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
+
+    // 本会话实测 MCP 的文章表示是**扁平**的（见 src/service/post-mapping.ts 的说明），
+    // 而写工具没有 outputSchema、返回形状未经验证。这里故意让写工具返回扁平对象，
+    // 与紧随其后的 REST 读路径返回的嵌套 Post **形状不同** —— 两者不同正是本用例的判别力所在。
+    const { client, calls } = createFakeClient((name, args) => {
+      if (name === "halo_create_post") {
+        return { categories: [], name: args.name, slug: "", tags: [], title: args.title };
+      }
+
+      throw new Error(`Unexpected tool: ${name}`);
+    });
+
+    let fetchedName = "";
+    requestUrlMock().mockImplementation((request: RequestUrlParam) => {
+      const url = typeof request === "string" ? request : request.url;
+
+      if (url.includes("/categories") || url.includes("/tags")) {
+        return { json: { items: [] } };
+      }
+
+      if (url.endsWith("/draft?patched=true")) {
+        return { json: { metadata: { annotations: {} }, spec: { rawType: "markdown" } } };
+      }
+
+      const match = /\/posts\/([^/?]+)$/.exec(url);
+
+      if (match) {
+        fetchedName = match[1];
+        return { json: makeRemotePost(match[1]) };
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    const service = new HaloService(app, createSettings(), site, client);
+
+    // 建文章成功后重试退避会跑满（RED 状态下闭包直接抛错），快进掉
+    rs.useFakeTimers();
+
+    try {
+      const pending = service.publishPost();
+      await rs.advanceTimersByTimeAsync(5_000);
+      await pending;
+    } finally {
+      rs.useRealTimers();
+    }
+
+    const createdName = calls.find((call) => call.name === "halo_create_post")?.args.name;
+    // 先确认建文章确实发生且带上了 name —— 否则下面的断言在「压根没调工具」的实现下也会通过
+    expect(createdName).toEqual(expect.any(String));
+    expect(createdName).not.toEqual("");
+
+    // 关键断言：本地笔记里的 title 与 halo.name 都必须是真值
+    expect(written?.title).toBe("Post title");
+    expect((written?.halo as { name?: string } | undefined)?.name).toEqual(createdName);
+
+    // 支撑断言：回写用的 name 就是建文章时传出去的那个（而不是被扁平响应体冲成 undefined）
+    expect(fetchedName).toEqual(createdName);
+  });
 });
 
 describe("changePostPublish 走 MCP", () => {
