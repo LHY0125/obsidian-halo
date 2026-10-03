@@ -26,6 +26,14 @@
       "name": "上傳圖片到 Halo",
       "error_no_sites": "請先配置網站",
       "error_no_matched_site": "此文件發佈到的網站未配置"
+    },
+    "mcp_self_check": {
+      "name": "MCP 連線自檢",
+      "error_no_sites": "請先在設定中新增一個 Halo 站點。",
+      "notice_checking": "正在自檢 MCP 連線…",
+      "error_failed": "自檢失敗：{{message}}",
+      "notice_ok": "自檢通過：{{name}} v{{version}}，可用工具 {{count}} 個。",
+      "notice_missing": "自檢未通過，缺少 {{count}} 個工具：{{tools}}"
     }
   },
   "settings": {
@@ -45,6 +53,12 @@
       "name": "替換圖片連結",
       "description": "上傳成功後，將 Markdown 中的本機圖片連結替換為 Halo 位址。關閉後，發布內容仍會使用上傳後的位址。"
     }
+  },
+  "settings_migration": {
+    "title": "Halo 發佈設定需要確認",
+    "publishByDefault-true": "偵測到「發佈時直接發佈」為開啟狀態，這與現行 MCP 工作流程（先存草稿、覆核後再發佈）不一致。是否改為預設推送草稿？",
+    "button_switch": "改為預設推送草稿",
+    "button_keep": "保持不變"
   },
   "post_selection_modal": {
     "title": "從 Halo 拉取文章",
@@ -76,8 +90,7 @@
       "validate": {
         "button": "驗證",
         "button_validating": "驗證中...",
-        "notice_validated": "驗證成功",
-        "error_no_permissions": "當前帳號沒有文章管理權限"
+        "notice_validated": "驗證成功"
       },
       "save": {
         "button": "保存"
@@ -110,5 +123,16 @@
   "common": {
     "error_connection_failed": "連接失敗",
     "button_close": "關閉"
+  },
+  "transport": {
+    "error": {
+      "protocol": "MCP 協定錯誤：伺服器回傳 400 且回應內容為空。通常是握手順序錯誤（未先 initialize），或請求標頭 Accept 未同時包含 application/json 與 text/event-stream。",
+      "unauthorized": "MCP 金鑰無效或已失效。請到 Halo 後台「工具 → MCP 服務」核對存取金鑰。",
+      "forbidden": "該 MCP 金鑰未被授權呼叫此工具。請到 Halo 後台「工具 → MCP 服務」為該金鑰勾選所需工具。",
+      "gateway": "站點回傳 HTML 而非 JSON，疑似被閘道（ESA/WAF）攔截。請確認站點可達且 WAF 未攔截該請求。",
+      "missing-tool": "站點未提供 MCP 工具「{{tool}}」（目前可用 {{count}} 個）。請確認站點 Halo 版本 ≥ 2.26 且已啟用 MCP Server 外掛，並檢查該金鑰的工具授權。",
+      "network": "無法連線 MCP 端點。請檢查站點位址與網路。",
+      "unknown": "MCP 請求失敗。請檢查站點設定與 Halo 後台。"
+    }
   }
 }

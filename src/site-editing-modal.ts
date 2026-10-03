@@ -1,7 +1,8 @@
 import i18next from "i18next";
-import { Modal, Notice, Setting, requestUrl } from "obsidian";
+import { Modal, Notice, Setting } from "obsidian";
 import type HaloPlugin from "./main";
-import { type HaloSite, normalizeSite } from "./settings";
+import { runSelfCheck } from "./mcp-self-check";
+import { type HaloSite, mcpEndpointOf, normalizeSite } from "./settings";
 
 export function openSiteEditingModal(
   plugin: HaloPlugin,
@@ -92,31 +93,35 @@ export class SiteEditingModal extends Modal {
 
       new Setting(contentEl)
         .addButton((button) => {
-          button.setButtonText(i18next.t("site_editing_modal.settings.validate.button")).onClick(() => {
+          button.setButtonText(i18next.t("site_editing_modal.settings.validate.button")).onClick(async () => {
             const site = normalizeSite(this.currentSite);
 
             button.setDisabled(true);
             button.setButtonText(i18next.t("site_editing_modal.settings.validate.button_validating"));
-            requestUrl({
-              url: `${site.url}/apis/api.console.halo.run/v1alpha1/users/-/permissions`,
-              headers: {
-                Authorization: `Bearer ${site.token}`,
-              },
-            })
-              .then((response) => {
-                if (response.json.uiPermissions.includes("uc:posts:manage")) {
-                  new Notice(i18next.t("site_editing_modal.settings.validate.notice_validated"));
-                } else {
-                  new Notice(i18next.t("site_editing_modal.settings.validate.error_no_permissions"));
-                }
-              })
-              .catch(() => {
-                new Notice(i18next.t("common.error_connection_failed"));
-              })
-              .finally(() => {
-                button.setDisabled(false);
-                button.setButtonText(i18next.t("site_editing_modal.settings.validate.button"));
-              });
+
+            try {
+              const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
+
+              if (report.error) {
+                new Notice(
+                  i18next.t("command.mcp_self_check.error_failed", {
+                    message: i18next.t(report.error.key, report.error.params),
+                  }),
+                );
+              } else if (report.ok) {
+                new Notice(i18next.t("site_editing_modal.settings.validate.notice_validated"));
+              } else {
+                new Notice(
+                  i18next.t("command.mcp_self_check.notice_missing", {
+                    count: report.missing.length,
+                    tools: report.missing.join(", "),
+                  }),
+                );
+              }
+            } finally {
+              button.setDisabled(false);
+              button.setButtonText(i18next.t("site_editing_modal.settings.validate.button"));
+            }
           });
         })
         .addButton((button) =>

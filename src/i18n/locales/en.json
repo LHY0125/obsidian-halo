@@ -26,6 +26,14 @@
       "name": "Upload images to Halo",
       "error_no_sites": "Please configure sites first",
       "error_no_matched_site": "The site this document publishes to is not configured"
+    },
+    "mcp_self_check": {
+      "name": "MCP connection self-check",
+      "error_no_sites": "Please configure a Halo site first.",
+      "notice_checking": "Checking MCP connection...",
+      "error_failed": "Self-check failed: {{message}}",
+      "notice_ok": "Self-check passed: {{name}} v{{version}}, {{count}} tools available.",
+      "notice_missing": "Self-check failed, {{count}} tool(s) missing: {{tools}}"
     }
   },
   "settings": {
@@ -45,6 +53,12 @@
       "name": "Replace image links",
       "description": "Replace local Markdown image links with Halo URLs after upload. When disabled, published content still uses the uploaded URLs."
     }
+  },
+  "settings_migration": {
+    "title": "Halo publishing settings need confirmation",
+    "publishByDefault-true": "「Publish post by default」is enabled, which conflicts with the current MCP workflow (draft first, review, then publish). Switch to draft-by-default?",
+    "button_switch": "Switch to draft by default",
+    "button_keep": "Keep as is"
   },
   "post_selection_modal": {
     "title": "Pull posts from Halo",
@@ -76,8 +90,7 @@
       "validate": {
         "button": "Validate",
         "button_validating": "Validating...",
-        "notice_validated": "Validation succeeded",
-        "error_no_permissions": "Current account has no permissions for managing posts"
+        "notice_validated": "Validation succeeded"
       },
       "save": {
         "button": "Save"
@@ -110,5 +123,16 @@
   "common": {
     "error_connection_failed": "Connection failed",
     "button_close": "Close"
+  },
+  "transport": {
+    "error": {
+      "protocol": "MCP protocol error: the server returned HTTP 400 with an empty body. This usually means the handshake order is wrong (initialize must come first), or the Accept header is missing text/event-stream.",
+      "unauthorized": "The MCP key is invalid or has expired. Check the access key under Tools -> MCP Service in the Halo console.",
+      "forbidden": "This MCP key is not authorized to call that tool. Grant the tool to the key under Tools -> MCP Service in the Halo console.",
+      "gateway": "The site returned HTML instead of JSON, which usually means a gateway (ESA/WAF) intercepted the request. Confirm the site is reachable and the WAF is not blocking it.",
+      "missing-tool": "The site does not provide the MCP tool \"{{tool}}\" ({{count}} tool(s) available). Confirm the site runs Halo >= 2.26 with the MCP Server plugin enabled, and check this key's tool grants.",
+      "network": "Could not reach the MCP endpoint. Check the site URL and your network.",
+      "unknown": "The MCP request failed. Check the site configuration and the Halo console."
+    }
   }
 }

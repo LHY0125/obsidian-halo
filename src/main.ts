@@ -2,16 +2,19 @@ import i18next from "i18next";
 import { Notice, Plugin, moment } from "obsidian";
 import { resources } from "./i18n";
 import { addHaloIcon } from "./icons";
+import { runSelfCheck } from "./mcp-self-check";
 import { openPostSelectionModal } from "./post-selection-model";
 import HaloService from "./service";
 import {
-  DEFAULT_SETTINGS,
   type HaloSetting,
   HaloSettingTab,
   type HaloSite,
   isSameSiteUrl,
+  mcpEndpointOf,
+  migrateSettings,
   normalizeSite,
 } from "./settings";
+import { SettingsMigrationModal } from "./settings-migration-modal";
 import { openSiteSelectionModal } from "./site-selection-modal";
 
 export default class HaloPlugin extends Plugin {
@@ -131,18 +134,67 @@ export default class HaloPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "mcp-self-check",
+      name: i18next.t("command.mcp_self_check.name"),
+      callback: async () => {
+        const site = this.settings.sites.find((item) => item.default) ?? this.settings.sites[0];
+
+        if (!site) {
+          new Notice(i18next.t("command.mcp_self_check.error_no_sites"));
+          return;
+        }
+
+        new Notice(i18next.t("command.mcp_self_check.notice_checking"));
+
+        const report = await runSelfCheck(mcpEndpointOf(site), site.mcpToken);
+
+        if (report.error) {
+          new Notice(
+            i18next.t("command.mcp_self_check.error_failed", {
+              message: i18next.t(report.error.key, report.error.params),
+            }),
+          );
+          return;
+        }
+
+        if (report.ok) {
+          new Notice(
+            i18next.t("command.mcp_self_check.notice_ok", {
+              name: report.server?.name,
+              version: report.server?.version,
+              count: report.availableCount,
+            }),
+          );
+          return;
+        }
+
+        new Notice(
+          i18next.t("command.mcp_self_check.notice_missing", {
+            count: report.missing.length,
+            tools: report.missing.join(", "),
+          }),
+        );
+      },
+    });
+
     this.addSettingTab(new HaloSettingTab(this));
   }
 
   onunload() {}
 
   async loadSettings() {
-    const settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this.settings = {
-      ...settings,
-      sites: settings.sites.map(normalizeSite),
-      imageUploadCache: { ...(settings.imageUploadCache ?? {}) },
-    };
+    const { settings, notices } = migrateSettings(await this.loadData());
+    this.settings = settings;
+
+    if (notices.length > 0) {
+      new SettingsMigrationModal(this.app, notices[0], (switchToDraft) => {
+        if (switchToDraft) {
+          this.settings.publishByDefault = false;
+          this.saveSettings();
+        }
+      }).open();
+    }
   }
 
   async saveSettings() {
