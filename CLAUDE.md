@@ -77,7 +77,7 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 环在打包器里未必直接报错，而是在某些 import 顺序下让某个绑定变成 `undefined`（本地测试跑得通，发出去的 `main.js` 才出问题）。
 匹配**大小写不敏感**（`globToRegExp` 构造正则时带 `i` 标志），因为用户在 Windows 上看到的目录名与实际
 大小写未必一致，而**没命中是没有任何提示的**。`matchGlob()` 归一化的是**模式**、**不**归一化**路径**：
-传进来的 `filePath` 必须是 `/` 分隔的库内相对路径：归一化只作用于模式，**给错形态既不报错、
+传进来的 `filePath` 必须是 `/` 分隔的库内相对路径：归一化只作用于模式，**给错形态既不报错，
 也不保证不命中** —— 以 `**` 开头的模式（`**` 编译成 `.*`）跨得过 `/` 与 `\`，照样命中错形态的路径；
 其余模式才会因为分隔符对不上而静默漏掉。两种情况都让规则静默走错站点。细节见 `src/glob.ts`
 的 `matchGlob()` 文档。
@@ -97,8 +97,12 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 **批量推草稿与批量发布也会改写本地笔记**，不是只动远端，而且**不止图片链接这一项**：
 `executePublish()` 里的 `processFrontMatter()` **无条件**回写 `title` / `slug` / `cover` / `excerpt` /
 `categories` / `tags` 与整个 9 键 `halo` 块（发布状态 `halo.publish` 也在其中）—— **关掉「替换图片链接」
-也照写**；`uploadImages()` 另外在「替换图片链接」打开时把笔记里的本地图片地址换成 Halo 地址
-（并可能把远程链接还原成本地，`restoreCachedLocalImageLinks()`）。
+也照写**；`uploadImages()` 另外在「替换图片链接」**打开**时把笔记里的本地图片地址换成 Halo 地址。
+反向的那一步（把远程链接还原成本地）**不在** `uploadImages()` 里：它由「**从 Halo 更新内容**」
+那条命令在「替换图片链接」**关闭**时调 `restoreCachedLocalImageLinks()` 完成
+（`HaloService.updatePost()` 里那个三元分支 —— 注意**不是**名字相邻的 `pullPost()`，
+那是另一条命令「从 Halo 拉取文档」）。开着那个开关时反而是把远端正文原样落盘。
+批量路径碰不到它：那条命令只作用于当前活动文档。
 确认弹窗里有一条显式提示（`batch.notice_rewrites_notes`），它**门控在 action 上**（撤回不显示，
 因为撤回一个字节都不改），且必须出现在**确认之前**。
 **批量撤回是个例外：它只在远端把发布状态退回草稿**，不**改写**正文、
