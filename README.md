@@ -50,6 +50,81 @@ HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pn
 - **两个都没设**：这是预期的跳过，保持静默（输出 1 passed，但什么都没验证）。
 - **只设了一个**：几乎肯定是配置失误，测试会往 stderr 打一行**点名缺失变量**的告警。看到告警就说明本次没有做任何断言，请把两个变量都设上。
 
+## 元数据字段
+
+下面 6 个字段写在 `halo:` 下，发布时**双向**生效 —— 发布会把它们传给站点，发布完的回写会把站点上的实际值写回笔记：
+
+```yaml
+halo:
+  site: https://blog.example.com
+  name: <post metadata.name>
+  publish: true
+  visible: PUBLIC                  # PUBLIC | INTERNAL | PRIVATE
+  pinned: false                    # 置顶
+  priority: 0                      # 排序权重，整数
+  publishTime: ""                  # 空串 = 立即发布；非空 = 定时发布（RFC 3339）
+  allowComment: true               # 单篇评论开关
+  template: ""                     # 自定义渲染模板
+```
+
+**删掉一行 ≠ 清空它。** 删掉 `halo.pinned:` 那一行表示「跟随远端当前的值」；
+要取消置顶必须写 `pinned: false`。写成空值（`pinned:` 后面什么都不写）与删掉这一行同义。
+这条规则对 `visible` / `pinned` / `priority` / `allowComment` / `template` 都成立。
+
+**唯一的例外是 `publishTime`**：写 `""`（空串）表示「立即发布」，是一条**有内容**的指令 ——
+要取消一篇已排定的定时发布，必须显式写 `publishTime: ""`，光删掉那一行只会让它继续跟随远端。
+
+写错的值会在发布**之前**被拦下（本地校验，一次网络请求都不会发），例如 `visible: public`（小写）
+会告诉你哪一行、写了什么、该写什么。`visible` 只认三个大写取值。
+
+## 站点路由规则
+
+在「设置 → Halo → 站点路由规则」里按**笔记在库内的相对路径**指定目标站点：
+
+| 模式 | 含义 |
+|---|---|
+| `博客/**` | `博客/` 下的所有笔记（`**` 跨目录） |
+| `日记/*.md` | `日记/` 下一层的 markdown（`*` 不跨 `/`） |
+| `草稿?.md` | `?` 匹配单个非 `/` 字符 |
+
+模式**大小写不敏感**（`Blog/**` 与 `blog/**` 等效），开头的 `./`、`/` 与反斜杠会被自动规整。
+规则自上而下取首个命中；设置页每一行会显示它当前命中了多少篇笔记。
+
+**命中一个已被删除的站点时，插件会停下来报错，而不是改用默认站点。** 这是刻意的：
+把笔记发到另一个站是不可逆的（目标站上可能已经建了同名文章），而报错只是让你去改一行配置。
+
+站点的解析优先级是：
+
+```
+笔记里的 halo.site  >  路由规则首个命中  >  设置里的默认站点  >  唯一站点  >  弹窗让你选
+```
+
+注意「发布到 Halo（使用默认配置）」这条命令**不经过**路由规则 —— 它的语义就是用默认站点。
+
+## 批量操作
+
+三个批量命令都从**当前库里的全部 markdown 笔记**取候选，按站点分组后在确认弹窗里列出：
+
+- **Halo: 批量推草稿**：逐篇建/更新文章，并把发布状态设为草稿。
+- **Halo: 批量发布**：逐篇建/更新文章，并把发布状态设为已发布。
+- **Halo: 批量撤回**：只把已发布文章的发布状态退回草稿，不读正文、不上传图片。
+
+确认弹窗里每一篇都有勾选框（默认全勾），「将处理 N 篇」会**跟着你的勾选实时变化**。
+没有站点、没有 `halo.name`（撤回时）、正文读不出来等进不了批的笔记，会单独列在「已跳过」里
+并逐条给出原因 —— 它们不会被算进失败。
+
+**批量推草稿与批量发布也会改写本地笔记**（不是只动远端）：只要开了「替换图片链接」，
+执行过程中笔记本地的图片地址会被换成 Halo 地址，发布状态也会回写进 `halo.publish`。
+批量撤回只改 `halo.publish`。
+
+批量执行**失败不中断**：某一篇失败了，后面的继续跑，跑完在一个汇总弹窗里报
+「成功 N 篇，失败 N 篇，另有 N 篇在执行前就被跳过」，并**逐条列出失败项及原因**。
+
+## 端到端手工验证清单
+
+上表这些行为里有一部分只有真实的 Obsidian 与真实站点才验得到（弹窗、勾选框、图片链接回写）。
+逐项清单见 **[docs/e2e-manual-checklist.md](./docs/e2e-manual-checklist.md)**。
+
 This plugin allows you to publish your Obsidian documents to [Halo](https://github.com/halo-dev/halo).
 
 [中文文档](./README.zh-CN.md)
@@ -83,6 +158,8 @@ This plugin allows you to publish your Obsidian documents to [Halo](https://gith
    - **Halo: Upload images to Halo**: upload local images in the current note to Halo and replace them with remote URLs.
    - **Halo: Pull posts from Halo**: pull posts from Halo to Obsidian.
    - **Halo: Update content from Halo**: update the content of the current note from Halo.
+   - **Halo: MCP connection self-check**: handshake with the site and list any required tools that are missing.
+   - **Halo: Batch push as drafts / Batch publish / Batch unpublish**: act on the whole vault after one aggregate confirmation. See 「批量操作」 above.
 
 ## Development
 

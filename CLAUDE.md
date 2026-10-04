@@ -38,17 +38,60 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 **手工联调**：把本仓库放到 `<vault>/.obsidian/plugins/<manifest.id>/`，`pnpm dev` 持续重建，然后在 Obsidian 里「重新加载插件」。插件 id 必须与目录名一致。
 
+**批量命令会改写本地笔记**：`Halo: 批量推草稿` / `批量发布` 在「替换图片链接」打开时会把笔记里的
+本地图片地址换成 Halo 地址，`批量撤回` 会改 `halo.publish`。三条命令都从**全库**取候选，
+所以在一整个 vault 上跑之前先想清楚范围（确认弹窗里可以按篇取消勾选）。
+
 ## 架构
 
 ### 入口与命令编排 — `src/main.ts`
 
 `HaloPlugin extends Plugin`。`onload()` 里做三件事：初始化 i18next、`loadSettings()`、注册命令与功能区图标。
 
-命令本身很薄，真正的编排在私有方法里，统一模式是：**解析目标站点 → 上传图片 → 发布**。
+命令本身很薄，真正的编排在私有方法里，统一模式是：**解析目标站点 → 规划（零写入）→ 预览确认 →
+上传图片 → 执行**。
 
-- 站点解析优先级：frontmatter 的 `halo.site` → 设置里的默认站点 → 单站点直取 → 弹窗让用户选
+- 站点解析优先级：frontmatter 的 `halo.site` → **路由规则表自上而下首个命中** → 设置里的默认站点 →
+  单站点直取 → 弹窗让用户选
 - `uploadImagesForPublish()` 是发布前的统一前置：静默上传图片，**只要有任意一张失败就中止发布**（`failedCount > 0` → 返回 `success: false`）
-- 发布时把上传后的 markdown 作为 `{ markdown }` 传进 `service.publishPost()`，避免重新读盘拿到未替换的旧内容
+- 发布时把上传后的 markdown 作为 `{ markdown }` 传进去，避免重新读盘拿到未替换的旧内容
+
+**站点解析只有一处入口 —— 不要另行解析**：`src/main.ts` 的 `HaloPlugin.resolveSiteFor(file)` 一层薄胶水
+（只负责从 `metadataCache` 取 `halo.site` 再转交，**不补 `?? ""`**），真正的规则在 `src/site-routing.ts`
+的 `resolveSite(sites, rules, filePath, frontmatterUrl)`（纯函数）。**发布与上传图片共用它**，
+批量路径（`src/batch-publish.ts` 的 `collectBatchCandidates()`）也走它，只是把结果当**数据**收着
+（批量不能一篇一弹窗）而不是就地处置。
+
+`resolveSite` 返回带 `kind` 的**联合**而不是 `HaloSite | undefined`，因为批量必须能说清
+「这篇为什么没有站点」：`resolved` / `needs-choice` / `no-sites` / `unknown-site` / `unknown-rule-site`。
+`resolved` 上的 `source` 还带一档 `rule` 与它命中的 `pattern`，好让预览如实标注站点是怎么定下来的。
+两处「**报错而不是继续往下找**」（`unknown-site` / `unknown-rule-site`）是刻意的：继续往下找的后果是
+把笔记发到**另一个站**上，而那是不可恢复的；报错只是让用户去改一行配置。
+
+`src/glob.ts` 是 glob 匹配的**零项目内依赖叶子**（`matchGlob()` / `normalizeRulePattern()`）。
+拆出去是为了破一个真 import 环：`settings.ts`（设置面板要显示每条规则命中几篇）要用 `matchGlob()`，
+而 `site-routing.ts` 要用 `settings.ts` 的 `isSameSiteUrl()`。**往 `glob.ts` 加任何 `import` 之前先读它顶部的说明** ——
+环在打包器里未必直接报错，而是在某些 import 顺序下让某个绑定变成 `undefined`（本地测试跑得通，发出去的 `main.js` 才出问题）。
+匹配**大小写不敏感**（`globToRegExp` 构造正则时带 `i` 标志），因为用户在 Windows 上看到的目录名与实际
+大小写未必一致，而**没命中是没有任何提示的**。`matchGlob()` 归一化的是**模式**、**不**归一化**路径**：
+传进来的 `filePath` 必须是 `/` 分隔的库内相对路径，传反斜杠路径会静默不命中。
+
+**批量操作**：三个命令（推草稿 / 发布 / 撤回）共用 `HaloPlugin.runBatchCommand(action)`，只在 `action` 上分档。
+候选是**全库的 markdown 笔记**；规划（`planBatch()`）与执行（`runBatch()`）都在 `src/batch-publish.ts`，
+确认与两处弹窗在 `src/batch-confirm-modal.ts`。三条必须记住的性质：
+
+- **规划阶段零写入**，且 `planBatch()` 的分类标签是**按站点取一次的快照** —— 留着它才能让
+  「将新建」跟着勾选实时重算，而不必每勾一次就打一次 MCP。
+- **执行阶段失败不中断**：这是对上游「任一图片失败即中止发布」的**刻意偏离**，只用于批量路径 ——
+  118 篇里第 3 篇失败不该让后面 115 篇一篇都不发。单篇命令仍保留中止语义。
+- **末尾汇总的「跳过」只有数字、没有原因**：「成功 N 篇，失败 N 篇，另有 N 篇在执行前就被跳过」，
+  逐条列出的是**失败项**。「执行前跳过」的逐条原因**只在确认弹窗里**（`BatchSkip` 带 key/params，
+  由弹窗渲染）。把跳过原因也逐条重列到汇总是**终审留下的开放项，尚未实现** —— 文档不许写成已实现。
+
+**批量推草稿与批量发布也会改写本地笔记**，不是只动远端：`uploadImages()` 在「替换图片链接」打开时会把
+笔记里的本地图片地址换成 Halo 地址（并可能把远程链接还原成本地，`restoreCachedLocalImageLinks()`），
+发布状态也会回写进 `halo.publish`。确认弹窗里有一条显式提示（`batch.notice_rewrites_notes`），
+且它必须出现在**确认之前**。批量撤回只改 `halo.publish`，连正文都不读。
 
 ### 业务层 — `src/service/` 与 `src/transport/`
 
@@ -57,10 +100,18 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 | 文件 | 唯一职责 |
 |---|---|
-| `service/index.ts` | 编排：发布 / 更新 / 拉取 / 分类标签解析 / 重试 / 失败文案 |
+| `service/index.ts` | 编排：规划（`planPublish`，零写入）/ 执行（`executePublish`）/ 更新 / 拉取 / 分类标签解析 / 重试 / 失败文案 |
 | `service/local-content.ts` | 本地内容：frontmatter 应用（`applyPostFrontmatter`）、正文里的本地图片引用解析 |
 | `service/image-upload.ts` | 图片上传：≤ 7 MiB 走 MCP base64，超出回退 REST multipart |
 | `service/post-mapping.ts` | 适配：MCP 的**扁平** post 表示 ↔ `{metadata, spec}` 嵌套结构 |
+| `frontmatter-map.ts` | frontmatter 契约的**唯一**一处：6 个元数据字段的校验（`parseHaloPostFields`）与回写（`applyPostToFrontmatter`） |
+| `site-routing.ts` | 站点解析的唯一入口（`resolveSite`）；重导出 `glob.ts` 的 `matchGlob` / `normalizeRulePattern` |
+| `glob.ts` | glob 模式匹配（路径 → 站点的路由规则用）。**零项目内依赖的叶子**，拆出去是为破 import 环 |
+| `publish-preview.ts` | 发布预览的纯数据构造（`buildPublishPreview`），弹窗只负责 `createEl` |
+| `publish-preview-modal.ts` | 发布预览弹窗；**取消返回 `false`** |
+| `batch-publish.ts` | 批量：候选收集（`collectBatchCandidates`，含跳过原因）、规划（`planBatch`）、按勾选算汇总（`summarizeSelection`）、执行（`runBatch`） |
+| `batch-confirm-modal.ts` | 批量确认弹窗（`BatchConfirmModal`）+ 末尾汇总弹窗（`BatchSummaryModal`） |
+| `site-routing-modal.ts` | 编辑单条路由规则（模式 + 目标站点） |
 | `transport/mcp-client.ts` | MCP JSON-RPC 客户端（`McpClient`，唯一出口） |
 | `transport/errors.ts` | `McpError` 与 HTTP/工具级失败的归一化 |
 
@@ -115,9 +166,41 @@ halo:
   site: https://blog.example.com   # 防跨站误推，不匹配直接报错返回
   name: <post metadata.name>       # 判断「新建 or 更新」的唯一依据
   publish: true
+  # ↓ 阶段 1-B 起开放：6 个元数据字段
+  visible: PUBLIC                  # PUBLIC | INTERNAL | PRIVATE（只认这三个大写值）
+  pinned: false                    # 置顶
+  priority: 0                      # 排序权重，整数
+  publishTime: ""                  # 空串 = 立即发布；非空 = 定时发布（RFC 3339）
+  allowComment: true               # 单篇评论开关
+  template: ""                     # 自定义渲染模板
 ```
 
-`applyPostFrontmatter()` **只处理上面这 6 个字段**。Halo Post 的其余 spec 字段由 `publishPost()` 里那个 `params` 字面量给出默认值（`visible: "PUBLIC"`、`pinned: false`、`priority: 0`、`publishTime: ""`、`allowComment: true`、`template: ""`），再由写工具显式传给 MCP。**frontmatter 仍然够不着它们**——MCP 切换只换了后端，并没有扩大 frontmatter 的表达力。
+这 6 个字段**双向读写**：发布时由 `src/frontmatter-map.ts` 的 `parseHaloPostFields()` 校验、
+`src/service/local-content.ts` 的 `applyPostFrontmatter()` 稀疏展开进 `spec`；发布后由同一个文件的
+`applyPostToFrontmatter()` 从**服务端归一化之后的** `post.spec` 回写进笔记（发布 / 更新 / 拉取三处共用它）。
+`publish: true` 的优先级是「命令的显式覆盖 > frontmatter 的 `publish` > 设置里的 `publishByDefault`」，
+其中 frontmatter 那一档读的是**规划阶段**记下的 `plan.publishFromFrontmatter`，不是执行时现读笔记。
+
+**稀疏是契约**（`HaloPostFields` 上的键「在不在」就是「写没写」）：
+
+- **`null` 与「键不存在」同义**。判据是 `value !== undefined && value !== null`，**不是真假判断**。
+  对 `pinned` / `allowComment` / `priority` / `template` 用真假判断，会把 `pinned: false` 变成
+  「跟随远端」—— 用户在本地取消置顶后发布，站上仍是置顶的，**而回写还会把 `true` 写回他的笔记**。
+- YAML 里 `visible:` 这种空值自然解析成 `null`，所以「写成空值」与「删掉这一行」同义，都表示「跟随远端」。
+- `false` / `0` / `""` 是**显式值**。
+- **`publishTime` 是唯一的例外**：`""`（空串）是**合法值**，语义是「立即发布」。
+  要清空一个已有的定时发布，必须写 `publishTime: ""`，**删掉那一行只会让它继续跟随远端**。
+  `parseHaloPostFields()` 为此在 `Date.parse` 之前先短路空串（`Date.parse("")` 是 NaN）。
+
+**写入方向是穷尽的，读取方向才是稀疏的** —— 两者不对称，别误读：`applyPostToFrontmatter()` 每次回写
+都会把 6 个键**全部**写进 `halo`（值取自 `post.spec`），所以一篇已发布的笔记发布完之后，笔记里必定
+出现完整的 6 个键、且带着显式空串的 `publishTime: ""`。稀疏语义管的是**读取**那一侧：
+只有真正写下的键进 `haloFields`，其余保留远端值。因此「删掉一行」只影响这一次的读取语义，
+它不会、也不需要把那一行从笔记里抹掉。
+
+这 6 个字段在预览弹窗里逐行显示（`src/publish-preview.ts` 的 `buildPublishPreview()`），
+而预览与执行读的是**同一份** `planned.plan.post.spec`（`src/service/index.ts` 的 `planPublish()` /
+`executePublish()`）—— 预览里给用户看过的取值就是最终会发出去的那份。
 
 ### 内容管线
 
