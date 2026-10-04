@@ -64,10 +64,10 @@
     },
     "siteRouting": {
       "name": "Site routing rules",
-      "description": "Match a note's vault-relative path against a target site; the first matching rule from the top wins, and notes matching nothing use the default site. Patterns support * (within a directory), ** (across directories) and ? (a single character).",
-      "empty": "No routing rules configured yet — every note goes to the default site or asks you to choose.",
+      "description": "Send notes to a target site by matching each note's vault-relative path against these rules. Patterns support *, ** and ? — what each one matches, and which site a note goes to when nothing matches, are documented in the README.",
+      "empty": "No routing rules configured.",
       "match_count": "Matches {{count}} note(s)",
-      "no_match": "Matches no notes — check the pattern for typos (mind the case and the directory depth)",
+      "no_match": "Matches no notes — check the pattern for typos (what each metacharacter matches is documented in the README)",
       "actions": {
         "add": "Add rule"
       }
