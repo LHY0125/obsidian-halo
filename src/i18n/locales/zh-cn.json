@@ -120,7 +120,8 @@
     },
     "save": {
       "button": "保存"
-    }
+    },
+    "notice_empty_pattern": "路径模式不能为空 —— 请填写一个模式（例如 博客/**）再保存。"
   },
   "site_selection_modal": {
     "title": "选择一个 Halo 站点",

@@ -120,7 +120,8 @@
     },
     "save": {
       "button": "Save"
-    }
+    },
+    "notice_empty_pattern": "The path pattern cannot be empty — enter a pattern (e.g. Blog/**) before saving."
   },
   "site_selection_modal": {
     "title": "Choose a Halo site",

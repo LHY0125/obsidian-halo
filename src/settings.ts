@@ -97,6 +97,11 @@ function normalizeRoutingRules(raw: unknown): SiteRoutingRule[] {
   return raw
     .filter((rule): rule is SiteRoutingRule => typeof rule === "object" && rule !== null)
     .map((rule) => ({
+      // 先摊开原对象、再用归一化后的值覆盖已知字段。`SiteRoutingRule` 今天恰好只有这两个字段，
+      // 所以当前零损失；风险在将来 —— 谁给类型加了第三个字段却忘了改这个 mapper，
+      // 那个字段会**每次加载都被剥掉、再被 saveData() 永久写掉**，用户视角是「我改的配置自己没了」。
+      // 摊开之后这里对未知字段免疫。
+      ...rule,
       pattern: normalizeRulePattern(String(rule.pattern ?? "")),
       site: String(rule.site ?? ""),
     }))
@@ -184,7 +189,12 @@ export class HaloSettingTab extends PluginSettingTab {
 
     rules.forEach((rule, index) => {
       const matchCount = markdownFiles.filter((file) => matchGlob(rule.pattern, file.path)).length;
-      const siteName = this.plugin.settings.sites.find((site) => isSameSiteUrl(site.url, rule.site))?.name ?? rule.site;
+      // 用 `||` 而不是 `??`：站点被找到但 `name` 是空串时，`""` **不是 nullish**，`??` 拦不住它，
+      // 行标题会渲染成「博客/** → 」——箭头后面空白，而这一栏正是本面板存在的理由。
+      // 空串在这里的语义是「用户只填了 URL、还没填名字」（新建站点的默认字面量就是 `name: ""`，
+      // 且新增路径不校验 name），不是「这个站点有意义地没有名字」。
+      // 与 site-routing-modal 里 `site.name || site.url` 保持同一形态。
+      const siteName = this.plugin.settings.sites.find((site) => isSameSiteUrl(site.url, rule.site))?.name || rule.site;
       const setting = new Setting(containerEl)
         .setName(`${rule.pattern} → ${siteName}`)
         .setDesc(
@@ -258,7 +268,11 @@ export class HaloSettingTab extends PluginSettingTab {
   private moveRule(from: number, to: number): void {
     const rules = this.plugin.settings.siteRouting;
 
-    if (to < 0 || to >= rules.length) {
+    // `from` 与 `to` 一起校验。今天 `from` 必定合法（两个参数都来自同一次渲染的下标，
+    // 上/下按钮又被 `setDisabled` 挡了边界），但一旦它越界，`splice` 返回空数组、`moved` 就是
+    // `undefined`，而 `undefined` 会被当作一条规则插回数组并 `saveSettings()` 落盘 ——
+    // 紧接着的 `display()` 才在 `rule.pattern` 上抛，那时坏数据已经在磁盘上了。
+    if (from < 0 || from >= rules.length || to < 0 || to >= rules.length) {
       return;
     }
 

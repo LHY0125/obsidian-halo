@@ -1,6 +1,8 @@
-import { describe, expect, it, test } from "@rstest/core";
+import { describe, expect, it, rs, test } from "@rstest/core";
+import { Modal } from "obsidian";
 import { isSameSiteUrl, normalizeSite, normalizeSiteUrl } from "../src/settings";
 import { CURRENT_SETTINGS_VERSION, DEFAULT_SETTINGS, mcpEndpointOf, migrateSettings } from "../src/settings";
+import { openSiteRoutingModal } from "../src/site-routing-modal";
 
 describe("settings URL normalization", () => {
   test("trims whitespace and removes trailing slashes", () => {
@@ -121,5 +123,60 @@ describe("siteRouting 迁移", () => {
   it("用户把 siteRouting 写成了非数组（手改 data.json）时回落成空数组，不抛错", () => {
     // data.json 是用户能直接编辑的文件。抛出会让插件整个加载不了 —— 比丢一条规则严重得多。
     expect(migrateSettings({ siteRouting: "博客/**" }).settings.siteRouting).toEqual([]);
+  });
+
+  it("规则里的未知字段不被迁移剥掉（将来给类型加字段时不会静默丢配置）", () => {
+    // 迁移会**重建**每条规则（模式要归一化、类型要收敛成字符串），所以"重建"很容易写成
+    // 「只搬 pattern 与 site 两个已知字段」。今天 `SiteRoutingRule` 恰好只有这两个字段，
+    // 那样写零损失；但将来谁给类型加了第三个字段却忘了改这里，那个字段会**每次加载都被剥掉、
+    // 再被 saveData() 永久写掉** —— 用户看到的是「我改的配置自己没了」，而全程没有任何提示。
+    const withExtraField = [{ pattern: "博客/**", site: "https://a.example.com", futureField: "keep me" }];
+
+    expect(migrateSettings({ siteRouting: withExtraField }).settings.siteRouting).toEqual([
+      { pattern: "博客/**", site: "https://a.example.com", futureField: "keep me" },
+    ]);
+  });
+});
+
+describe("站点路由弹窗的草案", () => {
+  /**
+   * 拦下弹窗实例以检查它的草案。
+   *
+   * 不用跑 `onOpen()`：本仓 `tests/setup.ts` 的 `Modal.open()` 是**同步**的
+   * （`open(): void {}` 定义在 prototype 上），而 `openSiteRoutingModal()` 里
+   * `new SiteRoutingModal(...).open()` 也是同步执行的 —— 对 prototype 打一个 spy 就能在
+   * 调用点同步拿到实例。这条路径刻意**不**碰 `onOpen()`：真去跑它会在第二个 `Setting`
+   * 处就撞上 mock 缺口（`Setting` 没有 `addDropdown`），那是另一件事（见账本 F4），
+   * 与本断言无关。
+   */
+  function captureModal(rule: { pattern: string; site: string }): unknown {
+    let captured: unknown;
+    const spy = rs.spyOn(Modal.prototype, "open").mockImplementation(function (this: unknown) {
+      captured = this;
+    });
+
+    try {
+      void openSiteRoutingModal({ app: undefined } as never, rule);
+    } finally {
+      // 必须还原：`Modal.prototype` 是**全局共享**的，泄漏出去的 spy 会让后续所有弹窗
+      // 都不再真的 open()，那种故障会以别的测试失败的形式出现，极难反查。
+      spy.mockRestore();
+    }
+
+    return captured;
+  }
+
+  it("弹窗不得把调用方的规则对象当作草案（否则「取消」取消不掉内存里的改动）", () => {
+    // 编辑既有规则时传进来的就是 plugin.settings.siteRouting 里的**活对象**。弹窗若直接
+    // 持有它，`onChange` 就会就地改写设置；用户点「取消」只丢弃了返回值，改动还留在内存里，
+    // 之后任何一次 saveSettings() 都会把它落盘 —— 用户以为没改，实际改了路由。
+    const rule = { pattern: "博客/**", site: "https://a.example.com" };
+    const draft = (captureModal(rule) as { draft: typeof rule }).draft;
+
+    // 判别力所在：复制之前，draft 与 rule 是同一个对象，这一行必红。
+    expect(draft).not.toBe(rule);
+    // 不能省：万一 `draft` 被改名成别的字段，上面那行会拿到 `undefined`，
+    // `undefined !== rule` 恒真 —— 这条把「字段找错了」与「没复制」区分开。
+    expect(draft).toEqual(rule);
   });
 });

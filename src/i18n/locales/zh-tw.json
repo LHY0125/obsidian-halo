@@ -120,7 +120,8 @@
     },
     "save": {
       "button": "保存"
-    }
+    },
+    "notice_empty_pattern": "路徑模式不能為空 —— 請填寫一個模式（例如 博客/**）再儲存。"
   },
   "site_selection_modal": {
     "title": "選擇一個 Halo 網站",

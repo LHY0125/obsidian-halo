@@ -1,5 +1,5 @@
 import i18next from "i18next";
-import { Modal, Setting } from "obsidian";
+import { Modal, Notice, Setting } from "obsidian";
 // 从 "glob" 而不是 "site-routing" 取符号：glob.ts 是零项目内依赖的叶子，
 // 从 site-routing.ts 取会把 settings.ts 一起拉进本模块的依赖图（那边 import 了 settings）。
 import { type SiteRoutingRule, normalizeRulePattern } from "./glob";
@@ -82,6 +82,10 @@ class SiteRoutingModal extends Modal {
             // 空模式绝不入表：`matchGlob` 会把它当"永不命中"，但一条什么都不匹配的规则
             // 在设置里看着像生效的，会让人以为已经配好了。
             if (pattern === "") {
+              // 拒绝之外还要**说出原因**：不弹 Notice 的话，这个分支在用户眼里就是
+              // 「点了保存，什么也没发生」——弹窗不关、按钮不变、没有任何反馈。
+              // 本阶段的立场是「失败要说得出是哪种失败」，这里同理。
+              new Notice(i18next.t("site_routing_modal.notice_empty_pattern"));
               return;
             }
 
