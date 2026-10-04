@@ -48,7 +48,7 @@ describe("parseHaloPostFields —— visible 枚举", () => {
     expect(parseHaloPostFields({ visible: value })).toEqual({ ok: true, fields: { visible: value } });
   });
 
-  it("两端空白被吃掉（YAML 里写成 \" PUBLIC \" 是手滑）", () => {
+  it('两端空白被吃掉（YAML 里写成 " PUBLIC " 是手滑）', () => {
     expect(parseHaloPostFields({ visible: " PUBLIC " })).toEqual({ ok: true, fields: { visible: "PUBLIC" } });
   });
 
@@ -75,7 +75,7 @@ describe("parseHaloPostFields —— visible 枚举", () => {
 });
 
 describe("parseHaloPostFields —— 类型校验", () => {
-  it.each(["pinned", "allowComment"])("%s 只接受布尔值，字符串 \"true\" 不接受", (field) => {
+  it.each(["pinned", "allowComment"])('%s 只接受布尔值，字符串 "true" 不接受', (field) => {
     // YAML 里加引号就是字符串。悄悄强转会把用户的书写错误掩盖成「有效配置」，
     // 而他下次看到回写结果时会以为是插件改了他的值。
     expect(parseHaloPostFields({ [field]: "true" })).toEqual({
@@ -118,11 +118,7 @@ describe("parseHaloPostFields —— 类型校验", () => {
 });
 
 describe("parseHaloPostFields —— publishTime 取值", () => {
-  it.each([
-    "2026-10-06T10:00:00+08:00",
-    "2026-10-06T02:00:00.000Z",
-    "2026-10-06 10:00",
-  ])("%s 被接受", (value) => {
+  it.each(["2026-10-06T10:00:00+08:00", "2026-10-06T02:00:00.000Z", "2026-10-06 10:00"])("%s 被接受", (value) => {
     expect(parseHaloPostFields({ publishTime: value })).toEqual({ ok: true, fields: { publishTime: value } });
   });
 

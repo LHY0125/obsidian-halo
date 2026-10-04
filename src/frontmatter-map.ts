@@ -1,5 +1,3 @@
-import type { Post } from "@halo-dev/api-client";
-
 /** `halo.visible` 的三个合法取值，与 Halo Post 的 schema 一致 */
 export type PostVisible = "PUBLIC" | "INTERNAL" | "PRIVATE";
 
@@ -102,7 +100,11 @@ export function parseHaloPostFields(halo: unknown): HaloFieldsResult {
 
   if (isPresent(priority)) {
     if (typeof priority !== "number" || !Number.isInteger(priority)) {
-      return { ok: false, key: "frontmatter.error_integer", params: { field: "priority", value: formatValue(priority) } };
+      return {
+        ok: false,
+        key: "frontmatter.error_integer",
+        params: { field: "priority", value: formatValue(priority) },
+      };
     }
 
     fields.priority = priority;
@@ -134,7 +136,11 @@ export function parseHaloPostFields(halo: unknown): HaloFieldsResult {
 
   if (isPresent(template)) {
     if (typeof template !== "string") {
-      return { ok: false, key: "frontmatter.error_string", params: { field: "template", value: formatValue(template) } };
+      return {
+        ok: false,
+        key: "frontmatter.error_string",
+        params: { field: "template", value: formatValue(template) },
+      };
     }
 
     fields.template = template.trim();

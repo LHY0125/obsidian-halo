@@ -1,5 +1,5 @@
-import { describe, expect, it } from "@rstest/core";
 import type { Post } from "@halo-dev/api-client";
+import { describe, expect, it } from "@rstest/core";
 import type { TFile } from "obsidian";
 import {
   applyPostFrontmatter,
