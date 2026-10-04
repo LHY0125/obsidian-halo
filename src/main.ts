@@ -1,5 +1,5 @@
 import i18next from "i18next";
-import { Notice, Plugin, moment } from "obsidian";
+import { Notice, Plugin, type TFile, moment } from "obsidian";
 import { resources } from "./i18n";
 import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
@@ -15,6 +15,7 @@ import {
   normalizeSite,
 } from "./settings";
 import { SettingsMigrationModal } from "./settings-migration-modal";
+import { type SiteResolution, resolveSite } from "./site-routing";
 import { openSiteSelectionModal } from "./site-selection-modal";
 
 export default class HaloPlugin extends Plugin {
@@ -50,6 +51,9 @@ export default class HaloPlugin extends Plugin {
       id: "publish-with-defaults",
       name: i18next.t("command.publish_with_defaults.name"),
       callback: async () => {
+        // 这条命令**刻意不经过 `resolveSite`**：它的语义就是「用默认站点」，
+        // 让路由规则来改写目标会与命令名直接冲突。`canPublishToSite` 那道守卫
+        // （笔记的 halo.site 与目标站点不一致时报错）因此也只在这条路径上有用。
         const site = this.settings.sites.find((site) => site.default);
 
         if (!site) {
@@ -215,33 +219,17 @@ export default class HaloPlugin extends Plugin {
       return;
     }
 
-    const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter;
+    // 这一处是**行为变更**（刻意的）：改动前 `publishCommand` 在没有 `halo.site` 时
+    // 一律弹窗选站点，**完全忽略设置里的默认站点与唯一站点**；而 `CLAUDE.md` 一直写着
+    // 的优先级是「frontmatter → 默认站点 → 单站点直取 → 弹窗」。改动后两端一致。
+    // 最直观的差别：只配了一个站点的用户不再每次发布都看一眼只有一个选项的弹窗。
+    const resolution = this.resolveSiteFor(activeEditor.file);
+    const site = await this.siteForResolution(resolution);
 
-    if (matterData?.halo?.site) {
-      const site = this.getSiteByUrl(matterData.halo.site);
-
-      if (!site) {
-        new Notice(i18next.t("command.publish.error_no_matched_site"));
-        return;
-      }
-
-      const service = new HaloService(this.app, this.settings, site);
-      const uploadResult = await this.uploadImagesForPublish(service);
-
-      if (!uploadResult.success) {
-        return;
-      }
-
-      await service.publishPost({ markdown: uploadResult.markdown });
+    if (!site) {
       return;
     }
 
-    if (this.settings.sites.length === 0) {
-      new Notice(i18next.t("command.publish.error_no_sites"));
-      return;
-    }
-
-    const site = await openSiteSelectionModal(this);
     const service = new HaloService(this.app, this.settings, site);
     const uploadResult = await this.uploadImagesForPublish(service);
 
@@ -264,6 +252,55 @@ export default class HaloPlugin extends Plugin {
     await this.saveSettings();
   }
 
+  /**
+   * 决定一篇笔记的目标站点。**同步、不弹窗、不报错** —— 只做判断，
+   * 用户可见的处置交给 `siteForResolution`。分开的理由是批量操作：它需要拿到
+   * 「为什么这篇没有站点」这个**结果**去汇总，而不是让一次弹窗打断整批。
+   */
+  private resolveSiteFor(file: TFile): SiteResolution {
+    const matterData = this.app.metadataCache.getFileCache(file)?.frontmatter;
+
+    // `matterData?.halo?.site` 缺席时给的是 `undefined`，`resolveSite` 把**只有** `undefined` / `null`
+    // 当「没写」而继续往下走规则表与默认站点。**绝不能在这里补 `?? ""`**：显式空串在
+    // `resolveSite` 里是「写了」的值，会直接报 `unknown-site` —— 那等于把所有没写 `halo.site`
+    // 的笔记全变成错误。（`site:` 裸写时 YAML 解析成 `null`，仍按缺席处理，这条路径是对的。）
+    return resolveSite(this.settings.sites, this.settings.siteRouting ?? [], file.path, matterData?.halo?.site);
+  }
+
+  /**
+   * 把解析结果变成可用的站点：需要用户选的弹窗、需要报错的报错，都收在这里。
+   * 返回 `undefined` 表示「这次操作不要继续」（用户取消，或已经弹过提示）。
+   */
+  private async siteForResolution(resolution: SiteResolution): Promise<HaloSite | undefined> {
+    switch (resolution.kind) {
+      case "resolved":
+        return resolution.site;
+      case "no-sites":
+        new Notice(i18next.t("command.publish.error_no_sites"));
+        return undefined;
+      case "unknown-site":
+        // 与既有文案一致：笔记的 halo.site 指向一个没配过的站点
+        new Notice(i18next.t("command.publish.error_no_matched_site"));
+        return undefined;
+      case "unknown-rule-site":
+        // `escapeValue: false` 与 `mcp-self-check.ts` 同一处置，且这里更是**必须**：
+        // i18next 默认会把插值做 HTML 转义，而它的转义表**连 `/` 也转**。
+        // 这条文案的两个插值恰好都含 `/`（URL 的 `//`、glob 模式的目录分隔符），开着转义时
+        // 用户看到的是 `https:&#x2F;&#x2F;blog.example.com` 与 `博客&#x2F;**` —— 而 Notice
+        // 按纯文本显示、不解析 HTML，所以那不是「能看懂的实体」，就是一串乱码。
+        new Notice(
+          i18next.t("service.error_unknown_rule_site", {
+            pattern: resolution.pattern,
+            url: resolution.url,
+            interpolation: { escapeValue: false },
+          }),
+        );
+        return undefined;
+      case "needs-choice":
+        return openSiteSelectionModal(this);
+    }
+  }
+
   private async getSiteForActiveFile(): Promise<HaloSite | undefined> {
     const { activeEditor } = this.app.workspace;
 
@@ -271,29 +308,9 @@ export default class HaloPlugin extends Plugin {
       return undefined;
     }
 
-    const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter;
-
-    if (matterData?.halo?.site) {
-      const site = this.getSiteByUrl(matterData.halo.site);
-
-      if (!site) {
-        new Notice(i18next.t("command.upload_images.error_no_matched_site"));
-        return undefined;
-      }
-
-      return site;
-    }
-
-    if (this.settings.sites.length === 0) {
-      new Notice(i18next.t("command.upload_images.error_no_sites"));
-      return undefined;
-    }
-
-    if (this.settings.sites.length === 1) {
-      return this.settings.sites[0];
-    }
-
-    return openSiteSelectionModal(this);
+    // 与发布走**同一个**解析入口。两处各解析一遍是错的：图片会传到 A 站、文章发到 B 站，
+    // 两个操作都报成功，而文章里的图片链接指向另一个域名。
+    return this.siteForResolution(this.resolveSiteFor(activeEditor.file));
   }
 
   private async uploadImagesForPublish(service: HaloService): Promise<{ success: boolean; markdown?: string }> {

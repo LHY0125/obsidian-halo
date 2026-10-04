@@ -147,7 +147,8 @@
     "notice_upload_images_partial": "Processed {{count}} image(s), {{failed}} failed",
     "error_term_not_applied": "\"{{name}}\" could not be applied to the post: the site did not return its resource name. The post will be published without it — add it in the Halo console, then publish again.",
     "error_image_too_large": "\"{{name}}\" exceeds {{limit}} MiB and this site has no personal access token configured, so it cannot be uploaded: MCP base64 uploads have that hard limit, and the REST fallback needs a PAT. Compress the image, or add a PAT in the site settings.",
-    "notice_taxonomy_not_resolved": "The category/tag names could not be read from the site, so the fields that failed were left as they are in the note (nothing was written for them). Everything else was written as usual; retry this operation later to fill them in."
+    "notice_taxonomy_not_resolved": "The category/tag names could not be read from the site, so the fields that failed were left as they are in the note (nothing was written for them). Everything else was written as usual; retry this operation later to fill them in.",
+    "error_unknown_rule_site": "The routing rule \"{{pattern}}\" points to a site ({{url}}) that is not in the site list. Fix the rule in Settings → Halo."
   },
   "common": {
     "error_connection_failed": "Connection failed",
