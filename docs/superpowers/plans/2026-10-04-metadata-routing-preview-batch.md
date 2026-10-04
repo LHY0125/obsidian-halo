@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **⚠️ 关于本文件里的代码与文案清单（后续追加，非计划当时的内容）**：本文件的代码块、函数清单与
+> 三语文案都是**规划当时的字面量**。实现与后续修复轮改过若干处，因此这些清单**可能已与交付代码分叉**
+>（已知的例子：`renderSummary()` 的改写提示门控、`planBatch()` 对 `unpublish` 的分支、
+> 三语 `settings.siteRouting` 的三句文案）。**以 `src/` 为准**，本节不再逐处加注记。
+
 **Goal:** 把 Halo Post 上另外 6 个元数据字段开放到 frontmatter 双向读写，加上按路径 glob 的站点路由、发布前预览确认、以及批量推草稿 / 发布 / 撤回。
 
 **Architecture:** 阶段 1-A 已经把发布链路整体切到 MCP，并把「MCP 的扁平表示 ↔ 领域模型」的适配收在 `service/post-mapping.ts`。1-A 的副产品是 `toUpdateArgs()` / `toCreateArgs()` **已经**在传这 6 个字段、`toPost()` **已经**在把它们读回来 —— 也就是说 **MCP 线上的一侧 1-A 已经做完了**，1-B 只需要补**本地 frontmatter 这一侧**。本计划的重心因此全部落在三处：① 本地 frontmatter 的读写契约（`src/frontmatter-map.ts`）；② 站点解析（`src/site-routing.ts`）；③ 交互面（预览弹窗、批量确认与执行）。
