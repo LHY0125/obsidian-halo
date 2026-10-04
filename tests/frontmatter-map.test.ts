@@ -236,7 +236,8 @@ describe("applyPostToFrontmatter", () => {
     // `categoryNames: ["技术思考"]` 与 `tagNames: ["Halo"]`，因此删掉**任一条**守卫都会让它红
     //（实测：删 `tagNames` 那条 → 它也红；删 `categoryNames` 那条 → 它也红）。
     // 这一条补的是 **`[]` 这一档**：那条走的是「非空值进得去」，而这里走的是「空数组也是真值、
-    // 也照写」——「跳过」是 `null` / `undefined` 那一档（见上面两条用例）。
+    // 也照写」——「跳过」是 `null` / `undefined` 那一档（见上面那条「显示名解析失败（undefined）时跳过该字段」
+    // 的用例）。
     const frontmatter: Record<string, unknown> = { categories: ["旧分类"], tags: ["旧标签"] };
 
     applyPostToFrontmatter(frontmatter, makePost(), {
