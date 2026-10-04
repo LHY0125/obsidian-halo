@@ -1,6 +1,10 @@
 import i18next from "i18next";
 import { PluginSettingTab, Setting } from "obsidian";
+// 从 "glob" 而不是 "site-routing" 取这两个符号：glob.ts 是零项目内依赖的叶子，
+// 而 site-routing.ts 反过来 import 本文件。从那边取会重新造出 settings ⇄ site-routing 的 import 环。
+import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./glob";
 import type HaloPlugin from "./main";
+import { openSiteRoutingModal } from "./site-routing-modal";
 import { HaloSitesModal } from "./sites-modal";
 
 export interface HaloSite {
@@ -29,6 +33,15 @@ export interface HaloSetting {
   settingsVersion: number;
   sites: HaloSite[];
   publishByDefault: boolean;
+  /**
+   * 发布前是否跳过预览弹窗。默认 `false` = **显示预览**。
+   *
+   * 刻意不复用 `publishByDefault` 来承载这个语义：那个键名里有 "publish" 却管的是"发布还是草稿"，
+   * 拿它同时表示"要不要弹窗"会让读者长期误读（spec §5.2 明确点名了这一点）。
+   */
+  skipPreviewOnPublish: boolean;
+  /** 站点路由规则。**数组顺序就是优先级**（自上而下取首个命中），所以任何地方都不能重排 */
+  siteRouting: SiteRoutingRule[];
   replaceImageLinks: boolean;
   imageUploadCache: Record<string, Record<string, ImageUploadCacheEntry>>;
 }
@@ -37,6 +50,8 @@ export const DEFAULT_SETTINGS: HaloSetting = {
   settingsVersion: CURRENT_SETTINGS_VERSION,
   sites: [],
   publishByDefault: false,
+  skipPreviewOnPublish: false,
+  siteRouting: [],
   replaceImageLinks: true,
   imageUploadCache: {},
 };
@@ -68,6 +83,27 @@ export interface MigrationResult {
 }
 
 /**
+ * 规整规则表：丢掉模式为空的行、把模式写成库内路径的形态。
+ *
+ * **绝不重排、绝不去重、绝不丢掉指向未知站点的行** —— 数组顺序就是优先级，
+ * 而指向未知站点的行是用户要去修的东西（`resolveSite` 会明确报出来），悄悄删掉它
+ * 等于把「规则写错了」变成「规则不见了」。
+ */
+function normalizeRoutingRules(raw: unknown): SiteRoutingRule[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .filter((rule): rule is SiteRoutingRule => typeof rule === "object" && rule !== null)
+    .map((rule) => ({
+      pattern: normalizeRulePattern(String(rule.pattern ?? "")),
+      site: String(rule.site ?? ""),
+    }))
+    .filter((rule) => rule.pattern !== "");
+}
+
+/**
  * 把任意来源的原始设置迁移到当前版本。
  *
  * 纯函数：不读磁盘、不弹窗、不写盘，便于测试。
@@ -90,6 +126,8 @@ export function migrateSettings(raw: unknown): MigrationResult {
       ...merged,
       settingsVersion: CURRENT_SETTINGS_VERSION,
       sites: (merged.sites ?? []).map(normalizeSite),
+      siteRouting: normalizeRoutingRules(merged.siteRouting),
+      skipPreviewOnPublish: merged.skipPreviewOnPublish === true,
       imageUploadCache: { ...(merged.imageUploadCache ?? {}) },
     },
     notices,
@@ -130,6 +168,82 @@ export class HaloSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName(i18next.t("settings.siteRouting.name"))
+      .setDesc(i18next.t("settings.siteRouting.description"))
+      .setHeading();
+
+    const rules = this.plugin.settings.siteRouting;
+
+    if (rules.length === 0) {
+      containerEl.createEl("p", { text: i18next.t("settings.siteRouting.empty") });
+    }
+
+    // 一次遍历算出每行的命中数：vault 里的 markdown 文件清单是现成的，规则又只有几条，
+    // 复杂度是 files × rules —— 当前规模（百余篇、个位数规则）下可以忽略。
+    const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
+
+    rules.forEach((rule, index) => {
+      const matchCount = markdownFiles.filter((file) => matchGlob(rule.pattern, file.path)).length;
+      const siteName = this.plugin.settings.sites.find((site) => isSameSiteUrl(site.url, rule.site))?.name ?? rule.site;
+      const setting = new Setting(containerEl)
+        .setName(`${rule.pattern} → ${siteName}`)
+        .setDesc(
+          matchCount === 0
+            ? i18next.t("settings.siteRouting.no_match")
+            : i18next.t("settings.siteRouting.match_count", { count: matchCount }),
+        );
+
+      setting.addExtraButton((button) =>
+        button
+          .setIcon("lucide-arrow-up")
+          .setDisabled(index === 0)
+          .onClick(() => {
+            this.moveRule(index, index - 1);
+          }),
+      );
+      setting.addExtraButton((button) =>
+        button
+          .setIcon("lucide-arrow-down")
+          .setDisabled(index === rules.length - 1)
+          .onClick(() => {
+            this.moveRule(index, index + 1);
+          }),
+      );
+      setting.addExtraButton((button) =>
+        button.setIcon("lucide-pencil").onClick(async () => {
+          const updated = await openSiteRoutingModal(this.plugin, rule);
+
+          if (updated) {
+            rules[index] = updated;
+            await this.plugin.saveSettings();
+            this.display();
+          }
+        }),
+      );
+      setting.addExtraButton((button) =>
+        button.setIcon("lucide-trash").onClick(() => {
+          rules.splice(index, 1);
+          this.plugin.saveSettings();
+          this.display();
+        }),
+      );
+    });
+
+    new Setting(containerEl).addButton((button) =>
+      button.setButtonText(i18next.t("settings.siteRouting.actions.add")).onClick(async () => {
+        const rule = await openSiteRoutingModal(this.plugin);
+
+        if (rule) {
+          // 追加到末尾：新规则默认优先级最低。要把它提到前面去，用行上的上移按钮 ——
+          // 静默插到最前面会让既有用户下次发布时突然改了目标站点。
+          rules.push(rule);
+          await this.plugin.saveSettings();
+          this.display();
+        }
+      }),
+    );
+
+    new Setting(containerEl)
       .setName(i18next.t("settings.replaceImageLinks.name"))
       .setDesc(i18next.t("settings.replaceImageLinks.description"))
       .addToggle((toggle) => {
@@ -138,5 +252,19 @@ export class HaloSettingTab extends PluginSettingTab {
           this.plugin.saveSettings();
         });
       });
+  }
+
+  /** 交换两条规则的顺序。**顺序就是优先级**，所以这是本设置面板里唯一改语义的操作 */
+  private moveRule(from: number, to: number): void {
+    const rules = this.plugin.settings.siteRouting;
+
+    if (to < 0 || to >= rules.length) {
+      return;
+    }
+
+    const [moved] = rules.splice(from, 1);
+    rules.splice(to, 0, moved);
+    void this.plugin.saveSettings();
+    this.display();
   }
 }

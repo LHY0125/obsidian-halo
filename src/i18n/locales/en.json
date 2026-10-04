@@ -49,6 +49,16 @@
       "name": "Publish post by default",
       "description": "After checking, the first post created will be published directly"
     },
+    "siteRouting": {
+      "name": "Site routing rules",
+      "description": "Match a note's vault-relative path against a target site; the first matching rule from the top wins, and notes matching nothing use the default site. Patterns support * (within a directory), ** (across directories) and ? (a single character).",
+      "empty": "No routing rules configured yet — every note goes to the default site or asks you to choose.",
+      "match_count": "Matches {{count}} note(s)",
+      "no_match": "Matches no notes — check the pattern for typos (mind the case and the directory depth)",
+      "actions": {
+        "add": "Add rule"
+      }
+    },
     "replaceImageLinks": {
       "name": "Replace image links",
       "description": "Replace local Markdown image links with Halo URLs after upload. When disabled, published content still uses the uploaded URLs."
@@ -98,6 +108,20 @@
       }
     }
   },
+  "site_routing_modal": {
+    "title": "Site routing rule",
+    "pattern": {
+      "name": "Path pattern",
+      "description": "A glob against the vault-relative path, e.g. Blog/** or Blog/diary/*"
+    },
+    "site": {
+      "name": "Target site",
+      "description": "Notes matching this pattern are published to this site"
+    },
+    "save": {
+      "button": "Save"
+    }
+  },
   "site_selection_modal": {
     "title": "Choose a Halo site",
     "button_choose": "Choose"
@@ -126,6 +150,7 @@
   },
   "common": {
     "error_connection_failed": "Connection failed",
+    "button_cancel": "Cancel",
     "button_close": "Close"
   },
   "transport": {

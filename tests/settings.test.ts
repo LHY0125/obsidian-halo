@@ -93,3 +93,25 @@ describe("migrateSettings", () => {
     expect(settings.sites).toEqual([]);
   });
 });
+
+describe("siteRouting 迁移", () => {
+  it("老配置没有 siteRouting 时补成空数组，不抛错", () => {
+    const { settings } = migrateSettings({ sites: [], publishByDefault: false });
+    expect(settings.siteRouting).toEqual([]);
+  });
+
+  it("已有的规则被原样保留（顺序就是优先级，绝不能在迁移里重排或去重）", () => {
+    const rules = [
+      { pattern: "博客/日记/**", site: "https://a.example.com" },
+      { pattern: "博客/**", site: "https://b.example.com" },
+    ];
+    const { settings } = migrateSettings({ siteRouting: rules });
+
+    expect(settings.siteRouting).toEqual(rules);
+  });
+
+  it("用户把 siteRouting 写成了非数组（手改 data.json）时回落成空数组，不抛错", () => {
+    // data.json 是用户能直接编辑的文件。抛出会让插件整个加载不了 —— 比丢一条规则严重得多。
+    expect(migrateSettings({ siteRouting: "博客/**" }).settings.siteRouting).toEqual([]);
+  });
+});

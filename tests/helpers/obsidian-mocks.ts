@@ -49,6 +49,8 @@ export function createSettings(overrides: Partial<HaloSetting> = {}): HaloSettin
     settingsVersion: CURRENT_SETTINGS_VERSION,
     sites: [TEST_SITE],
     publishByDefault: false,
+    skipPreviewOnPublish: false,
+    siteRouting: [],
     replaceImageLinks: true,
     imageUploadCache: {},
     ...overrides,

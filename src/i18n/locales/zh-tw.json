@@ -49,6 +49,16 @@
       "name": "默认發布文章",
       "description": "勾選之後，首次建立文章將直接發布"
     },
+    "siteRouting": {
+      "name": "站點路由規則",
+      "description": "按筆記在庫內的相對路徑匹配目標站點，自上而下取首個命中的規則；都不命中時用預設站點。模式支援 *（不跨目錄）、**（跨目錄）、?（單一字元）。",
+      "empty": "還沒有設定路由規則 —— 所有筆記都會走預設站點或彈窗選擇。",
+      "match_count": "匹配到 {{count}} 篇筆記",
+      "no_match": "沒有匹配到任何筆記 —— 請檢查模式是否寫錯（注意大小寫與目錄層級）",
+      "actions": {
+        "add": "新增規則"
+      }
+    },
     "replaceImageLinks": {
       "name": "替換圖片連結",
       "description": "上傳成功後，將 Markdown 中的本機圖片連結替換為 Halo 位址。關閉後，發布內容仍會使用上傳後的位址。"
@@ -98,6 +108,20 @@
       }
     }
   },
+  "site_routing_modal": {
+    "title": "站點路由規則",
+    "pattern": {
+      "name": "路徑模式",
+      "description": "vault 庫內相對路徑的 glob，例如 博客/** 或 博客/日記/*"
+    },
+    "site": {
+      "name": "目標站點",
+      "description": "命中這條模式的筆記將發佈到這個站點"
+    },
+    "save": {
+      "button": "保存"
+    }
+  },
   "site_selection_modal": {
     "title": "選擇一個 Halo 網站",
     "button_choose": "選擇"
@@ -126,6 +150,7 @@
   },
   "common": {
     "error_connection_failed": "連接失敗",
+    "button_cancel": "取消",
     "button_close": "關閉"
   },
   "transport": {
