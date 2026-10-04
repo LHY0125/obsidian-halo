@@ -163,6 +163,46 @@ describe("collectBatchCandidates", () => {
     expect(skipSignatures(skipped)).toEqual(["b.md | batch.skip_not_published"]);
   });
 
+  it("halo.name 是空串时归一化成 undefined —— 与单篇路径同档，不留第三态", () => {
+    // `halo.name: ""` 的语义是「还没发布过」。留着空串，下游按「有名字就更新」判档时
+    // 会拿 `""` 当远端文章名去调 MCP（逐篇失败），而单篇路径在同一份笔记上走的是「新建」。
+    const blank = collectBatchCandidates(
+      [fileAt("a.md")],
+      appWith({ "a.md": { title: "A", halo: { name: "" } } }),
+      makeSettings([]),
+      "draft",
+    );
+
+    expect(blank.candidates).toHaveLength(1);
+    expect(blank.candidates[0].remoteName).toBeUndefined();
+    // 对照物：**有**名字时必须原样带出来。少了它，一个「一律返回 undefined」的实现
+    // 也会让上面那条通过 —— 而那种实现会让每次批量发布都变成新建、在站点上重复建文章。
+    const named = collectBatchCandidates(
+      [fileAt("a.md")],
+      appWith({ "a.md": { title: "A", halo: { name: "post-1" } } }),
+      makeSettings([]),
+      "draft",
+    );
+
+    expect(named.candidates[0].remoteName).toBe("post-1");
+  });
+
+  it("halo.name 为空串时撤回照样跳过它（存的两档与用的真值判据不分叉）", () => {
+    // 这条**不**验归一化本身（`!""` 与 `!undefined` 在这里都是真，改不改都一样红不了）。
+    // 它挡的是另一件事：存储侧归一化被撤掉**且**判据被换成 `remoteName === undefined`
+    // 的那种「单边不一致」—— 那时空串会被当成「已发布过」，于是一篇没发过的笔记
+    // 被列进批量撤回的清单里。
+    const { candidates, skipped } = collectBatchCandidates(
+      [fileAt("a.md")],
+      appWith({ "a.md": { title: "A", halo: { name: "" } } }),
+      makeSettings([]),
+      "unpublish",
+    );
+
+    expect(candidates).toHaveLength(0);
+    expect(skipSignatures(skipped)).toEqual(["a.md | batch.skip_not_published"]);
+  });
+
   it("推草稿 / 发布**不**要求 halo.name（没有就是新建）", () => {
     // 与上一条成对：同一个「没有 halo.name」的笔记，在 unpublish 下被跳过，在 publish 下是候选。
     // 两条合起来才说明筛选条件真的挂在 action 上，而不是「一律要求 halo.name」。

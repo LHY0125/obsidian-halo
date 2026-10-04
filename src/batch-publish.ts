@@ -22,7 +22,13 @@ export interface BatchSkip {
 export interface BatchCandidate {
   file: TFile;
   resolution: SiteResolution;
-  /** `halo.name`。有它才是「已发布过」，撤回也才有对象 */
+  /**
+   * 归一化后的 `halo.name`。有它才是「已发布过」，撤回也才有对象。
+   *
+   * **只有「有名字」与「没有」两档**：显式空串在解析时就收敛成 `undefined`（见
+   * `collectBatchCandidates`）—— `halo.name: ""` 的语义是「还没发布过」，留着空串会让
+   * 下游多出一个既非更新、也非新建的第三态。
+   */
   remoteName?: string;
   /** frontmatter 里写着的分类/标签**显示名**（还没解析成资源名） */
   categories: string[];
@@ -103,7 +109,12 @@ export function collectBatchCandidates(
       continue;
     }
 
-    const remoteName = matterData?.halo?.name;
+    // 归一化掉显式空串：`halo.name: ""` 在单篇路径（`service/index.ts` 的 `planPublish`）走的
+    // 就是**新建**分支，那里已经把这件事收敛成 `undefined` 并写明理由。批量路径与它必须逐字对齐 ——
+    // 否则同一个 `halo.name: ""` 在单篇下是「新建」、在批量下 `remoteName` 是 `""`，而下游一旦按
+    // 「有名字就更新」判档，就会拿 `""` 当远端文章名去调 MCP，**逐篇失败**。
+    // 这条归一化也让本字段对下游只有「有名字」与「没有」两档，与它自己的注释所说的一致。
+    const remoteName = matterData?.halo?.name || undefined;
 
     // 撤回只对已经发布过的笔记有意义：没有 halo.name 就没有可撤回的远端文章。
     // 把它列进候选会让用户在清单里看到它、确认、然后在汇总里看到它"失败" —— 而它从一开始就不该在。

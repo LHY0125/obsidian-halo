@@ -1,7 +1,9 @@
-import { describe, expect, it } from "@rstest/core";
+import { beforeAll, describe, expect, it } from "@rstest/core";
+import i18next from "i18next";
 import type { App, TFile } from "obsidian";
 import { BatchConfirmModal } from "src/batch-confirm-modal";
 import type { BatchGroup, BatchItem, BatchPlan } from "src/batch-publish";
+import { initializeI18n } from "src/i18n";
 import type HaloPlugin from "src/main";
 import type { HaloSite } from "src/settings";
 import { createSettings } from "./helpers/obsidian-mocks";
@@ -13,9 +15,22 @@ import { createSettings } from "./helpers/obsidian-mocks";
  * 「全不选本组」到底有没有把那一组清掉。默认值写反、取消交回全部路径，都会让
  * 「批量发布」变成「把整库发出去」，而这两种错误在界面上**看不出任何异常**。
  *
- * 覆盖不到的部分（已在实现文件里注明）：逐条勾选框的 `onChange`、`renderSummary` 的重画
- * 与按钮的禁用态 —— 那几处只有 DOM 与 mock 配合才验得到，本仓库不为 UI 建 mock 基建。
+ * 覆盖不到的只有逐条勾选框的 `onChange`（`tests/setup.ts` 的 `ToggleComponent.onChange`
+ * 丢弃回调）与真实 DOM 结构 —— 本仓库不为 UI 建 mock 基建。
+ * `renderSummary` 与确认按钮的禁用态**已经**覆盖：给实例塞一个最小的 `summaryEl` 桩，
+ * 那段原本每跑必提前返回的代码就能跑到（见 `attachSummaryStub`），不必动 `tests/setup.ts`。
  */
+
+/**
+ * 初始化 i18n —— 走**生产同一条入口** `initializeI18n()`（`main.ts` 的 `onload` 调的就是它）。
+ *
+ * 不初始化的话 `i18next.t()` 返回键名本身、`{{count}}` 不被插值，于是「汇总里写着几篇」
+ * 在渲染结果里根本看不出来 —— 那条钉「汇总跟着活集合走」的用例会退化成零判别力
+ *（`count: 1` 与 `count: 3` 算出来是同一个字符串）。
+ */
+beforeAll(async () => {
+  await initializeI18n("en");
+});
 
 const siteA: HaloSite = { name: "A", url: "https://a.example.com", token: "", mcpToken: "", default: true };
 const siteB: HaloSite = { name: "B", url: "https://b.example.com", token: "", mcpToken: "", default: false };
@@ -43,11 +58,16 @@ function planWith(spec: { site: HaloSite; paths: string[] }[]): BatchPlan {
   };
 }
 
-/** 弹窗的三个私有出口 —— 见 `openModal` 里为什么不走「模拟点击」 */
+/** 弹窗的私有出口 —— 见 `openModal` 里为什么不走「模拟点击」 */
 type ModalInternals = {
   confirm(): void;
   cancel(): void;
   selectGroup(group: BatchGroup, selected: boolean): void;
+  renderContent(): void;
+  renderSummary(): void;
+  /** 汇总容器。生产里由 `renderContent` 建出来；测试里塞桩就能让 `renderSummary` 不再提前返回 */
+  summaryEl?: HTMLElement;
+  confirmButton?: { setDisabled(value: boolean): unknown };
 };
 
 interface Harness {
@@ -78,6 +98,62 @@ function openModal(plan: BatchPlan): Harness {
   }) as unknown as ModalInternals;
 
   return { modal, decision: () => result, wasDecided: () => decided };
+}
+
+/**
+ * 给弹窗塞一个能记录文字的汇总容器桩，让 `renderSummary()` **真的跑到**。
+ *
+ * 为什么必须这么做：`tests/setup.ts` 的 `Modal.contentEl.createEl()` 返回 `undefined`，于是
+ * `renderContent` 里那句 `this.summaryEl = contentEl.createEl("div")` 让 `summaryEl` 恒为
+ * `undefined`，而 `renderSummary` 第一句就是 `if (!this.summaryEl) return;` —— 整段汇总逻辑
+ * （含「空勾选禁用确认」那道唯一的闸门）在测试里**从未执行过**。一个「构造时快照 selected、
+ * 汇总读快照」的实现能通过全部 5 条用例，因为那行代码根本没跑。
+ *
+ * 不动 `tests/setup.ts`（那是本仓明确不建的 UI mock 基建），只给这一个实例喂最小桩。
+ */
+function attachSummaryStub(internals: ModalInternals): { texts: string[] } {
+  const texts: string[] = [];
+  const stub = {
+    // `renderSummary` 每次先 `empty()` 再重画，桩要跟着清 —— 否则上一轮的文案会留在里面，
+    // 「重画后不该再出现旧数字」这条断言就永远为假。
+    empty: () => {
+      texts.length = 0;
+    },
+    createEl: (_tag: string, options?: { text?: string }) => {
+      if (options?.text !== undefined) {
+        texts.push(options.text);
+      }
+
+      return undefined;
+    },
+  };
+
+  internals.summaryEl = stub as unknown as HTMLElement;
+
+  return { texts };
+}
+
+/**
+ * 记下确认按钮收到的 `setDisabled` 调用。
+ *
+ * 按钮实例在每次**整块重画**时都会被重建（`Setting.addButton` 每次回调一个新的
+ * `ButtonComponent`），所以要在最后一次重画**之后**再接，接早了记的是个已经被丢掉的实例。
+ */
+function recordDisabled(internals: ModalInternals): boolean[] {
+  const button = internals.confirmButton;
+
+  if (!button) {
+    throw new Error("确认按钮还没建出来 —— 先调 renderContent() 或 selectGroup()");
+  }
+
+  const calls: boolean[] = [];
+  button.setDisabled = (value: boolean) => {
+    calls.push(value);
+
+    return button;
+  };
+
+  return calls;
 }
 
 const plan = planWith([
@@ -111,12 +187,18 @@ describe("BatchConfirmModal 的勾选状态", () => {
   });
 
   it("「全不选本组」只清掉这一组，别的组照旧", () => {
-    const { modal, decision } = openModal(plan);
+    const { modal, decision, wasDecided } = openModal(plan);
 
+    // `selectGroup` 内部会整块重画：重画跑不通的话**这一行**就会抛（不是因为下面的断言）
     modal.selectGroup(plan.groups[0], false);
 
-    // 这一步也顺带证明 `selectGroup` 会整块重画（重画跑不通的话这里会先抛）
+    // 清一组**不是**一个决定。`decision()` 此时确实是 `undefined`，但那是「还没决定」的
+    // `undefined`，不是「取消」的那个 —— 而「还没决定」的初始值就是 `undefined`，
+    // 所以单靠它分不出「selectGroup 里错误地替用户做了决定」。配一条 `wasDecided()` 为假
+    // 才挡得住那种实现（它会让用户一勾选就被当成"取消"，弹窗的 Promise 直接 settle）。
+    expect(wasDecided()).toBe(false);
     expect(decision()).toBeUndefined();
+
     modal.confirm();
     expect(decision()).toEqual(new Set(["c.md"]));
   });
@@ -137,6 +219,8 @@ describe("BatchConfirmModal 的勾选状态", () => {
     const { modal, decision, wasDecided } = openModal(plan);
 
     modal.selectGroup(plan.groups[1], false);
+    // 与上一条同理：这个 `undefined` 是「还没决定」，靠 `wasDecided()` 为假才站得住
+    expect(wasDecided()).toBe(false);
     expect(decision()).toBeUndefined();
 
     modal.selectGroup(plan.groups[0], false);
@@ -144,5 +228,67 @@ describe("BatchConfirmModal 的勾选状态", () => {
 
     expect(wasDecided()).toBe(true);
     expect(decision()).toEqual(new Set());
+  });
+
+  it("汇总跟着**活集合**走：清掉一组后重画，篇数立刻变小", () => {
+    // 这条钉的是「汇总按 `this.selected` 这个**活集合**算，而不是构造时拍的快照」。
+    // 一个「构造时拷一份 selected、renderSummary 读那份拷贝」的实现会让用户在弹窗上看到
+    // 取消勾选**之前**的数字 —— 他会以为自己的取消没生效，而本阶段「一次聚合确认」的
+    // 全部依据就是汇总跟着勾选走。
+    const internals = openModal(plan).modal;
+    const initial = attachSummaryStub(internals);
+
+    internals.renderSummary();
+
+    expect(initial.texts).toContain(i18next.t("batch.summary_count", { count: 3 }));
+
+    internals.selectGroup(plan.groups[0], false); // 清掉 A 组两篇（内部整块重画，把桩冲掉了）
+    const after = attachSummaryStub(internals);
+
+    internals.renderSummary();
+
+    expect(after.texts).toContain(i18next.t("batch.summary_count", { count: 1 }));
+    // 反面：重画后**不该**还写着 3 篇。少了这一条，一个只把新数字"追加"上去的实现也能过。
+    expect(after.texts).not.toContain(i18next.t("batch.summary_count", { count: 3 }));
+  });
+
+  it("汇总按站点分组重画：整组清掉后那一组不再出现在汇总里", () => {
+    const internals = openModal(plan).modal;
+
+    internals.selectGroup(plan.groups[0], false);
+    const stub = attachSummaryStub(internals);
+
+    internals.renderSummary();
+
+    // 汇总里的组标题是 `站点名（篇数）`。清掉 A 组后只剩 B 组
+    expect(stub.texts.some((text) => text.startsWith("B（"))).toBe(true);
+    expect(stub.texts.some((text) => text.startsWith("A（"))).toBe(false);
+  });
+
+  it("一篇都没勾时把确认按钮禁掉 —— 空勾选不能发布", () => {
+    // `confirmButton.setDisabled(summary.total === 0)` 是「空勾选不发布」的**唯一**闸门，
+    // 而它就在那段原本从不执行的 `renderSummary` 里。
+    const internals = openModal(plan).modal;
+
+    internals.selectGroup(plan.groups[0], false);
+    internals.selectGroup(plan.groups[1], false);
+
+    const disabled = recordDisabled(internals);
+    attachSummaryStub(internals); // 闸门在 renderSummary 里 —— 没这个桩它会提前返回，什么都记不到
+    internals.renderSummary();
+
+    expect(disabled).toEqual([true]);
+  });
+
+  it("还有勾选时不禁用确认按钮（与上一条成对：闸门是看值，不是恒禁用）", () => {
+    const internals = openModal(plan).modal;
+
+    internals.selectGroup(plan.groups[0], false); // 还剩 B 组一篇
+
+    const disabled = recordDisabled(internals);
+    attachSummaryStub(internals);
+    internals.renderSummary();
+
+    expect(disabled).toEqual([false]);
   });
 });
