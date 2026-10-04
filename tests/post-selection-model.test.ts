@@ -1,20 +1,24 @@
 import { beforeAll, describe, expect, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
-import { resources } from "../src/i18n";
+import { initializeI18n } from "../src/i18n";
 import { LIST_PAGE_SIZE, fetchSelectablePosts, toSelectablePosts } from "../src/post-selection-model";
 import type { McpPostItem } from "../src/service/post-mapping";
 import { McpError } from "../src/transport/errors";
 import { createFakeClient } from "./helpers/mcp-mock";
 
 /**
- * 按生产路径初始化 i18n（与 `tests/service/index.test.ts` 同一处置）。
+ * 初始化 i18n —— 走**生产同一条入口** `initializeI18n()`（`main.ts` 的 `onload` 调的就是它）。
  *
  * 不初始化的话 `i18next.t()` 返回 **undefined**，于是「弹的是具体原因还是泛化文案」这件事
  * 再也分不出来 —— 断言会退化成 `expect(undefined).toBe(undefined)` 这种零判别力的形式。
+ *
+ * 刻意**不再自己拼 options**：那样测试与生产跑在**两套配置**下，而其中一处差异（全局
+ * `interpolation.escapeValue`）恰好决定插值出来的字符串长什么样 —— 断言插值文案的用例会看到
+ * 与用户所见不同的输出。收敛到生产入口之后，两边只有一份配置。
  */
 beforeAll(async () => {
-  await i18next.init({ lng: "en", fallbackLng: "en", resources, returnNull: false });
+  await initializeI18n("en");
 });
 
 /** `tests/setup.ts` 里那个 Notice 构造器会把每条文案推进这个数组 */

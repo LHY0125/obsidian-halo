@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, rs, test } from "@rstest/core"
 import i18next from "i18next";
 import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
-import { resources } from "../../src/i18n";
+import { initializeI18n } from "../../src/i18n";
 import HaloService, { type PublishPlan, type PublishResult } from "../../src/service";
 import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
@@ -17,15 +17,19 @@ import {
 } from "../helpers/obsidian-mocks";
 
 /**
- * 按生产路径初始化 i18n（`main.ts` 的 onload 就是这么做的）。
+ * 初始化 i18n —— 走**生产同一条入口** `initializeI18n()`（`main.ts` 的 `onload` 调的就是它）。
  *
  * 不初始化的话 `i18next.t()` 返回 **undefined**，于是每条 `Notice` 的文本都是 undefined——
  * 「发布成功」与「发布失败」再也分不出来，notice 断言会退化成
  * 「弹了一条 notice」甚至 `expect(undefined).toBe(undefined)` 这种零判别力的形式。
- * 参数与 `main.ts` 保持一致（`returnNull: false`）。
+ *
+ * 此前这里是自己拼的一份 options（`{ lng: "en", fallbackLng: "en", resources, returnNull: false }`），
+ * 与 `initializeI18n` **逐项等价**、只差全局那条 `interpolation.escapeValue` ——
+ * 而那一条恰好决定插值出来的字符串长什么样（`Notice` 文案里的 URL、分类标签名都在插值里），
+ * 于是测试与生产跑在两套配置下。收敛到生产入口之后只有一份。
  */
 beforeAll(async () => {
-  await i18next.init({ lng: "en", fallbackLng: "en", resources, returnNull: false });
+  await initializeI18n("en");
 });
 
 /**
