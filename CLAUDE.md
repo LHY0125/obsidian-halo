@@ -39,8 +39,11 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 **手工联调**：把本仓库放到 `<vault>/.obsidian/plugins/<manifest.id>/`，`pnpm dev` 持续重建，然后在 Obsidian 里「重新加载插件」。插件 id 必须与目录名一致。
 
 **批量命令会改写本地笔记**：`Halo: 批量推草稿` / `批量发布` 在「替换图片链接」打开时会把笔记里的
-本地图片地址换成 Halo 地址，`批量撤回` 会改 `halo.publish`。三条命令都从**全库**取候选，
+本地图片地址换成 Halo 地址。三条命令都从**全库**取候选，
 所以在一整个 vault 上跑之前先想清楚范围（确认弹窗里可以按篇取消勾选）。
+
+⚠️ **`Halo: 批量撤回` 不写回本地笔记**（它不碰笔记，见下方「批量操作」）。而 `Halo: 批量发布`
+对每一篇都强制传「发布」、不看笔记里的 `halo.publish`，所以**撤回后再跑一次批量发布会让这些文章复活**。
 
 ## 架构
 
@@ -91,7 +94,12 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 **批量推草稿与批量发布也会改写本地笔记**，不是只动远端：`uploadImages()` 在「替换图片链接」打开时会把
 笔记里的本地图片地址换成 Halo 地址（并可能把远程链接还原成本地，`restoreCachedLocalImageLinks()`），
 发布状态也会回写进 `halo.publish`。确认弹窗里有一条显式提示（`batch.notice_rewrites_notes`），
-且它必须出现在**确认之前**。批量撤回只改 `halo.publish`，连正文都不读。
+且它必须出现在**确认之前**。**批量撤回是个例外：它只在远端把发布状态退回草稿**，不读正文、
+也**不回写本地笔记** —— `runBatch()` 的 unpublish 分支直接 `changePostPublish()` 后 `continue`，
+从不进 `executePublish()`（`applyPostToFrontmatter` 的三个调用点里没有它）。
+所以撤回后笔记里的 `halo.publish` **仍是原值**，而 `batch publish` 对每一篇强制传
+`publishOverride: true`、不看本地值 —— **撤回后再跑一次批量发布会把这些文章重新发出去**。
+（`tests/batch-publish.test.ts` 有用例钉住「撤回不碰 `publishPost`」。）
 
 ### 业务层 — `src/service/` 与 `src/transport/`
 
@@ -181,7 +189,11 @@ halo:
 `publish: true` 的优先级是「命令的显式覆盖 > frontmatter 的 `publish` > 设置里的 `publishByDefault`」，
 其中 frontmatter 那一档读的是**规划阶段**记下的 `plan.publishFromFrontmatter`，不是执行时现读笔记。
 
-**稀疏是契约**（`HaloPostFields` 上的键「在不在」就是「写没写」）：
+**稀疏是契约**（`HaloPostFields` 上的键「在不在」就是「写没写」）。**前提是这篇笔记已经存在远端文章**
+—— 下面这些「跟随远端」的说法对**新建**（从没发布过的笔记）没有对象：新建分支的底是
+`createEmptyPost()` 那个字段齐全的字面量（`src/service/index.ts`），没有远端可跟随，
+所以缺键时用的是**插件内置默认值**。（那份默认值的唯一定义在 `createEmptyPost()`，
+文档刻意不复述，避免第二份真值来源随代码漂移。）
 
 - **`null` 与「键不存在」同义**。判据是 `value !== undefined && value !== null`，**不是真假判断**。
   对 `pinned` / `allowComment` / `priority` / `template` 用真假判断，会把 `pinned: false` 变成
