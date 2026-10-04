@@ -646,17 +646,24 @@ class HaloService {
   /**
    * 上传一篇笔记里的图片，必要时回写 markdown。
    *
-   * ⚠️ 两个入口的参数顺序**刻意不一致**：这里是 `uploadImages(options, file?)`（options 在前），
-   * 而 `publishPost(file, options?)` 是 file 在前。别顺手「统一」成同一种顺序 ——
-   * 下游按这个签名往下写，改动会静默改掉调用点。
+   * 目标文件有**两种给法，都支持**：
+   * - 写在 options 里（`{ file }`）—— **批量路径（Task 10）用的就是这种**；
+   * - 作为第二个位置参数 —— 单篇命令用这种。
+   *
+   * 两者同时给出时 **options 里的那个优先**。顺序不能反过来：批量只传 options、不给第二个
+   * 位置参数，若让位置参数优先，那个 `undefined` 会**盖掉** `options.file` → 静默回落到
+   * 活动编辑器 → 每一篇的图片都传到当前打开的那篇上，正是本计划要消灭的「静默错文件」。
+   *
+   * ⚠️ 另一个入口 `publishPost(file, options?)` 是 file 在前 —— 两处顺序刻意不一致，
+   * 别顺手「统一」，改了就静默改掉调用点。
    *
    * 实现在 `./image-upload`——这里只负责拼出运行上下文。
    */
   public async uploadImages(
-    options: { silent?: boolean; replaceMarkdown?: boolean } = {},
+    options: { silent?: boolean; replaceMarkdown?: boolean; file?: TFile } = {},
     file?: TFile,
   ): Promise<UploadImagesResult> {
-    return uploadImages({ ...options, file }, this.imageUploadContext());
+    return uploadImages({ ...options, file: options.file ?? file }, this.imageUploadContext());
   }
 
   /**

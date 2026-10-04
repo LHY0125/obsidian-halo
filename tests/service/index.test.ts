@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
-import type { RequestUrlParam } from "obsidian";
+import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { resources } from "../../src/i18n";
 import HaloService from "../../src/service";
@@ -477,6 +477,51 @@ describe("HaloService.uploadImages", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  test("file 给在 options 里时作用于那个文件，而不是活动编辑器", async () => {
+    // 判别器：把转发改成 `{ ...options, file }`（位置参数优先）这条就红 ——
+    // 那正是 `options.file ?? file` 的方向写反时的形态。
+    //
+    // 为什么非要钉它：批量路径（Task 10）的调用形态是
+    // `uploadImages({ file: item.file, silent: true })` —— **只给 options、不给第二个参数**。
+    // 方向写反的话，位置参数那个 `undefined` 会盖掉 `item.file` → 静默回落到活动编辑器 →
+    // 每一篇的图片都传到当前打开的那篇上。**这是静默的**，批量跑完还会报"成功"。
+    const explicit = createFile("notes/other.md");
+    const active = createFile("active.md");
+    const image = createFile("a.png");
+    // 内容挂在 explicit 上：`vault.read` 按 `file.path` 查表，**查不到就返回空串**
+    const { app, vault } = createMockApp("![A](a.png)", explicit, [image]);
+    const { client } = fakeUploads({ "a.png": "/uploads/a.png" });
+
+    // 活动编辑器指向**另一个**文件：options 里的 file 若被忽略，读到的就是它
+    (app.workspace as unknown as { activeEditor: { file: TFile } }).activeEditor = { file: active };
+
+    await new HaloService(app, createSettings(), site, client).uploadImages({ file: explicit, silent: true });
+
+    expect(vault.read).toHaveBeenCalledWith(explicit);
+    expect(vault.read).not.toHaveBeenCalledWith(active);
+    // 也钉住**回写**落在同一个文件上：只看 `vault.read` 的话，
+    // 一个「读了显式文件、却用活动编辑器回写」的实现照样绿
+    expect(vault.modify).toHaveBeenCalledWith(explicit, "![A](https://halo.example.com/uploads/a.png)");
+  });
+
+  test("两种给法同时给出时，options 里的 file 优先", async () => {
+    // 与上一条配对：把方向反过来（`file ?? options.file`）时这条红。
+    // 单篇命令给的是位置参数、批量给的是 options —— 两者同时出现时以 options 为准。
+    const fromOptions = createFile("notes/from-options.md");
+    const fromArg = createFile("notes/from-arg.md");
+    const image = createFile("a.png");
+    const { app, vault } = createMockApp("![A](a.png)", fromOptions, [image]);
+    const { client } = fakeUploads({ "a.png": "/uploads/a.png" });
+
+    await new HaloService(app, createSettings(), site, client).uploadImages(
+      { file: fromOptions, silent: true },
+      fromArg,
+    );
+
+    expect(vault.read).toHaveBeenCalledWith(fromOptions);
+    expect(vault.read).not.toHaveBeenCalledWith(fromArg);
   });
 });
 
