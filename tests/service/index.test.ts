@@ -3,7 +3,7 @@ import i18next from "i18next";
 import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { resources } from "../../src/i18n";
-import HaloService from "../../src/service";
+import HaloService, { type PublishResult } from "../../src/service";
 import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
 import { McpError } from "../../src/transport/errors";
@@ -497,7 +497,12 @@ describe("HaloService.uploadImages", () => {
     // 活动编辑器指向**另一个**文件：options 里的 file 若被忽略，读到的就是它
     (app.workspace as unknown as { activeEditor: { file: TFile } }).activeEditor = { file: active };
 
-    await new HaloService(app, createSettings(), site, client).uploadImages({ file: explicit, silent: true });
+    // `replaceImageLinks` 显式写出来：下面那条 `vault.modify` 断言只在它为真时成立。
+    // 靠 `createSettings()` 的隐式默认值的话，将来谁翻转默认值，先红的会是这条
+    // **看起来与默认值无关**的用例 —— 排查时会被误判成"无关失败"。
+    const service = new HaloService(app, createSettings({ replaceImageLinks: true }), site, client);
+
+    await service.uploadImages({ file: explicit, silent: true });
 
     expect(vault.read).toHaveBeenCalledWith(explicit);
     expect(vault.read).not.toHaveBeenCalledWith(active);
@@ -522,6 +527,28 @@ describe("HaloService.uploadImages", () => {
 
     expect(vault.read).toHaveBeenCalledWith(fromOptions);
     expect(vault.read).not.toHaveBeenCalledWith(fromArg);
+  });
+
+  test("不传 file 时回落到活动编辑器", async () => {
+    // 这条钉的是 `options.file ?? ctx.app.workspace.activeEditor?.file` 的**右半边**。
+    // 改造前那 9 条既有用例**全部**依赖这条回落（那是它们当时唯一的文件来源），
+    // 改造后它们都显式传了文件 —— 于是这半边一度**零覆盖**，而 brief 明确要求
+    // 「单篇路径不传 file 时行为一致」。零覆盖的回落分支是最容易在后续重构里被删掉的。
+    //
+    // ⚠️ 但别把它当成**生产受测路径**：这条回落今天已经**不可达**了 ——
+    // `main.ts` 的两处调用点都传显式文件。它在测的是「万一将来有人不传，别退化成什么都不做」。
+    const active = createFile("notes/active.md");
+    const image = createFile("a.png");
+    const { app, vault } = createMockApp("![A](a.png)", active, [image]);
+    const { client } = fakeUploads({ "a.png": "/uploads/a.png" });
+
+    const result = await new HaloService(app, createSettings({ replaceImageLinks: true }), site, client).uploadImages({
+      silent: true,
+    });
+
+    expect(result.processedCount).toBe(1);
+    expect(vault.read).toHaveBeenCalledWith(active);
+    expect(vault.modify).toHaveBeenCalledWith(active, "![A](https://halo.example.com/uploads/a.png)");
   });
 });
 
@@ -1230,6 +1257,35 @@ describe("publishPost 走 MCP", () => {
 
     expect((written?.halo as { publishTime?: string } | undefined)?.publishTime).toBe("2026-10-06T10:00:00.000Z");
   });
+
+  test("publishPost 作用于显式传入的那个文件，而不是活动编辑器", async () => {
+    // 判别器：把实现改成 `this.app.workspace.activeEditor?.file ?? file`，这条就红。
+    //
+    // 为什么必须让**正文内容**成为判别力所在：本文件的 mock 里 `processFrontMatter` **忽略
+    // file 参数**（见 `tests/helpers/obsidian-mocks.ts`），所以任何 frontmatter 断言对
+    // 「用了哪个文件」都是零判别力。唯一能作证的是「读出来的正文」—— 内容挂在显式文件上，
+    // 写工具的 `raw` 就必须带着它。
+    //
+    // 这条契约在本计划里**没有第二个见证**：Task 10 的批量循环调的正是 `publishPost(item.file, …)`，
+    // 而 Task 10 自己的测试把 `HaloService` 整个 stub 掉了，永远走不到这一层。
+    // 其余 29 处调用点的 `createMockApp` activeFile **恰好就是**传进去的那个文件，
+    // 所以「改成读活动编辑器」的错实现在它们那里全都是绿的 —— 这条是唯一的拦路者。
+    const explicit = createFile("notes/other.md");
+    const active = createFile("notes/active.md");
+    const { app, metadataCache } = createMockApp("hello world", explicit, []);
+    const { client, calls } = fakeService();
+    metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
+
+    // 活动编辑器指向**另一个**文件：显式 file 若被忽略，读到的就是它（内容是空串）
+    (app.workspace as unknown as { activeEditor: { file: TFile } }).activeEditor = { file: active };
+
+    await new HaloService(app, createSettings(), site, client).publishPost(explicit);
+
+    // 先钉住写入真的发生了 —— 否则下面的断言在「压根没调工具」的实现下也会通过
+    const create = calls.find((call) => call.name === "halo_create_post");
+    expect(create).toBeDefined();
+    expect(create?.args.raw).toBe("hello world");
+  });
 });
 
 describe("changePostPublish 走 MCP", () => {
@@ -1887,9 +1943,22 @@ describe("publishPost 的返回值、quiet 与 publishOverride", () => {
     const seen = notices.length;
     metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
 
-    const result = await new HaloService(app, createSettings(), site, client).publishPost(note);
+    // 写失败会被 `withPublishRetry` 重试满 3 次（退避 500+1000+1500ms = 3 秒真实等待）。
+    // 快进掉 —— 与本文件另外三条重试用例同一处置（样板见「发布状态调用瞬时失败时会被重试」）。
+    rs.useFakeTimers();
 
-    expect(result.ok).toBe(false);
+    let result: PublishResult | undefined;
+
+    try {
+      const pending = new HaloService(app, createSettings(), site, client).publishPost(note);
+      await rs.advanceTimersByTimeAsync(5_000);
+      result = await pending;
+    } finally {
+      rs.useRealTimers();
+    }
+
+    expect(result?.ok).toBe(false);
+    // 与便签**逐字一致**（不断言它等于某个 key —— `publishFailureMessage` 会拼上服务端原文）
     expect(notices.slice(seen)).toEqual([(result as { reason: string }).reason]);
   });
 

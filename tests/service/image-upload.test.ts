@@ -164,12 +164,16 @@ describe("uploadImages 的显式 file", () => {
     // 这也是本用例唯一能分辨「读的是哪一个文件」的入口 —— 见下一条注释。
     const { app, vault } = createMockApp("![A](a.png)", explicit, [image]);
     const { client, calls } = createFakeClient(() => ({ permalink: "/uploads/a.png" }));
+    // `replaceImageLinks` 显式写出来：下面那条 `vault.modify` 断言只在它为真时成立。
+    // 靠 `createSettings()` 的隐式默认值的话，将来谁翻转默认值，先红的会是这条
+    // **看起来与默认值无关**的用例 —— 排查时会被误判成"无关失败"。
+    const settings = createSettings({ replaceImageLinks: true });
 
     // 活动编辑器指向**另一个**文件：`options.file` 若被忽略，读到的就是它（内容是空串，
     // 于是本地图片引用一个都收集不到 → 后面的 MCP 断言也会红）。
     (app.workspace as unknown as { activeEditor: { file: TFile } }).activeEditor = { file: active };
 
-    await uploadImages({ file: explicit, silent: true }, { app, client, settings: createSettings(), site: TEST_SITE });
+    await uploadImages({ file: explicit, silent: true }, { app, client, settings, site: TEST_SITE });
 
     expect(vault.read).toHaveBeenCalledWith(explicit);
     expect(vault.read).not.toHaveBeenCalledWith(active);

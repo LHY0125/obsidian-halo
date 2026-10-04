@@ -21,7 +21,7 @@ type Internals = {
   publishCommand(): Promise<void>;
   getSiteForActiveFile(): Promise<unknown>;
   resolveSiteFor(file: unknown): unknown;
-  uploadImagesForPublish(service: unknown): Promise<{ success: boolean }>;
+  uploadImagesForPublish(service: unknown, file: unknown): Promise<{ success: boolean }>;
 };
 
 function makePlugin(): { plugin: Internals; file: ReturnType<typeof createFile> } {
