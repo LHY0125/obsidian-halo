@@ -1,6 +1,7 @@
 import type { Post } from "@halo-dev/api-client";
 import { type App, TFile, getLinkpath, normalizePath } from "obsidian";
 import { slugify } from "transliteration";
+import type { HaloPostFields } from "../frontmatter-map";
 import type { ImageUploadCacheEntry } from "../settings";
 
 export interface LocalImageReference {
@@ -29,6 +30,16 @@ export interface HaloPostFrontmatter {
     site?: string;
     name?: string;
     publish?: boolean;
+    /**
+     * 这 6 个键**声明在这里只为让读者知道它们合法**：读取一律走 `parseHaloPostFields()`
+     * （那才有校验与「在不在」语义），本文件不直接读它们。
+     */
+    visible?: HaloPostFields["visible"];
+    pinned?: HaloPostFields["pinned"];
+    priority?: HaloPostFields["priority"];
+    publishTime?: HaloPostFields["publishTime"];
+    allowComment?: HaloPostFields["allowComment"];
+    template?: HaloPostFields["template"];
   };
 }
 
@@ -38,6 +49,14 @@ export interface ApplyPostFrontmatterOptions {
   matterData?: HaloPostFrontmatter;
   tagNames?: string[];
   useActiveFileDefaults: boolean;
+  /**
+   * 已校验的 6 个元数据字段（`parseHaloPostFields()` 的产物），直接展开进 `spec`。
+   *
+   * 刻意传**已校验的稀疏对象**，而不是让本函数自己去读 `matterData.halo`：校验与落地各读一遍
+   * 同一批键，两处判断一旦分叉，就会出现「校验放行的值落不下去」或「没校验的值落下去」——
+   * 而后者会往服务端送一个 schema 之外的值。让「校验的产物」成为唯一入口，分叉就不可能发生。
+   */
+  haloFields?: HaloPostFields;
 }
 
 export const IMAGE_EXTENSIONS = new Set([
@@ -55,7 +74,7 @@ export const IMAGE_EXTENSIONS = new Set([
 ]);
 
 export function applyPostFrontmatter(post: Post, options: ApplyPostFrontmatterOptions): Post {
-  const { activeFile, categoryNames, matterData, tagNames, useActiveFileDefaults } = options;
+  const { activeFile, categoryNames, haloFields, matterData, tagNames, useActiveFileDefaults } = options;
   const nextPost: Post = {
     ...post,
     metadata: {
@@ -66,6 +85,9 @@ export function applyPostFrontmatter(post: Post, options: ApplyPostFrontmatterOp
     },
     spec: {
       ...post.spec,
+      // 稀疏展开：只有 frontmatter 写了的键才在 haloFields 上，所以「没这个键」= 保留远端值。
+      // 这一行就是 spec「没写就跟随远端，而不是覆盖成 0/false」的全部实现。
+      ...haloFields,
       categories: [...(post.spec.categories || [])],
       excerpt: {
         ...post.spec.excerpt,

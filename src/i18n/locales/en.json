@@ -138,5 +138,12 @@
       "network": "Could not reach the MCP endpoint. Check the site URL and your network.",
       "unknown": "The MCP request failed. Check the site configuration and the Halo console."
     }
+  },
+  "frontmatter": {
+    "error_visible": "The value \"{{value}}\" of `halo.visible` is invalid: it must be one of PUBLIC, INTERNAL, PRIVATE.",
+    "error_boolean": "The value \"{{value}}\" of `halo.{{field}}` is invalid: it must be an unquoted true or false.",
+    "error_integer": "The value \"{{value}}\" of `halo.{{field}}` is invalid: it must be an integer.",
+    "error_string": "The value \"{{value}}\" of `halo.{{field}}` is invalid: it must be a string.",
+    "error_publish_time": "The value \"{{value}}\" of `halo.publishTime` is not a recognizable time. Use RFC 3339 (e.g. 2026-10-06T10:00:00+08:00); use an empty string \"\" to publish immediately."
   }
 }

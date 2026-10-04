@@ -138,5 +138,12 @@
       "network": "无法连接 MCP 端点。请检查站点地址与网络。",
       "unknown": "MCP 请求失败。请检查站点配置与 Halo 后台。"
     }
+  },
+  "frontmatter": {
+    "error_visible": "「halo.visible」的值「{{value}}」不合法：只能是 PUBLIC、INTERNAL 或 PRIVATE 之一。",
+    "error_boolean": "「halo.{{field}}」的值「{{value}}」不合法：必须是不加引号的 true 或 false。",
+    "error_integer": "「halo.{{field}}」的值「{{value}}」不合法：必须是一个整数。",
+    "error_string": "「halo.{{field}}」的值「{{value}}」不合法：必须是一个字符串。",
+    "error_publish_time": "「halo.publishTime」的值「{{value}}」不是能识别的时间。请写成 RFC 3339 格式（如 2026-10-06T10:00:00+08:00）；要立即发布请写空串 \"\"。"
   }
 }

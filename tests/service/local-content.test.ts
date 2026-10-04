@@ -1,5 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
+import type { Post } from "@halo-dev/api-client";
+import type { TFile } from "obsidian";
 import {
+  applyPostFrontmatter,
   decodeMarkdownPath,
   formatMarkdownImagePath,
   formatWikiImageEmbed,
@@ -102,5 +105,90 @@ describe("formatWikiImageEmbed", () => {
 
   it("别名里的竖线被转义，避免破坏 embed 语法", () => {
     expect(formatWikiImageEmbed(entry, "a|b")).toBe("![[assets/a.png|a\\|b]]");
+  });
+});
+
+describe("applyPostFrontmatter —— 6 个元数据字段", () => {
+  const activeFile = { basename: "笔记", path: "a.md" } as TFile;
+
+  /** 模拟「从服务端读回来的那一篇」：每个字段都有一个与默认值不同的初值，好让覆盖可见 */
+  function remotePost(): Post {
+    return {
+      metadata: { annotations: {} },
+      spec: {
+        title: "远端标题",
+        slug: "remote-slug",
+        cover: "",
+        template: "remote-template",
+        pinned: true,
+        priority: 7,
+        publishTime: "2026-01-01T00:00:00.000Z",
+        allowComment: true,
+        visible: "INTERNAL",
+        publish: true,
+        categories: [],
+        tags: [],
+        htmlMetas: [],
+        excerpt: { autoGenerate: true, raw: "" },
+      },
+    } as unknown as Post;
+  }
+
+  it("不传 haloFields 时一个元数据字段都不动 —— 「没写就跟随远端」", () => {
+    const next = applyPostFrontmatter(remotePost(), { activeFile, matterData: {}, useActiveFileDefaults: false });
+
+    expect(next.spec.visible).toBe("INTERNAL");
+    expect(next.spec.pinned).toBe(true);
+    expect(next.spec.priority).toBe(7);
+    expect(next.spec.publishTime).toBe("2026-01-01T00:00:00.000Z");
+    expect(next.spec.template).toBe("remote-template");
+  });
+
+  it("显式假值覆盖远端的真值（这是真假判断实现会漏掉的那条）", () => {
+    const next = applyPostFrontmatter(remotePost(), {
+      activeFile,
+      matterData: {},
+      haloFields: { pinned: false, priority: 0, allowComment: false },
+      useActiveFileDefaults: false,
+    });
+
+    expect(next.spec.pinned).toBe(false);
+    expect(next.spec.priority).toBe(0);
+    expect(next.spec.allowComment).toBe(false);
+  });
+
+  it("6 个字段逐一落进 spec（名字写错时这里会红）", () => {
+    const next = applyPostFrontmatter(remotePost(), {
+      activeFile,
+      matterData: {},
+      haloFields: {
+        visible: "PRIVATE",
+        pinned: false,
+        priority: 3,
+        publishTime: "2026-10-06T10:00:00+08:00",
+        allowComment: false,
+        template: "custom",
+      },
+      useActiveFileDefaults: false,
+    });
+
+    expect(next.spec.visible).toBe("PRIVATE");
+    expect(next.spec.pinned).toBe(false);
+    expect(next.spec.priority).toBe(3);
+    expect(next.spec.publishTime).toBe("2026-10-06T10:00:00+08:00");
+    expect(next.spec.allowComment).toBe(false);
+    expect(next.spec.template).toBe("custom");
+  });
+
+  it("不就地改动入参对象", () => {
+    const post = remotePost();
+    applyPostFrontmatter(post, {
+      activeFile,
+      matterData: {},
+      haloFields: { pinned: false },
+      useActiveFileDefaults: false,
+    });
+
+    expect(post.spec.pinned).toBe(true);
   });
 });
