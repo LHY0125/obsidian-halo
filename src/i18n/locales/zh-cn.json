@@ -239,7 +239,9 @@
     "skip_unreadable": "读不出这篇笔记的内容（正文或其图片不可用），已把它排除在本次批量之外。",
     "error_no_sites": "请先配置站点。",
     "error_no_candidates": "没有可批量处理的笔记。",
-    "summary_title": "批量操作完成",
-    "summary_line": "成功 {{success}} 篇，失败 {{failed}} 篇，另有 {{skipped}} 篇在执行前就被跳过（原因见确认清单）。"
+    "summary_title_draft": "批量推草稿完成",
+    "summary_title_publish": "批量发布完成",
+    "summary_title_unpublish": "批量撤回完成",
+    "summary_line": "成功 {{success}} 篇，失败 {{failed}} 篇，另有 {{skipped}} 篇在执行前就被跳过。"
   }
 }

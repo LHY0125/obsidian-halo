@@ -420,4 +420,16 @@ describe("BatchSummaryModal 的汇总渲染", () => {
     expect(texts).toContain("b.md —— ");
     expect(texts.some((text) => text.includes("undefined"))).toBe(false);
   });
+
+  it("标题按 action 分档：跑完撤回不会显示成「发布完成」", () => {
+    // 三个命令跑完都是同一句话的话，用户点了「批量撤回」看到「成功 118 篇」，
+    // 弹窗**没说是撤回了还是发出去了** —— 而这正是他跑完之后最需要确认的那件事。
+    const draft = renderSummary(summaryOf("draft", [{ path: "a.md", ok: true }]));
+    const unpublish = renderSummary(summaryOf("unpublish", [{ path: "a.md", ok: true }]));
+
+    expect(draft).toContain(i18next.t("batch.summary_title_draft"));
+    expect(unpublish).toContain(i18next.t("batch.summary_title_unpublish"));
+    // 反面：写死一个标题的实现能过上一条、过不了这一条
+    expect(draft).not.toContain(i18next.t("batch.summary_title_unpublish"));
+  });
 });

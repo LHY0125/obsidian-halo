@@ -246,7 +246,11 @@ export class BatchSummaryModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
 
-    contentEl.createEl("h2", { text: i18next.t("batch.summary_title") });
+    // 标题按 action 分档，**不用一句通用的「批量操作完成」**：三个命令跑完是同一句的话，
+    // 用户点了「批量推草稿」看到「成功 118 篇」，弹窗**没说是草稿还是已经发出去了** ——
+    // 而这正是他跑完之后最需要确认的那件事。`action` 本来就带在 `BatchRunSummary` 上。
+    // 动态键的写法与上面 `BatchConfirmModal` 的 `batch.title_${action}` 一致。
+    contentEl.createEl("h2", { text: i18next.t(`batch.summary_title_${this.summary.action}`) });
     contentEl.createEl("p", {
       text: i18next.t("batch.summary_line", {
         success: this.summary.successCount,

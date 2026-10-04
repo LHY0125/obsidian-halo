@@ -209,7 +209,7 @@ export async function planBatch(
 
       try {
         images = await deps.summarizeImages(candidate);
-      } catch {
+      } catch (error) {
         // 概览要读笔记正文（`summarizeLocalImages` 在 `vault.read` 失败时抛），而**一篇读不出来
         // 不该让整份 118 篇的计划一起 reject**。这与上面 `listTaxonomy` 那条处置是同一条立场，
         // 只是失败方向更凶险：`runBatchCommand` 里 `planBatch` 是**裸调用**，异常直接冒到命令
@@ -221,6 +221,16 @@ export async function planBatch(
         // 发生的事不符。跳过则复用了既有的「这篇进不了批，原因是……」这条出路，
         // 用户能在确认弹窗的跳过清单里看见它、知道要去看一眼那篇笔记。
         allSkipped.push({ path: candidate.file.path, key: "batch.skip_unreadable" });
+
+        // **但线索不能跟着一起吞掉。** 跳过是以「用户的笔记有问题」的措辞告诉他的
+        //（「读不出这篇笔记的内容」），而这条 catch 同样会接住 `summarizeImages` 内部的
+        // 类型错误 / 接口变更 —— 那时 118 篇会一起被跳过，用户去翻遍自己的笔记也找不到问题，
+        // 因为它根本不在笔记里。控制台留一份带路径的原始错误，是「失败要说得出是哪种失败」
+        // 在这条路径上的最低要求：至少有人能看出这是插件的问题。
+        console.error(
+          `[obsidian-halo] 读取笔记以统计图片失败，已把这一篇排除在本次批量之外：${candidate.file.path}`,
+          error,
+        );
         continue;
       }
 

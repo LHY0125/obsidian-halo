@@ -239,7 +239,9 @@
     "skip_unreadable": "讀不出這篇筆記的內容（正文或其圖片無法取得），已將它排除在本次批次之外。",
     "error_no_sites": "請先設定站點。",
     "error_no_candidates": "沒有可批次處理的筆記。",
-    "summary_title": "批次操作完成",
-    "summary_line": "成功 {{success}} 篇，失敗 {{failed}} 篇，另有 {{skipped}} 篇在執行前就被跳過（原因見確認清單）。"
+    "summary_title_draft": "批次推送草稿完成",
+    "summary_title_publish": "批次發佈完成",
+    "summary_title_unpublish": "批次撤回完成",
+    "summary_line": "成功 {{success}} 篇，失敗 {{failed}} 篇，另有 {{skipped}} 篇在執行前就被跳過。"
   }
 }

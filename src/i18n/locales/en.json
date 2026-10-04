@@ -239,7 +239,9 @@
     "skip_unreadable": "The note could not be read (its content or images are unavailable) — it was left out of this batch.",
     "error_no_sites": "Configure a site first.",
     "error_no_candidates": "No notes to process in batch.",
-    "summary_title": "Batch run finished",
-    "summary_line": "{{success}} succeeded, {{failed}} failed, and {{skipped}} were skipped before the run (see the confirmation list for the reasons)."
+    "summary_title_draft": "Batch push as drafts finished",
+    "summary_title_publish": "Batch publish finished",
+    "summary_title_unpublish": "Batch unpublish finished",
+    "summary_line": "{{success}} succeeded, {{failed}} failed, and {{skipped}} were skipped before the run."
   }
 }
