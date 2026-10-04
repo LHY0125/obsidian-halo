@@ -1,6 +1,6 @@
 import i18next from "i18next";
 import { Notice, Plugin, type TFile, moment } from "obsidian";
-import { resources } from "./i18n";
+import { initializeI18n } from "./i18n";
 import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
 import { openPostSelectionModal } from "./post-selection-model";
@@ -26,12 +26,10 @@ export default class HaloPlugin extends Plugin {
   async onload() {
     console.log("loading obsidian-halo plugin");
 
-    await i18next.init({
-      lng: moment.locale(),
-      fallbackLng: "en",
-      resources,
-      returnNull: false,
-    });
+    // 语言取 Obsidian 自己的 locale（`moment.locale()`，可能是 `zh-cn` 这种小写形态），
+    // 回落 `en` 由 `initializeI18n` 负责。**不要在这里自己拼 options** ——
+    // 全局的 `interpolation.escapeValue` 必须只有一份，理由见 `initializeI18n` 的注释。
+    await initializeI18n(moment.locale());
 
     await this.loadSettings();
 
