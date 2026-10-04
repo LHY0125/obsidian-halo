@@ -306,7 +306,7 @@ class HaloService {
         newCategories: pickNewTerms(desiredCategories, existingCategories),
         newTags: pickNewTerms(desiredTags, existingTags),
         // 概览按 `md` 算，不按盘上的内容算 —— 与上面的「正文取自哪一份」同源
-        images: await summarizeLocalImages(file, this.imageUploadContext(), md),
+        images: await this.summarizeImages(file, md),
         publishFromFrontmatter,
         matterData,
         haloFields: haloFields.fields,
@@ -903,12 +903,16 @@ class HaloService {
   /**
    * 只读的图片概览，供发布预览与批量确认使用（**不发出任何请求**）。
    *
-   * 刻意不在 `planPublish` 里直接把 `imageUploadContext()` 传给模块函数了事：这条封装把
-   * 「上传模块的运行上下文」留在类内部。为了省一行而把 `imageUploadContext()` 开成 public，
-   * 等于把整个上传模块的依赖（app / settings / site / client）暴露给所有调用方。
+   * 规划阶段也走这一条，而不是直接调模块函数：这条封装把「上传模块的运行上下文」留在类内部，
+   * 否则 `planPublish` 就得自己拼一份 `imageUploadContext()` —— 那正是「为了省一行而把上传
+   * 模块的依赖（app / settings / site / client）摊到每个调用方手上」的开始。
+   *
+   * `markdown` 缺席时才读盘。发布链路把它手上那份（**上传图片之后**的正文）递进来：
+   * 同一次发布不必为算概览再读一遍盘，更不会拿上传之前的旧内容去统计张数 ——
+   * 而预览要报的必须是即将发布的那一份。
    */
-  public async summarizeImages(file: TFile): Promise<LocalImageSummary> {
-    return summarizeLocalImages(file, this.imageUploadContext());
+  public async summarizeImages(file: TFile, markdown?: string): Promise<LocalImageSummary> {
+    return summarizeLocalImages(file, this.imageUploadContext(), markdown);
   }
 
   /**
