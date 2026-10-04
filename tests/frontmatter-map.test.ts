@@ -228,10 +228,15 @@ describe("applyPostToFrontmatter", () => {
     expect(frontmatter.categories).toEqual([]);
   });
 
-  it("tagNames 是空数组时**照写**（与 categories 那条同形，但两条分支各自独立）", () => {
-    // 判别器：把 `applyPostToFrontmatter` 里 `if (options.tagNames)` 那一块删掉就红 ——
-    // `tags` 会保持笔记原值。`categories` 那条分支有独立守卫（上面一条用例），`tags` 此前没有：
-    // 两条分支代码同形，只改其中一条不会让任何用例变红。
+  it("tagNames 是空数组时**照写**（补的是 `[]` 那一档，不是「此前没人守」）", () => {
+    // 判别器：把 `applyPostToFrontmatter` 里 `if (options.tagNames)` 那一块删掉就红。
+    //
+    // ⚠️ 但**不能**把这条读成「`tags` 那条守卫此前没人守」—— 上面那条「写入 4 个元数据字段与 halo 块」
+    // 用的是 `expect(frontmatter).toEqual({…})` 的**整体对象**断言，入参同时给了
+    // `categoryNames: ["技术思考"]` 与 `tagNames: ["Halo"]`，因此删掉**任一条**守卫都会让它红
+    //（实测：删 `tagNames` 那条 → 它也红；删 `categoryNames` 那条 → 它也红）。
+    // 这一条补的是 **`[]` 这一档**：那条走的是「非空值进得去」，而这里走的是「空数组也是真值、
+    // 也照写」——「跳过」是 `null` / `undefined` 那一档（见上面两条用例）。
     const frontmatter: Record<string, unknown> = { categories: ["旧分类"], tags: ["旧标签"] };
 
     applyPostToFrontmatter(frontmatter, makePost(), {
