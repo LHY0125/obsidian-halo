@@ -163,6 +163,10 @@ export function collectBatchCandidates(
  *
  * `deps` 注入也是为了让这层可测：`listTaxonomy` 走 MCP、`summarizeImages` 读文件，
  * 两者都是副作用，而本函数的产出全是纯数据。
+ *
+ * **`action === "unpublish"` 时既不调 `summarizeImages`、也不做概览跳过**：撤回不改写正文、
+ * 不上传图片，为它读一遍正文只会制造一条答非所问的跳过理由（「读不出这篇笔记的内容」）。
+ * 该分支下每篇条目的 `images` 是零值。
  */
 export async function planBatch(
   candidates: BatchCandidate[],
@@ -207,31 +211,44 @@ export async function planBatch(
     for (const candidate of bucket) {
       let images: LocalImageSummary;
 
-      try {
-        images = await deps.summarizeImages(candidate);
-      } catch (error) {
-        // 概览要读笔记正文（`summarizeLocalImages` 在 `vault.read` 失败时抛），而**一篇读不出来
-        // 不该让整份 118 篇的计划一起 reject**。这与上面 `listTaxonomy` 那条处置是同一条立场，
-        // 只是失败方向更凶险：`runBatchCommand` 里 `planBatch` 是**裸调用**，异常直接冒到命令
-        // 回调 —— 用户点了「批量发布」，没有弹窗、没有汇总、什么都没有，正是本计划要消灭的
-        // 「说不清是哪一种失败」。
-        //
-        // 处置是**跳过这一篇**，而不是给它一个「空概览」蒙混过去：空的概览会让确认弹窗写着
-        // 「待上传 0 张」，而执行阶段照样会把那几张贴上去 —— 用户在确认时看到的数字与实际
-        // 发生的事不符。跳过则复用了既有的「这篇进不了批，原因是……」这条出路，
-        // 用户能在确认弹窗的跳过清单里看见它、知道要去看一眼那篇笔记。
-        allSkipped.push({ path: candidate.file.path, key: "batch.skip_unreadable" });
+      if (action === "unpublish") {
+        // **撤回不为概览读正文。** 两个理由，都不是性能：
+        // ① 概览读不出来会把这一篇记成 `batch.skip_unreadable`，而那句给用户的理由是
+        //    「读不出这篇笔记的内容」—— 对撤回**答非所问**：撤回根本不需要正文，用户会被
+        //    引去看一个与他这次操作无关的问题，甚至因此以为这篇撤回不了。
+        // ② 顺带省掉「跑一次批量撤回把每篇候选正文都读一遍」。
+        // 零值而不是跳过渲染：撤回不上传图片，`summarizeSelection` 累加后 `pending` 与
+        // `overLimit` 都是 0，确认弹窗那条「要传 N 张图」本来就不会渲染（它门控在
+        // `pending > 0 || overLimit.length > 0` 上），所以这里不需要额外分档。
+        images = { pending: 0, cached: 0, overLimit: [] };
+      } else {
+        try {
+          images = await deps.summarizeImages(candidate);
+        } catch (error) {
+          // 概览要读笔记正文（`summarizeLocalImages` 在 `vault.read` 失败时抛），而**一篇读不出来
+          // 不该让整份 118 篇的计划一起 reject**。这与上面 `listTaxonomy` 那条处置是同一条立场，
+          // 只是失败方向更凶险：`runBatchCommand` 里 `planBatch` 是**裸调用**，异常直接冒到命令
+          // 回调 —— 用户点了「批量发布」，没有弹窗、没有汇总、什么都没有，正是本计划要消灭的
+          // 「说不清是哪一种失败」。
+          //
+          // 处置是**跳过这一篇**，而不是给它一个「空概览」蒙混过去：空的概览会让确认弹窗写着
+          // 「待上传 0 张」，而执行阶段照样会把那几张贴上去 —— 用户在确认时看到的数字与实际
+          // 发生的事不符。跳过则复用了既有的「这篇进不了批，原因是……」这条出路，
+          // 用户能在确认弹窗的跳过清单里看见它、知道要去看一眼那篇笔记。
+          // （**只有推草稿 / 发布走这条路** —— 撤回在上面那道 `action` 分支里就返回了。）
+          allSkipped.push({ path: candidate.file.path, key: "batch.skip_unreadable" });
 
-        // **但线索不能跟着一起吞掉。** 跳过是以「用户的笔记有问题」的措辞告诉他的
-        //（「读不出这篇笔记的内容」），而这条 catch 同样会接住 `summarizeImages` 内部的
-        // 类型错误 / 接口变更 —— 那时 118 篇会一起被跳过，用户去翻遍自己的笔记也找不到问题，
-        // 因为它根本不在笔记里。控制台留一份带路径的原始错误，是「失败要说得出是哪种失败」
-        // 在这条路径上的最低要求：至少有人能看出这是插件的问题。
-        console.error(
-          `[obsidian-halo] 读取笔记以统计图片失败，已把这一篇排除在本次批量之外：${candidate.file.path}`,
-          error,
-        );
-        continue;
+          // **但线索不能跟着一起吞掉。** 跳过是以「用户的笔记有问题」的措辞告诉他的
+          //（「读不出这篇笔记的内容」），而这条 catch 同样会接住 `summarizeImages` 内部的
+          // 类型错误 / 接口变更 —— 那时 118 篇会一起被跳过，用户去翻遍自己的笔记也找不到问题，
+          // 因为它根本不在笔记里。控制台留一份带路径的原始错误，是「失败要说得出是哪种失败」
+          // 在这条路径上的最低要求：至少有人能看出这是插件的问题。
+          console.error(
+            `[obsidian-halo] 读取笔记以统计图片失败，已把这一篇排除在本次批量之外：${candidate.file.path}`,
+            error,
+          );
+          continue;
+        }
       }
 
       items.push({ ...candidate, images });

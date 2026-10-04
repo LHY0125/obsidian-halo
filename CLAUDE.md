@@ -101,13 +101,14 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 `publishOverride: true`、不看本地值 —— **撤回后再跑一次批量发布会把这些文章重新发出去**。
 （`tests/batch-publish.test.ts` 有用例钉住「撤回不碰 `publishPost`」。）
 
-⚠️ **措辞纪律：这里写「不改写正文」，不写「不读正文」。** 后者是假的 ——
-`planBatch()` 对**三个 action 一视同仁**地在循环里无条件调 `deps.summarizeImages(candidate)`
-（`batch-publish.ts`），而它经 `summarizeImages(file)` 落到 `summarizeLocalImages`，**靠读盘取正文**；
-读不出来的笔记连撤回都进不去（记成 `batch.skip_unreadable`，而给的理由「读不出这篇笔记的内容」
-对撤回是答非所问）。「不改写」在两种世界里都为真，所以它**不会过期**。
-（这条不一致已记入终审输入 A18：修法是 `action === "unpublish"` 时不调 `summarizeImages` ——
-**待改**，改完之后「不读正文」才成立，届时可再议是否换回。）
+⚠️ **措辞纪律：这里写「不改写正文」，不写「不读正文」。** 后者在**推草稿 / 发布**两条路径上仍是假的 ——
+`planBatch()` 在那两条路径上会在循环里调 `deps.summarizeImages(candidate)`（`src/batch-publish.ts`），
+而它经 `summarizeImages(file)` 落到 `summarizeLocalImages`，**靠读盘取正文**；读不出来的笔记进不了批
+（记成 `batch.skip_unreadable`，理由是「读不出这篇笔记的内容」）。
+**撤回是例外**：`planBatch()` 的 `unpublish` 分支不调 `summarizeImages` —— 撤回不改写正文、也不上传图片，
+为它读一遍正文只会制造一条**答非所问**的跳过理由（用户会以为自己这篇撤回不了，而去查一个与本次操作无关的问题）。
+所以「**不改写**正文」在三条路径上都为真，它**不会过期**；要写「读 / 不读」就必须按 action 分档。
+**这段是行为描述，动 `planBatch()` / `runBatch()` 的人必须同时改本段。**
 
 **批量命令按命令名决定发布状态，不看笔记里的 `halo.publish`**：`publishOverride` 在批量路径上
 **永远是 `!== undefined`**（`publish` 给 `true`、`draft` 给 `false`、`unpublish` 走另一分支），

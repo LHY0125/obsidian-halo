@@ -341,6 +341,47 @@ describe("planBatch", () => {
     expect(plan.skipped).toEqual([{ path: "a.md", key: "batch.skip_unreadable" }]);
   });
 
+  it("撤回不为概览读正文：unpublish 下压根不调 summarizeImages", async () => {
+    // 判别器：把 `if (action === "unpublish")` 那道闸门换成无条件调用就会红。
+    //
+    // 为什么这是缺陷而不是性能问题：概览读不出来会把这一篇记成 `batch.skip_unreadable`，
+    // 而那句给用户的理由是「读不出这篇笔记的内容（正文或其图片不可用）」—— 对撤回**答非所问**，
+    // 撤回根本不需要正文。一篇读不出正文的笔记**连撤回都进不去**，用户被引去看一个
+    // 与他这次操作无关的问题。
+    let summarizeCalls = 0;
+    const plan = await planBatch([candidate("a.md", siteA)], [], "unpublish", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: async () => {
+        summarizeCalls++;
+        throw new Error("这篇读不出来");
+      },
+    });
+
+    expect(summarizeCalls).toBe(0);
+    expect(plan.skipped).toEqual([]);
+    expect(plan.groups[0].items.map((item) => item.file.path)).toEqual(["a.md"]);
+    // 撤回不上传图片，概览是零值 —— 确认弹窗那条「要传 N 张图」因此不会渲染
+    expect(plan.groups[0].items[0].images).toEqual({ pending: 0, cached: 0, overLimit: [] });
+  });
+
+  it("同样的候选换成 draft 时 summarizeImages 确实被调到（上一条「没有调」的对照物）", async () => {
+    // 「没有调」在代码路径压根没走到时永久为真。这条用**同一份候选、同一个会抛的实现**证明
+    // 那条路径本来会走到 —— 换成 draft 就真的调了，而且那个抛异常照样把它记成跳过。
+    let summarizeCalls = 0;
+    const plan = await planBatch([candidate("a.md", siteA)], [], "draft", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: async () => {
+        summarizeCalls++;
+        throw new Error("这篇读不出来");
+      },
+    });
+
+    expect(summarizeCalls).toBe(1);
+    expect(plan.skipped).toEqual([{ path: "a.md", key: "batch.skip_unreadable" }]);
+    // 对照物之二：draft 既然跳过了这一篇，组里就不剩任何条目（与上一条的「照样进计划」相反）
+    expect(plan.groups).toHaveLength(0);
+  });
+
   it("解析阶段与概览阶段的跳过**并集**带进计划（前者不被后者挤掉）", async () => {
     // `planBatch` 收到的 `skipped` 来自解析阶段，它自己在概览阶段又要往里加。
     // 一个「直接返回自己那份新数组」的实现会把解析阶段的跳过全丢掉 ——
