@@ -49,6 +49,10 @@
       "name": "默认發布文章",
       "description": "勾選之後，首次建立文章將直接發布"
     },
+    "skipPreviewOnPublish": {
+      "name": "發佈時跳過預覽",
+      "description": "勾選後，發佈命令不再彈出預覽確認框，直接執行。"
+    },
     "siteRouting": {
       "name": "站點路由規則",
       "description": "按筆記在庫內的相對路徑匹配目標站點，自上而下取首個命中的規則；都不命中時用預設站點。模式支援 *（不跨目錄）、**（跨目錄）、?（單一字元）。",
@@ -134,6 +138,35 @@
       "edit": "編輯",
       "add": "添加"
     }
+  },
+  "publish_preview": {
+    "title": "發佈預覽",
+    "button_confirm": "發佈",
+    "row_site": "目標站點",
+    "site_from_frontmatter": "（來自筆記的 halo.site）",
+    "site_from_rule": "（來自路由規則「{{pattern}}」）",
+    "site_from_default": "（來自預設站點設定）",
+    "site_from_single": "（唯一已設定的站點）",
+    "site_from_picked": "（你在彈窗裡選的）",
+    "row_title": "標題",
+    "row_slug": "Slug",
+    "row_characters": "正文字元數",
+    "row_visible": "可見性",
+    "row_pinned": "置頂",
+    "row_priority": "排序權重",
+    "row_publish_time": "定時發佈",
+    "row_allow_comment": "允許評論",
+    "row_template": "渲染範本",
+    "row_new_categories": "將新建的分類",
+    "row_new_tags": "將新建的標籤",
+    "row_images": "圖片",
+    "row_images_over_limit": "超過 7 MiB（需要 PAT）",
+    "value_auto": "（由服務端產生）",
+    "value_immediate": "立即發佈",
+    "value_none": "（無）",
+    "value_yes": "是",
+    "value_no": "否",
+    "value_images": "待上傳 {{pending}} 張，快取命中 {{cached}} 張"
   },
   "service": {
     "error_site_not_match": "網站地址不匹配",

@@ -4,6 +4,8 @@ import { resources } from "./i18n";
 import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
 import { openPostSelectionModal } from "./post-selection-model";
+import { type PublishPreviewInput, buildPublishPreview } from "./publish-preview";
+import { confirmPublishPreview } from "./publish-preview-modal";
 import HaloService from "./service";
 import {
   type HaloSetting,
@@ -53,34 +55,15 @@ export default class HaloPlugin extends Plugin {
       callback: async () => {
         // 这条命令**刻意不经过 `resolveSite`**：它的语义就是「用默认站点」，
         // 让路由规则来改写目标会与命令名直接冲突。`canPublishToSite` 那道守卫
-        // （笔记的 halo.site 与目标站点不一致时报错）因此也只在这条路径上有用。
-        const site = this.settings.sites.find((site) => site.default);
-
-        if (!site) {
-          new Notice(i18next.t("command.publish_with_defaults.error_no_default_site"));
-          return;
-        }
-
-        if (!this.canPublishToSite(site)) {
-          return;
-        }
-
-        // `canPublishToSite` 已经确认过有活动文件；这里再取一次是为了把**文件本身**拿在手上 ——
-        // `publishPost` / `uploadImages` 现在都收显式文件，不再各自去读活动编辑器。
+        // （笔记的 halo.site 与目标站点不一致时报错）因此也只在这条路径上有用 ——
+        // 它被收进了 `publishToDefaultSite`，与「默认站点在哪」的判断放在一起。
         const { activeEditor } = this.app.workspace;
 
         if (!activeEditor?.file) {
           return;
         }
 
-        const service = new HaloService(this.app, this.settings, site);
-        const uploadResult = await this.uploadImagesForPublish(service, activeEditor.file);
-
-        if (!uploadResult.success) {
-          return;
-        }
-
-        await service.publishPost(activeEditor.file, { markdown: uploadResult.markdown });
+        await this.publishToDefaultSite(activeEditor.file);
       },
     });
 
@@ -220,6 +203,12 @@ export default class HaloPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  /**
+   * `publish` 命令与功能区图标的入口：取出活动文件，再走 `publishFile`。
+   *
+   * 取活动文件的守卫留在这里、**不**下沉进 `publishFile`：那个方法收的是**显式文件**，
+   * 批量路径也要用它 —— 那边手上是一批文件，而活动编辑器只有一个。
+   */
   private async publishCommand() {
     const { activeEditor } = this.app.workspace;
 
@@ -227,28 +216,115 @@ export default class HaloPlugin extends Plugin {
       return;
     }
 
-    // 这一处是**行为变更**（刻意的）：改动前 `publishCommand` 在没有 `halo.site` 时
+    await this.publishFile(activeEditor.file);
+  }
+
+  /**
+   * 单篇发布的完整流程：解析站点 → 规划 → 预览 → 确认 → 上传图片 → 执行。
+   *
+   * 预览发生在**规划之后、任何写操作之前**。`uploadImages` 也会改笔记（把图片链接换成
+   * 远程地址），所以它必须排在确认之后 —— 否则用户点了「取消」，笔记里的图片链接已经被换掉了：
+   * 一次「什么都没发生」的取消，实际改动了整库笔记里的图片链接。
+   */
+  private async publishFile(file: TFile): Promise<void> {
+    // 这一处的解析顺序是**行为变更**（刻意的）：改动前 `publishCommand` 在没有 `halo.site` 时
     // 一律弹窗选站点，**完全忽略设置里的默认站点与唯一站点**；而 `CLAUDE.md` 一直写着
     // 的优先级是「frontmatter → 默认站点 → 单站点直取 → 弹窗」。改动后两端一致。
     // 注意 `resolveSite` 的实际顺序比那句**多一层**：frontmatter → **路由规则表** → 默认站点
     // → 单站点直取 → 弹窗（规则表是 Task 5 新加的，`CLAUDE.md` 那句还没跟上）。
     // 差别是实质性的：笔记一旦命中某条规则，目标就由规则决定，轮不到默认站点。
     // 最直观的差别：只配了一个站点的用户不再每次发布都看一眼只有一个选项的弹窗。
-    const resolution = this.resolveSiteFor(activeEditor.file);
+    const resolution = this.resolveSiteFor(file);
+
+    if (resolution.kind === "resolved") {
+      await this.publishToResolvedSite(file, resolution);
+      return;
+    }
+
+    // 其余四档（no-sites / unknown-site / unknown-rule-site / needs-choice）的处置都在
+    // `siteForResolution` 里：该报错的报错，该弹窗的弹窗。返回 undefined 就是「这次算了」。
     const site = await this.siteForResolution(resolution);
 
     if (!site) {
       return;
     }
 
-    const service = new HaloService(this.app, this.settings, site);
-    const uploadResult = await this.uploadImagesForPublish(service, activeEditor.file);
+    // 这一档是用户在弹窗里手选的，`resolveSite` 并不知道 —— 预览上要如实标成「你选的」，
+    // 而不是套用「唯一站点」或「默认站点」的说法（那会让人以为自己的配置变了）。
+    await this.publishToResolvedSite(file, { site, source: "picked" });
+  }
+
+  /**
+   * `publish-with-defaults` 命令的入口：直接用设置里的默认站点，**不经过路由解析**。
+   *
+   * 与 `publishFile` 分成两条而不是加个开关：这条命令的语义就是「用默认站点」，
+   * 让路由规则来改写目标会与命令名直接冲突。
+   */
+  private async publishToDefaultSite(file: TFile): Promise<void> {
+    const site = this.settings.sites.find((item) => item.default);
+
+    if (!site) {
+      new Notice(i18next.t("command.publish_with_defaults.error_no_default_site"));
+      return;
+    }
+
+    if (!this.canPublishToSite(site)) {
+      return;
+    }
+
+    await this.publishToResolvedSite(file, { site, source: "default" });
+  }
+
+  /** 站点已经定下来之后的发布流程。签名刻意只接受「已解析」这一档，省掉调用方的判空 */
+  private async publishToResolvedSite(
+    file: TFile,
+    resolved: { site: HaloSite; source: PublishPreviewInput["siteSource"]; pattern?: string },
+  ): Promise<void> {
+    const service = new HaloService(this.app, this.settings, resolved.site);
+    const planned = await service.planPublish(file);
+
+    if (!planned.ok) {
+      // `planPublish` 自己不播报（详见它的说明：命令层要在预览之前显示原因），
+      // 所以原因在这里显示出来。用户点了「发布」却什么都不发生、也不说为什么，
+      // 是最难自查的一种失败。
+      new Notice(planned.reason);
+      return;
+    }
+
+    if (!this.settings.skipPreviewOnPublish) {
+      const preview = buildPublishPreview({
+        siteName: resolved.site.name || resolved.site.url,
+        siteUrl: resolved.site.url,
+        siteSource: resolved.source,
+        sitePattern: resolved.pattern,
+        title: planned.plan.post.spec.title,
+        slug: planned.plan.post.spec.slug,
+        raw: planned.plan.raw,
+        // `Post` 来自 `@halo-dev/api-client`，而该包的类型在本项目解析不了（`moduleResolution: "node"`
+        // 忽略 `exports`），`spec` 实际退化成 `any`。`buildPublishPreview` 只要一个只读的记录，
+        // 所以这里显式断言一次，把「调用方知道类型是虚的」这件事写在代码里。
+        spec: planned.plan.post.spec as unknown as Record<string, unknown>,
+        newCategories: planned.plan.newCategories,
+        newTags: planned.plan.newTags,
+        images: planned.plan.images,
+      });
+
+      if (!(await confirmPublishPreview(this, preview))) {
+        // 用户点了「取消」：此刻站点与本地都还是打开弹窗之前的样子（规划的零写入不变式），
+        // 所以这里直接结束就是对「取消」最忠实的实现。
+        return;
+      }
+    }
+
+    const uploadResult = await this.uploadImagesForPublish(service, file);
 
     if (!uploadResult.success) {
       return;
     }
 
-    await service.publishPost(activeEditor.file, { markdown: uploadResult.markdown });
+    // 单篇路径不传 quiet，`executePublish` 自己会弹成功便签，这里不重复播报。
+    // 失败的原因也已经由它弹过 —— 拿返回值只是为了让「不弹便签」这件事有据可依。
+    await service.executePublish(file, planned.plan, { markdown: uploadResult.markdown });
   }
 
   private async uploadImagesCommand() {

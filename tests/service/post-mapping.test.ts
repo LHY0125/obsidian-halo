@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { type McpPostItem, generateResourceName, toContent, toPost } from "src/service/post-mapping";
+import { type McpPostItem, generateResourceName, pickNewTerms, toContent, toPost } from "src/service/post-mapping";
 
 /**
  * fixture 取自实抓的 `halo_get_post` 返回体（2026-10-04 对真实站点复核过字段名）。
@@ -174,5 +174,23 @@ describe("generateResourceName", () => {
     } finally {
       getRandomValues.mockRestore();
     }
+  });
+});
+
+describe("pickNewTerms", () => {
+  it("挑出站点上还没有的显示名（按 displayName 精确匹配）", () => {
+    expect(pickNewTerms(["技术", "随笔"], [{ displayName: "技术" }])).toEqual(["随笔"]);
+  });
+
+  it("入参缺席时给空数组，不把「没写分类」变成「要建空分类」", () => {
+    expect(pickNewTerms(undefined, [])).toEqual([]);
+  });
+
+  it("大小写不同算不同的显示名（与创建时的 `===` 判等同一套）", () => {
+    expect(pickNewTerms(["halo"], [{ displayName: "Halo" }])).toEqual(["halo"]);
+  });
+
+  it("保持入参顺序、不去重（去重是调用方对「并集」的处置）", () => {
+    expect(pickNewTerms(["X", "X"], [])).toEqual(["X", "X"]);
   });
 });

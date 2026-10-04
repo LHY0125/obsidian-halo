@@ -49,6 +49,10 @@
       "name": "默认发布文章",
       "description": "勾选之后，首次创建文章将直接发布"
     },
+    "skipPreviewOnPublish": {
+      "name": "发布时跳过预览",
+      "description": "勾选后，发布命令不再弹出预览确认框，直接执行。"
+    },
     "siteRouting": {
       "name": "站点路由规则",
       "description": "按笔记在库内的相对路径匹配目标站点，自上而下取首个命中的规则；都不命中时用默认站点。模式支持 *（不跨目录）、**（跨目录）、?（单个字符）。",
@@ -134,6 +138,35 @@
       "edit": "编辑",
       "add": "添加"
     }
+  },
+  "publish_preview": {
+    "title": "发布预览",
+    "button_confirm": "发布",
+    "row_site": "目标站点",
+    "site_from_frontmatter": "（来自笔记的 halo.site）",
+    "site_from_rule": "（来自路由规则「{{pattern}}」）",
+    "site_from_default": "（来自默认站点设置）",
+    "site_from_single": "（唯一已配置的站点）",
+    "site_from_picked": "（你在弹窗里选的）",
+    "row_title": "标题",
+    "row_slug": "Slug",
+    "row_characters": "正文字符数",
+    "row_visible": "可见性",
+    "row_pinned": "置顶",
+    "row_priority": "排序权重",
+    "row_publish_time": "定时发布",
+    "row_allow_comment": "允许评论",
+    "row_template": "渲染模板",
+    "row_new_categories": "将新建的分类",
+    "row_new_tags": "将新建的标签",
+    "row_images": "图片",
+    "row_images_over_limit": "超过 7 MiB（需要 PAT）",
+    "value_auto": "（由服务端生成）",
+    "value_immediate": "立即发布",
+    "value_none": "（无）",
+    "value_yes": "是",
+    "value_no": "否",
+    "value_images": "待上传 {{pending}} 张，缓存命中 {{cached}} 张"
   },
   "service": {
     "error_site_not_match": "站点地址不匹配",

@@ -3,7 +3,7 @@ import i18next from "i18next";
 import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { resources } from "../../src/i18n";
-import HaloService, { type PublishResult } from "../../src/service";
+import HaloService, { type PublishPlan, type PublishResult } from "../../src/service";
 import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
 import { McpError } from "../../src/transport/errors";
@@ -1990,5 +1990,98 @@ describe("publishPost 的返回值、quiet 与 publishOverride", () => {
 
     const states = calls.filter((call) => call.name === "halo_set_post_publish_state");
     expect(states[states.length - 1]?.args?.publish).toBe(true);
+  });
+});
+
+/**
+ * 「规划阶段零写入」—— 本阶段新增的核心不变式，也是预览能成立的**全部**依据。
+ *
+ * `planPublish` 存在的意义就在这里：它必须在**任何写操作之前**把「这次会发生什么」算完，
+ * 因为用户在预览弹窗里点「取消」时，站点与本地都必须与打开弹窗之前一模一样。
+ * 违反它的代价不是"预览算得不准"，而是"用户取消了、东西却已经写下去了"——
+ * 一次什么都没发生的取消，在站点上留下几个新建的空分类标签。
+ *
+ * 两条判别器各自盯着**一类**写入机制，缺一不可：
+ * - `halo_create_category` / `halo_create_tag` 走的是 `callToolJson`（它们要读回资源名），
+ *   所以只有「工具名前缀」那一条拦得住它们；
+ * - 写文章 / 改发布状态走的是 `callToolVoid`，它们**不**带 `halo_create_` 前缀，
+ *   所以只有「入口是 callToolVoid」那一条拦得住它们。
+ * 任何单独一条都留着另一半的口子 —— 这正是要用两条、而不是一条 `expect(calls).toEqual([])`
+ * 的原因（规划阶段本来就会调只读工具，整体为空是做不到的）。
+ */
+describe("planPublish 的「零写入」不变式", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  /** 规划阶段**允许**出现的全部工具：一律只读。白名单比黑名单更难被将来新增的写工具绕过 */
+  const READ_ONLY_TOOLS = new Set(["halo_get_post", "halo_list_categories", "halo_list_tags"]);
+
+  test("planPublish 不建分类标签，也不调任何写工具", async () => {
+    // 判别器：把 `getCategories()`（只列）换回 `getCategoryNames()`（会建）就会红。
+    // 这条是预览能成立的全部依据：用户在弹窗里点「取消」之后，站点上不能多出任何东西。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client, calls } = fakeService();
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", categories: ["还没有的分类"] },
+    }));
+
+    const result = await new HaloService(app, createSettings(), site, client).planPublish(note);
+
+    expect(result.ok).toBe(true);
+    expect((result as { plan: PublishPlan }).plan.newCategories).toEqual(["还没有的分类"]);
+    expect(calls.filter((call) => call.name.startsWith("halo_create_"))).toEqual([]);
+    expect(calls.filter((call) => call.method === "callToolVoid")).toEqual([]);
+    // 第三层，也是最严的一层：规划阶段出现的工具必须**全部**在只读白名单里。
+    // 前两条分别盯死"建分类标签"与"void 写入"两类机制，这一条盯死"将来新增的写工具"：
+    // 前两条是黑名单，新写一个走 callToolJson 的写工具就能从两条之间溜过去。
+    //
+    // 顺带钉住「规划不产生任何请求副作用」的另一半：图片只做概览，**不上传**
+    // （`halo_upload_attachment` 也不在白名单里，而它同样是 callToolJson）。
+    expect(calls.map((call) => call.name).filter((name) => !READ_ONLY_TOOLS.has(name))).toEqual([]);
+    // 反证：白名单本身不是空的、规划阶段确实调过只读工具 ——
+    // 否则「没有越界调用」可能只是因为**一次工具调用都没有**（例如 planPublish 提前失败了）
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  test("planPublish 失败时不抛，把原因放进 reason", async () => {
+    // 预览路径的调用方是命令回调。异常穿到 Obsidian 只会进控制台 ——
+    // 用户点了「发布」，什么都没发生，也没有任何提示。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client } = fakeService({
+      itemFor: () => {
+        throw new McpError("network", {});
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1" } },
+    }));
+
+    const service = new HaloService(app, createSettings(), site, client);
+
+    // 更新分支的规划要读远端，而那次读**带发布级重试** —— 改动前它就在 `withPublishRetry`
+    // 的闭包里，一次网络抖动不该从「重试后成功」变成「直接报发布失败」。所以这条用例会跑满
+    // 三次退避（500+1000+1500ms），快进掉：与本文件另外三条重试用例同一处置，
+    // 免得一条用例把整个套件拖慢三秒。
+    rs.useFakeTimers();
+
+    let result: Awaited<ReturnType<HaloService["planPublish"]>> | undefined;
+
+    try {
+      const pending = service.planPublish(note);
+      await rs.advanceTimersByTimeAsync(5_000);
+      result = await pending;
+    } finally {
+      rs.useRealTimers();
+    }
+
+    // 用收窄而不是类型断言：断言会把「ok 为真时没有 reason」这个事实抹掉，
+    // 而这条用例要钉的恰恰是「失败这一支**带着**原因交出来」。
+    const reason = result && !result.ok ? result.reason : "";
+
+    expect(result?.ok).toBe(false);
+    expect(reason).toBeTruthy();
   });
 });

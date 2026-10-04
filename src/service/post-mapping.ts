@@ -154,3 +154,21 @@ export function generateResourceName(prefix: "category" | "tag"): string {
 
   return `${prefix}-${suffix}`;
 }
+
+/**
+ * 从「期望的显示名」里挑出站点上还没有的那些。
+ *
+ * 判等用 `displayName` 精确匹配，**与 `getCategoryNames()` / `getTagNames()` 创建时的判等
+ * 必须是同一套**：两处判等一分叉，就会出现「预览说将新建、执行时又不建」或反过来，
+ * 而用户在预览里刚为它做过决定。所以这一份实现同时服务预览、执行路径与批量确认。
+ *
+ * 刻意**不去重**：它是个过滤器，去重是调用方对"并集"的处置（批量路径要先去重再传进来）。
+ * 在过滤器里偷偷去重会让调用方失去对顺序与重复的控制。
+ */
+export function pickNewTerms(desired: string[] | undefined, existing: { displayName: string }[]): string[] {
+  if (!desired) {
+    return [];
+  }
+
+  return desired.filter((name) => !existing.some((item) => item.displayName === name));
+}

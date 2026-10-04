@@ -3,15 +3,17 @@ import i18next from "i18next";
 import { type App, Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
-import { applyPostToFrontmatter, parseHaloPostFields } from "../frontmatter-map";
+import { type HaloPostFields, applyPostToFrontmatter, parseHaloPostFields } from "../frontmatter-map";
 import { renderErrorMessage, withErrorDetail } from "../i18n/error-message";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
 import { McpError } from "../transport/errors";
 import { McpClient } from "../transport/mcp-client";
 import {
   type ImageUploadContext,
+  type LocalImageSummary,
   type UploadImagesResult,
   restoreCachedLocalImageLinks,
+  summarizeLocalImages,
   uploadImage,
   uploadImages,
 } from "./image-upload";
@@ -21,6 +23,7 @@ import {
   type McpGetPostResult,
   type McpTagItem,
   generateResourceName,
+  pickNewTerms,
   toContent,
   toPost,
 } from "./post-mapping";
@@ -39,6 +42,91 @@ const PUBLISH_RETRY_DELAY_MS = 500;
  * 渲染发生在产出原因的那一处，调用方只负责决定「怎么告诉用户」（单篇弹提示、批量汇总）。
  */
 export type PublishResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * 一次发布的**完整规划** —— `planPublish` 的产物，`executePublish` 的输入。
+ *
+ * 存在的理由是「预览」：用户要在**任何写操作之前**看到这次到底会发生什么。
+ * 所以规划把「读远端 / 套 frontmatter / 算图片 / 算将新建的分类标签」全部做完，
+ * 只把「写」留给执行。`planPublish` 不写任何东西，是这一整块能成立的前提。
+ *
+ * 顺序上有一条必须原样保留：预览发生在**上传图片之前**，而 `uploadImages` 会改写本地笔记
+ * （把图片链接换成远程地址）。反过来先上传再预览的话，用户在预览里点「取消」时笔记已经被
+ * 改过了 —— 一次「什么都没发生」的取消，实际改动了整库笔记里的图片链接。
+ */
+export interface PublishPlan {
+  /** 走更新分支时的远端文章名；为空表示这次是新建 */
+  remoteName?: string;
+  /** `applyPostFrontmatter` 之后的最终 spec —— 预览与首次写入都用它 */
+  post: Post;
+  raw: string;
+  markdown: string;
+  /** frontmatter 里写着的分类/标签显示名（还没解析资源名） */
+  desiredCategories?: string[];
+  desiredTags?: string[];
+  /** 站点上**还不存在**的那些显示名 —— 预览里的「将新建」就是它 */
+  newCategories: string[];
+  newTags: string[];
+  images: LocalImageSummary;
+  /** frontmatter 里的 publish: true/false/没写（`undefined`） */
+  publishFromFrontmatter?: boolean;
+  /**
+   * frontmatter 的原始数据与已校验的 6 个字段。**重试时要把同一份「本地意愿」重新套到
+   * 刚读回来的远端文章上**，所以随计划一起带上。
+   *
+   * 为什么不让 `executePublish` 自己去 `metadataCache` 重读一遍：发布要跑几秒（上传图片
+   * 还更久），重试与规划之间用户可能正在编辑同一篇笔记 —— 重试套上去的必须是**用户在预览里
+   * 确认过的那一份**，而不是那一刻磁盘上的那一份。
+   */
+  matterData?: HaloPostFrontmatter;
+  /**
+   * 上者的校验产物（`parseHaloPostFields()`）。走到这里必定合法 ——
+   * 不合法时 `planPublish` 已经返回失败，不会产出 `PublishPlan`。
+   */
+  haloFields?: HaloPostFields;
+}
+
+/**
+ * 新建分支的底稿：一份字段齐全的 `Post` 字面量。
+ *
+ * 提成函数是因为「底稿」这个概念现在有两个语义不同的来源（新建＝这个字面量、
+ * 更新＝刚读回来的远端文章），而两处必须**逐字段同形** ——
+ * 差一个字段就会让预览里给用户看的东西与实际写出去的东西对不上。
+ */
+function createEmptyPost(): Post {
+  return {
+    apiVersion: "content.halo.run/v1alpha1",
+    kind: "Post",
+    metadata: {
+      annotations: {},
+      name: "",
+    },
+    spec: {
+      allowComment: true,
+      baseSnapshot: "",
+      categories: [],
+      cover: "",
+      deleted: false,
+      excerpt: {
+        autoGenerate: true,
+        raw: "",
+      },
+      headSnapshot: "",
+      htmlMetas: [],
+      owner: "",
+      pinned: false,
+      priority: 0,
+      publish: false,
+      publishTime: "",
+      releaseSnapshot: "",
+      slug: "",
+      tags: [],
+      template: "",
+      title: "",
+      visible: "PUBLIC",
+    },
+  } as Post;
+}
 
 class HaloService {
   private readonly site: HaloSite;
@@ -113,80 +201,146 @@ class HaloService {
   }
 
   /**
-   * 发布（或更新）一篇笔记。
+   * 发布前的规划：读远端、套 frontmatter、算图片概览、算出「将新建」的分类标签。
    *
-   * `file` 是显式的，不再从 `activeEditor` 取：批量操作要发的是一批文件，
-   * 而活动编辑器只有一个。单篇命令传 `activeEditor.file`，行为与改动前一致。
+   * **不写任何东西**（不建分类、不改笔记、不碰站点）。这是预览能成立的前提 ——
+   * 用户在弹窗里点「取消」时，站点与本地都必须与打开弹窗之前一模一样。
    *
-   * `options.quiet` 只是**不做便签播报**，结果照常从返回值给出 —— 两条通道里
-   * 返回值是权威那份，便签只是单篇路径的呈现方式。
+   * 与 `getCategoryNames` 的分工：那个负责**建**，这个只负责**算出要建哪些**。
+   * 分类/标签的列表在两处各取一次（`halo_list_categories` 是只读的，代价可接受），
+   * 换来的是「规划」与「执行」各自独立可测。
+   *
+   * `options.markdown` 是调用方手上那份正文（发布链路里是**上传图片之后**的那份）。
+   * 给了就用它、一次盘都不读：读盘拿到的是上传之前的旧内容，而预览要报的必须是即将发布的
+   * 那一份。这条契约有既有测试钉着（"publishes the provided markdown instead of rereading
+   * the local note"）—— 规划阶段若自己去读盘，那条断言立刻变红。
+   *
+   * 失败一律**不抛**、也**不弹便签**，只把原因从 `reason` 交出来：命令层要在预览之前显示
+   * 原因（它还没拿到 `plan`），播报收在 `publishPost` 一处，两条路径才不会一个弹一个不弹。
+   * 异常若穿出去，Obsidian 只会把它记进控制台 —— 用户点了「发布」，什么都没发生。
    */
-  public async publishPost(
+  public async planPublish(
     file: TFile,
-    options: { markdown?: string; publishOverride?: boolean; quiet?: boolean } = {},
-  ): Promise<PublishResult> {
-    const activeFile = file;
-
-    let params: Post = {
-      apiVersion: "content.halo.run/v1alpha1",
-      kind: "Post",
-      metadata: {
-        annotations: {},
-        name: "",
-      },
-      spec: {
-        allowComment: true,
-        baseSnapshot: "",
-        categories: [],
-        cover: "",
-        deleted: false,
-        excerpt: {
-          autoGenerate: true,
-          raw: "",
-        },
-        headSnapshot: "",
-        htmlMetas: [],
-        owner: "",
-        pinned: false,
-        priority: 0,
-        publish: false,
-        publishTime: "",
-        releaseSnapshot: "",
-        slug: "",
-        tags: [],
-        template: "",
-        title: "",
-        visible: "PUBLIC",
-      },
-    };
-
-    const md = options.markdown ?? (await this.app.vault.read(activeFile));
-    const matterData = this.app.metadataCache.getFileCache(activeFile)?.frontmatter as HaloPostFrontmatter | undefined;
-    const frontmatterPosition = this.app.metadataCache.getFileCache(activeFile)?.frontmatterPosition;
-
-    const raw = frontmatterPosition ? md.slice(frontmatterPosition?.end.offset) : md;
+    options: { markdown?: string } = {},
+  ): Promise<{ ok: true; plan: PublishPlan } | { ok: false; reason: string }> {
+    const md = options.markdown ?? (await this.app.vault.read(file));
+    const matterData = this.app.metadataCache.getFileCache(file)?.frontmatter as HaloPostFrontmatter | undefined;
+    const raw = this.bodyOf(md, file);
 
     // check site url
     if (matterData?.halo?.site && !isSameSiteUrl(matterData.halo.site, this.site.url)) {
-      const reason = i18next.t("service.error_site_not_match");
-      this.report(reason, options.quiet);
-      return { ok: false, reason };
+      return { ok: false, reason: i18next.t("service.error_site_not_match") };
     }
 
-    // 6 个元数据字段的校验放在**最前面**，理由是它必须早于任何副作用：
-    // 分类/标签解析会真的在站点上建分类（`getCategoryNames`），一旦走到那一步再报"字段写错了"，
-    // 站点上已经留下了新建的标签，而文章没发出去 —— 用户看到的是"发布失败"和一堆新标签。
+    // 6 个元数据字段的校验放在**最前面**，理由是它必须早于任何副作用：分类/标签的列举也要走
+    // MCP，一旦走到那一步再报"字段写错了"，用户已经为一次注定失败的发布等了一个来回 ——
+    // 而这条校验纯本地、零成本。
     const haloFields = parseHaloPostFields(matterData?.halo);
 
     if (!haloFields.ok) {
-      const reason = i18next.t(haloFields.key, haloFields.params);
-      this.report(reason, options.quiet);
-      return { ok: false, reason };
+      return { ok: false, reason: i18next.t(haloFields.key, haloFields.params) };
     }
 
-    // 分类/标签的解析发生在**写入之前**：此刻站点上还什么都没有，所以失败的正确处置是
-    // **中止本次发布**并把原因带给用户。此前异常会直接穿出 `publishPost`，Obsidian 只把它记进
-    // 控制台 —— 用户看到「什么都没发生」，而站点上确实什么都没发生，他却无从知道为什么。
+    const desiredCategories = matterData?.categories;
+    const desiredTags = matterData?.tags;
+
+    // 只列不建：预览要在**写之前**告诉用户"将新建这 3 个标签"，而 `getCategoryNames`
+    // 会真的把它们建到站点上。用户点取消后站点上多出 3 个空标签，是这次改造最容易漏的一处。
+    //
+    // 「将新建」用 `pickNewTerms` 算 —— 它与创建时的判等是**同一套** `displayName` 精确匹配。
+    // 两处判等一分叉就会出现「预览说将新建、执行时又不建」或反过来，而用户刚在预览里为它做过决定。
+    //
+    // 列举失败与执行阶段的创建失败是同一件事的两半（都是这个密钥调不动分类/标签工具），
+    // 故共用一套文案（`resolutionFailureMessage`）与同一套处置（中止，一个写工具都不调）。
+    let existingCategories: McpCategoryItem[] = [];
+    let existingTags: McpTagItem[] = [];
+
+    try {
+      if (desiredCategories) {
+        existingCategories = await this.getCategories();
+      }
+
+      if (desiredTags) {
+        existingTags = await this.getTags();
+      }
+    } catch (error) {
+      return { ok: false, reason: this.resolutionFailureMessage(error) };
+    }
+
+    // 归一化掉显式空串：`halo.name: ""` 在改动前走的就是**新建**分支（`if (remotePostName)` 的
+    // 真值判断），所以这里收敛成 `undefined`，既保住那条判据，也让 `plan.remoteName` 对下游
+    // 只有「有名字」与「没有」两档，不必再判一次空串。
+    const remoteName = matterData?.halo?.name || undefined;
+    const halo = matterData?.halo;
+    // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
+    const publishFromFrontmatter = halo?.hasOwnProperty("publish") ? Boolean(halo.publish) : undefined;
+
+    let post: Post;
+
+    try {
+      // 更新分支以**远端**为底、新建分支以字段齐全的字面量为底，两种情况都套上 frontmatter。
+      // 预览要看的正是这个结果：`applyPostFrontmatter` 是稀疏展开，没写进 frontmatter 的键保留
+      // 底里的值 —— 所以「没写就跟随远端」这件事只有在**读过远端之后**才看得见。不读远端的话，
+      // 预览会把一篇 INTERNAL、已置顶的远端文章的可见性报成 PUBLIC、置顶报成否。
+      const basis = remoteName ? await this.readRemotePost(remoteName) : createEmptyPost();
+
+      post = applyPostFrontmatter(basis, {
+        activeFile: file,
+        haloFields: haloFields.fields,
+        matterData,
+        useActiveFileDefaults: !remoteName,
+      });
+    } catch (error) {
+      return { ok: false, reason: this.publishFailureMessage(error) };
+    }
+
+    return {
+      ok: true,
+      plan: {
+        remoteName,
+        post,
+        raw,
+        markdown: md,
+        desiredCategories,
+        desiredTags,
+        newCategories: pickNewTerms(desiredCategories, existingCategories),
+        newTags: pickNewTerms(desiredTags, existingTags),
+        // 概览按 `md` 算，不按盘上的内容算 —— 与上面的「正文取自哪一份」同源
+        images: await summarizeLocalImages(file, this.imageUploadContext(), md),
+        publishFromFrontmatter,
+        matterData,
+        haloFields: haloFields.fields,
+      },
+    };
+  }
+
+  /**
+   * 按规划执行：建分类标签 → 建/更新文章 → 设定发布状态 → 回读 → 回写笔记。
+   *
+   * 与 `planPublish` 的分工是本次改造的核心：规划**决定**一切、什么都不写；执行**只写**、
+   * 不再自己重新决定一遍。所以执行阶段拿 `plan` 里的取值，而不是再读一遍笔记与远端 ——
+   * 用户在预览里确认过的那一份才是权威的。
+   *
+   * `options.markdown` 是**上传图片之后**的正文（本地图片链接已被换成远程地址）。发布流程
+   * 必须在它之后才执行，所以规划时算出的 `plan.markdown` 会过时；给了 `markdown` 就用它，
+   * 没给才回落 `plan.markdown`。
+   */
+  public async executePublish(
+    file: TFile,
+    plan: PublishPlan,
+    options: { markdown?: string; publishOverride?: boolean; quiet?: boolean } = {},
+  ): Promise<PublishResult> {
+    // `??` 而不是真值判断：空串是**显式值**（一篇被清空了正文的笔记），与「没给」不是一回事。
+    // 两者都收敛到同一份正文，但走的分支不同 —— 空串再切一次 frontmatter 仍然得到空串。
+    const md = options.markdown ?? plan.markdown;
+    const raw = this.bodyOf(md, file);
+
+    // 分类/标签在这里**真的建**（`getCategoryNames` / `getTagNames` 会往站点上写）。
+    // 拆分的全部意义就是把这个副作用挡在预览之后 —— 用户点「取消」时站点上不能多出任何东西。
+    //
+    // 顺序与改动前一致：解析（建）发生在写文章之前，失败的正确处置是**中止本次发布**并把原因
+    // 带给用户。此前异常会直接穿出 `publishPost`，Obsidian 只把它记进控制台 —— 用户看到
+    // 「什么都没发生」，而站点上确实什么都没发生，他却无从知道为什么。
     //
     // （`getCategoryNames` 是逐个创建的：失败前已建好的那几个会留在站点上。这是本设计的既有
     // 副作用、与上游一致 —— 它不改变「此刻文章还没写」这个判断，故中止依然是对的语义。）
@@ -194,12 +348,12 @@ class HaloService {
     let tagNames: string[] | undefined;
 
     try {
-      if (matterData?.categories) {
-        categoryNames = await this.getCategoryNames(matterData.categories);
+      if (plan.desiredCategories) {
+        categoryNames = await this.getCategoryNames(plan.desiredCategories);
       }
 
-      if (matterData?.tags) {
-        tagNames = await this.getTagNames(matterData.tags);
+      if (plan.desiredTags) {
+        tagNames = await this.getTagNames(plan.desiredTags);
       }
     } catch (error) {
       const reason = this.resolutionFailureMessage(error);
@@ -207,7 +361,7 @@ class HaloService {
       return { ok: false, reason };
     }
 
-    let remotePostName = matterData?.halo?.name;
+    let remotePostName = plan.remoteName;
 
     /**
      * 本次**要求的**发布状态（没要求就是 `undefined`）。
@@ -217,18 +371,29 @@ class HaloService {
      */
     let intendedPublish: boolean | undefined;
 
+    let params = plan.post;
+
     try {
-      params = await this.withPublishRetry(async () => {
+      params = await this.withPublishRetry(async (attempt) => {
         // 两个分支刻意用 if/else 而不是 if + 提前 return：发布状态那步必须对**两条**分支都生效，
         // 提前 return 会让更新分支跳过它（上游就是这个形状，不是随手写的）。
         if (remotePostName) {
-          const latestPost = (await this.getPost(remotePostName)).post;
+          // 首次尝试沿用规划阶段读到的那份（`plan.post` 就是它的产物）：那次读就发生在预览之前，
+          // 再读一遍只是把同一件事做两遍 —— 而「第一次写入之前只读过一次远端」这条性质有既有
+          // 测试钉着（`fetchesBeforeAttempt`）。
+          // **重试才重读**：重试的动机正是上一次写入失败了，远端此刻可能已经被别的客户端改过，
+          // 拿旧对象原样重放会把这些改动盖掉。这与改动前「重试前先重读远端」的性质一致。
+          const basis = attempt === 0 ? plan.post : await this.readRemotePost(remotePostName);
 
-          params = applyPostFrontmatter(latestPost, {
-            activeFile,
+          // 重新套一遍 frontmatter 是**幂等**的（同一份 `matterData` / `haloFields` 再展开一次得到
+          // 同一结果），所以对 `plan.post` 再套一次不会改动预览里给用户看过的那几个取值。它真正
+          // 要做的是把**此刻才解析出来的** `categoryNames` / `tagNames` 填进去 —— 分类标签的创建
+          // 是写操作，只能发生在预览之后，规划阶段拿不到它们的资源名。
+          params = applyPostFrontmatter(basis, {
+            activeFile: file,
             categoryNames,
-            haloFields: haloFields.fields,
-            matterData,
+            haloFields: plan.haloFields,
+            matterData: plan.matterData,
             tagNames,
             useActiveFileDefaults: false,
           });
@@ -250,10 +415,10 @@ class HaloService {
           }
 
           params = applyPostFrontmatter(params, {
-            activeFile,
+            activeFile: file,
             categoryNames,
-            haloFields: haloFields.fields,
-            matterData,
+            haloFields: plan.haloFields,
+            matterData: plan.matterData,
             tagNames,
             useActiveFileDefaults: true,
           });
@@ -275,12 +440,15 @@ class HaloService {
         // 而这些笔记仍然在线。单篇命令**不传** override，所以那一条路径的行为完全不变。
         // 后两级与上游一致 —— frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
         // 只有没写时才看 publishByDefault。
+        //
+        // 第二级读的是**规划阶段**记下的 `plan.publishFromFrontmatter`（改动前在这里现场读
+        // `matterData.halo.hasOwnProperty("publish")`）：规划与执行之间用户可能正在编辑笔记，
+        // 而这次发布已经由预览确认过 —— 用的必须是确认过的那一份。
         if (options.publishOverride !== undefined) {
           intendedPublish = options.publishOverride;
           await this.changePostPublish(params.metadata.name, intendedPublish);
-          // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
-        } else if (matterData?.halo?.hasOwnProperty("publish")) {
-          intendedPublish = Boolean(matterData.halo.publish);
+        } else if (plan.publishFromFrontmatter !== undefined) {
+          intendedPublish = plan.publishFromFrontmatter;
           await this.changePostPublish(params.metadata.name, intendedPublish);
         } else if (this.settings.publishByDefault) {
           intendedPublish = true;
@@ -314,7 +482,7 @@ class HaloService {
     const postCategories = await this.resolveDisplayNames(() => this.getCategoryDisplayNames(params.spec.categories));
     const postTags = await this.resolveDisplayNames(() => this.getTagDisplayNames(params.spec.tags));
 
-    this.app.fileManager.processFrontMatter(activeFile, (frontmatter) => {
+    this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, params, {
         siteUrl: this.site.url,
         name: params.metadata.name,
@@ -330,6 +498,56 @@ class HaloService {
     }
 
     return { ok: true };
+  }
+
+  /**
+   * 单篇发布的便捷入口：规划 + 执行。命令层刻意**不用**它 —— 命令层要拿到 `plan` 才能预览。
+   *
+   * `options.markdown` 一路透传给 `planPublish`：规划也必须按**即将发布的那一份**正文来做
+   * （图片张数、正文字符数都在其中）。读盘拿到的是上传图片之前的旧内容，而调用方递进来的
+   * 那一份才是权威的 —— 既有测试 `publishes the provided markdown instead of rereading
+   * the local note` 钉的正是这一点。
+   *
+   * 规划失败在这里补一次播报：`planPublish` 自己**不弹**（命令层要在预览之前自己显示原因），
+   * 所以两条调用路径的播报都收在这一处，不会一个弹一个不弹。
+   */
+  public async publishPost(
+    file: TFile,
+    options: { markdown?: string; publishOverride?: boolean; quiet?: boolean } = {},
+  ): Promise<PublishResult> {
+    const planned = await this.planPublish(file, options);
+
+    if (!planned.ok) {
+      this.report(planned.reason, options.quiet);
+      return { ok: false, reason: planned.reason };
+    }
+
+    return this.executePublish(file, planned.plan, options);
+  }
+
+  /**
+   * 切出 frontmatter **之后**的正文。
+   *
+   * 抽出来是因为它有两处调用，且必须用**同一套**切法：规划阶段（读盘或调用方递进来的那份）
+   * 与执行阶段（上传图片之后的那份）。切法一旦分叉，实际发出去的正文就会与预览里报的字符数
+   * 对不上 —— 差的正是 frontmatter 那几十个字符，用户按预览估的长度就白估了。
+   */
+  private bodyOf(markdown: string, file: TFile): string {
+    const position = this.app.metadataCache.getFileCache(file)?.frontmatterPosition;
+
+    return position ? markdown.slice(position.end.offset) : markdown;
+  }
+
+  /**
+   * 读远端文章，**带发布级重试**。
+   *
+   * 规划阶段的这次读与执行阶段重试时的重读是同一件事：都要求「一次瞬时抖动不该毁掉一次发布」。
+   * 改动前这个读本来就在 `withPublishRetry` 的闭包里；拆出规划阶段时若不给它同样的覆盖，
+   * 一次网络抖动就会从「重试后成功」变成「直接报发布失败」—— 那是拆分引入的行为退化，
+   * 而不是拆分的目的。
+   */
+  private async readRemotePost(name: string): Promise<Post> {
+    return this.withPublishRetry(async () => (await this.getPost(name)).post);
   }
 
   /** 便签播报。`quiet` 为真时什么也不做 —— 返回值仍然带着原因，调用方自己去汇总 */
@@ -481,16 +699,23 @@ class HaloService {
     return outcome;
   }
 
-  private async withPublishRetry<T>(operation: () => Promise<T>): Promise<T> {
-    for (let retryCount = 0; ; retryCount++) {
+  /**
+   * 把一次发布事务包进重试。
+   *
+   * `operation` 拿得到**尝试序号**（首次为 0）。这不是为了方便计数，而是调用方真的需要它：
+   * 更新分支的首次尝试必须沿用规划阶段读到的那份远端状态，重试才重新拉取 ——
+   * 见 `executePublish`。把序号交给闭包，比在外面挂一个布尔量更难失去同步。
+   */
+  private async withPublishRetry<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
       try {
-        return await operation();
+        return await operation(attempt);
       } catch (error) {
-        if (retryCount >= PUBLISH_RETRY_COUNT) {
+        if (attempt >= PUBLISH_RETRY_COUNT) {
           throw error;
         }
 
-        await this.sleep(PUBLISH_RETRY_DELAY_MS * (retryCount + 1));
+        await this.sleep(PUBLISH_RETRY_DELAY_MS * (attempt + 1));
       }
     }
   }
@@ -673,6 +898,17 @@ class HaloService {
    */
   public async uploadImage(file: TFile): Promise<string> {
     return uploadImage(file, this.imageUploadContext());
+  }
+
+  /**
+   * 只读的图片概览，供发布预览与批量确认使用（**不发出任何请求**）。
+   *
+   * 刻意不在 `planPublish` 里直接把 `imageUploadContext()` 传给模块函数了事：这条封装把
+   * 「上传模块的运行上下文」留在类内部。为了省一行而把 `imageUploadContext()` 开成 public，
+   * 等于把整个上传模块的依赖（app / settings / site / client）暴露给所有调用方。
+   */
+  public async summarizeImages(file: TFile): Promise<LocalImageSummary> {
+    return summarizeLocalImages(file, this.imageUploadContext());
   }
 
   /**

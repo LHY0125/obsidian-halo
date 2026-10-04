@@ -42,6 +42,21 @@ export interface UploadImagesResult {
 }
 
 /**
+ * 图片概览。三个数字刻意分开：
+ * - `pending` 是**真的会发请求**的张数（用户能据此预估这次发布要多久）；
+ * - `cached` 是命中缓存的张数（不发请求，但仍会被替换链接）；
+ * - `overLimit` 是超过 7 MiB、必须走 REST + PAT 的那几张的**文件名**。
+ *
+ * 给文件名而不是只给数字：这正是缺 PAT 时唯一会失败的几张，而用户此刻能做的动作
+ * （压缩这几张，或去补一个 PAT）取决于**是哪几张**。
+ */
+export interface LocalImageSummary {
+  pending: number;
+  cached: number;
+  overLimit: string[];
+}
+
+/**
  * 服务层错误：`key` + `params` 交给 UI 层用 `i18next.t()` 还原成**用户可见文案**。
  *
  * 为什么不用 `McpError`：它要求一个 `McpErrorKind`，而这是**本地前置条件**不满足
@@ -487,6 +502,58 @@ export async function uploadImages(
     markdown: updatedMarkdown,
     replaced: shouldReplaceMarkdown,
   };
+}
+
+/**
+ * 统计一篇笔记里的本地图片，**不发出任何请求**。
+ *
+ * 预览要在用户点确认之前告诉他"这次要传几张、有没有超限"，而 `uploadImages` 是
+ * 边扫边传的。这个函数只做扫描 + 缓存查表 + 体积判断。
+ *
+ * 按 `file.path` 去重：同一张图在一篇笔记里被引用两次时上传只发生一次
+ * （`uploadImages` 里的 `uploadedPermalinks` 就是干这个的），概览必须与它口径一致 ——
+ * 否则预览说"要传 5 张"而实际只传 3 次，用户会以为有一张没传上去。
+ *
+ * `markdown` 缺席时才读盘。调用方既然已经把正文递进来了，就必须按**那一份**统计：
+ * 发布链路里递进来的是上传图片之后的正文，而读盘拿到的是上传之前的旧内容，
+ * 两者算出来的张数可能不同 —— 预览要报的必须是即将发布的那一份。
+ *
+ * `overLimit` 用的是 `stat.size`，不是真正读回来的字节数（那要读二进制，与"预览不产生
+ * 任何 I/O 副作用"冲突）。真正的分流判据在 `uploadImage` 里，用的是实际字节数；
+ * 两者在文件被就地改动时会短暂不一致 —— 这是刻意接受的一档误差，换来的是预览不读盘。
+ */
+export async function summarizeLocalImages(
+  file: TFile,
+  ctx: ImageUploadContext,
+  markdown?: string,
+): Promise<LocalImageSummary> {
+  const md = markdown ?? (await ctx.app.vault.read(file));
+  const references = collectLocalImageReferences(md, file, ctx.app);
+  const seen = new Set<string>();
+  const overLimit: string[] = [];
+  let pending = 0;
+  let cached = 0;
+
+  for (const reference of references) {
+    if (seen.has(reference.file.path)) {
+      continue;
+    }
+
+    seen.add(reference.file.path);
+
+    if (getCachedImagePermalink(reference.file, ctx)) {
+      cached++;
+      continue;
+    }
+
+    pending++;
+
+    if (reference.file.stat.size > MCP_UPLOAD_MAX_BYTES) {
+      overLimit.push(reference.file.name);
+    }
+  }
+
+  return { pending, cached, overLimit };
 }
 
 function createMultipartBody(

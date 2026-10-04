@@ -172,6 +172,19 @@ export class HaloSettingTab extends PluginSettingTab {
         });
       });
 
+    // 紧挨着 `publishByDefault`：两者都是「发布这一次要怎么做」的开关，放在一起才不会被
+    // 当成两件无关的事。注意它们的语义**完全不同**（一个是"发还是存草稿"、一个是"要不要
+    // 先看一眼"），所以是两个键 —— 见 `HaloSetting.skipPreviewOnPublish` 的说明。
+    new Setting(containerEl)
+      .setName(i18next.t("settings.skipPreviewOnPublish.name"))
+      .setDesc(i18next.t("settings.skipPreviewOnPublish.description"))
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.skipPreviewOnPublish).onChange((value) => {
+          this.plugin.settings.skipPreviewOnPublish = value;
+          this.plugin.saveSettings();
+        });
+      });
+
     new Setting(containerEl)
       .setName(i18next.t("settings.siteRouting.name"))
       .setDesc(i18next.t("settings.siteRouting.description"))
