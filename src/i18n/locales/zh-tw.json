@@ -205,5 +205,29 @@
     "error_integer": "「halo.{{field}}」的值「{{value}}」不合法：必須是一個整數。",
     "error_string": "「halo.{{field}}」的值「{{value}}」不合法：必須是一個字串。",
     "error_publish_time": "「halo.publishTime」的值「{{value}}」不是能識別的時間。請寫成 RFC 3339 格式（如 2026-10-06T10:00:00+08:00）；要立即發佈請寫空字串 \"\"。"
+  },
+  "batch": {
+    "title_draft": "批次推送草稿",
+    "title_publish": "批次發佈",
+    "title_unpublish": "批次撤回",
+    "summary_count": "將處理 {{count}} 篇",
+    "button_confirm": "執行",
+    "button_select_all": "全選本組",
+    "button_select_none": "全不選本組",
+    "row_new_categories": "將新建的分類",
+    "row_new_tags": "將新建的標籤",
+    "row_images": "圖片",
+    "row_images_over_limit": "超過 7 MiB（需要 PAT）",
+    "value_images": "待上傳 {{pending}} 張，快取命中 {{cached}} 張",
+    "notice_rewrites_notes": "注意：本機筆記也會被改寫",
+    "notice_rewrites_notes_desc": "勾選「替換圖片連結」時，執行過程中會把筆記裡的本機圖片位址換成 Halo 位址。",
+    "skipped_title": "已跳過 {{count}} 篇",
+    "skip_needs_choice": "有多個站點可用但沒有預設站點，也沒有規則命中 —— 請到設定裡設一條路由規則或指定預設站點。",
+    "skip_no_sites": "還沒有設定任何站點。",
+    "skip_unknown_site": "筆記裡寫的 halo.site（{{url}}）不在站點清單裡。",
+    "skip_unknown_rule_site": "路由規則「{{pattern}}」指向的站點（{{url}}）已不在站點清單裡。",
+    "skip_not_published": "還沒有發佈到 Halo（沒有 halo.name），沒有可撤回的文章。",
+    "error_no_sites": "請先設定站點。",
+    "error_no_candidates": "沒有可批次處理的筆記。"
   }
 }

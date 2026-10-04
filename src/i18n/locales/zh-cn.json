@@ -205,5 +205,29 @@
     "error_integer": "「halo.{{field}}」的值「{{value}}」不合法：必须是一个整数。",
     "error_string": "「halo.{{field}}」的值「{{value}}」不合法：必须是一个字符串。",
     "error_publish_time": "「halo.publishTime」的值「{{value}}」不是能识别的时间。请写成 RFC 3339 格式（如 2026-10-06T10:00:00+08:00）；要立即发布请写空串 \"\"。"
+  },
+  "batch": {
+    "title_draft": "批量推草稿",
+    "title_publish": "批量发布",
+    "title_unpublish": "批量撤回",
+    "summary_count": "将处理 {{count}} 篇",
+    "button_confirm": "执行",
+    "button_select_all": "全选本组",
+    "button_select_none": "全不选本组",
+    "row_new_categories": "将新建的分类",
+    "row_new_tags": "将新建的标签",
+    "row_images": "图片",
+    "row_images_over_limit": "超过 7 MiB（需要 PAT）",
+    "value_images": "待上传 {{pending}} 张，缓存命中 {{cached}} 张",
+    "notice_rewrites_notes": "注意：本地笔记也会被改写",
+    "notice_rewrites_notes_desc": "勾选了「替换图片链接」时，执行过程中会把笔记里的本地图片地址换成 Halo 地址。",
+    "skipped_title": "已跳过 {{count}} 篇",
+    "skip_needs_choice": "有多个站点可用但没有默认站点，也没有规则命中 —— 请到设置里配一条路由规则或指定默认站点。",
+    "skip_no_sites": "还没有配置任何站点。",
+    "skip_unknown_site": "笔记里写的 halo.site（{{url}}）不在站点列表里。",
+    "skip_unknown_rule_site": "路由规则「{{pattern}}」指向的站点（{{url}}）已不在站点列表里。",
+    "skip_not_published": "还没有发布到 Halo（没有 halo.name），没有可撤回的文章。",
+    "error_no_sites": "请先配置站点。",
+    "error_no_candidates": "没有可批量处理的笔记。"
   }
 }

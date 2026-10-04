@@ -205,5 +205,29 @@
     "error_integer": "The value \"{{value}}\" of `halo.{{field}}` is invalid: it must be an integer.",
     "error_string": "The value \"{{value}}\" of `halo.{{field}}` is invalid: it must be a string.",
     "error_publish_time": "The value \"{{value}}\" of `halo.publishTime` is not a recognizable time. Use RFC 3339 (e.g. 2026-10-06T10:00:00+08:00); use an empty string \"\" to publish immediately."
+  },
+  "batch": {
+    "title_draft": "Batch push as drafts",
+    "title_publish": "Batch publish",
+    "title_unpublish": "Batch unpublish",
+    "summary_count": "{{count}} note(s) to process",
+    "button_confirm": "Run",
+    "button_select_all": "Select all in group",
+    "button_select_none": "Deselect all in group",
+    "row_new_categories": "Categories to create",
+    "row_new_tags": "Tags to create",
+    "row_images": "Images",
+    "row_images_over_limit": "Over 7 MiB (needs a PAT)",
+    "value_images": "{{pending}} to upload, {{cached}} from cache",
+    "notice_rewrites_notes": "Note: local notes are rewritten too",
+    "notice_rewrites_notes_desc": "With \"Replace image links\" enabled, local image paths in the notes are replaced with Halo URLs during the run.",
+    "skipped_title": "{{count}} note(s) skipped",
+    "skip_needs_choice": "Several sites are available but none is the default and no routing rule matched — set a routing rule or a default site in the settings.",
+    "skip_no_sites": "No site has been configured yet.",
+    "skip_unknown_site": "The halo.site value in the note ({{url}}) is not in the site list.",
+    "skip_unknown_rule_site": "The routing rule \"{{pattern}}\" points to a site ({{url}}) that is no longer in the site list.",
+    "skip_not_published": "Not published to Halo yet (no halo.name) — there is nothing to unpublish.",
+    "error_no_sites": "Configure a site first.",
+    "error_no_candidates": "No notes to process in batch."
   }
 }
