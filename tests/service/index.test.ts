@@ -1043,7 +1043,15 @@ describe("publishPost 走 MCP", () => {
     expect(writtenArgs?.visible).toBe("INTERNAL");
   });
 
-  test("显式 false 不被默认值翻盘：halo.pinned: false 送出 pinned: false", async () => {
+  test("显式 false 不被默认值翻盘：halo.allowComment: false 送出 allowComment: false", async () => {
+    // 为什么是 allowComment 而不是 pinned：五个「有意义的假值」字段里，**只有它的默认值与它相反**
+    //（`publishPost` 的 params 字面量给的是 `allowComment: true`），所以它是唯一既能守住
+    //「显式假值不被默认值翻盘」的原意、又**同时**能判别接线的一条。
+    //
+    // `pinned: false` / `priority: 0` / `template: ""` 三条的默认值恰与断言值相同，
+    // 接线在不在都绿 —— 拿它们做端到端判别器等于放一条空洞测试在这儿（本轮修复前正是如此）。
+    // 那三条的语义已由 `tests/frontmatter-map.test.ts` 的表驱动用例在**单元层**守住，
+    // 端到端这一层只需要管接线。
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
@@ -1053,12 +1061,12 @@ describe("publishPost 走 MCP", () => {
       },
     });
     metadataCache.getFileCache.mockImplementation(() => ({
-      frontmatter: { title: "Post title", halo: { pinned: false } },
+      frontmatter: { title: "Post title", halo: { allowComment: false } },
     }));
 
     await new HaloService(app, createSettings(), site, client).publishPost();
 
-    expect(writtenArgs?.pinned).toBe(false);
+    expect(writtenArgs?.allowComment).toBe(false);
   });
 
   test("更新分支同样消费 halo.* 字段", async () => {
@@ -1081,8 +1089,35 @@ describe("publishPost 走 MCP", () => {
     expect(writtenArgs?.priority).toBe(9);
   });
 
-  test("halo.publishTime 为空串时送 null，不是空字符串", async () => {
-    // schema 是 ["string","null"] + format: date-time —— 空字符串会被服务端拒绝
+  test("halo.publishTime 有值时原样送进写工具的参数", async () => {
+    // 这里**不能**拿空串做判别器：空串既是 params 字面量的默认值，又经 `toUpdateArgs` 的
+    // `|| null` 与「压根没写」收敛到同一个 `null` —— 接线在不在都绿，结构上不可能判别接线。
+    // 换成一个真实时间才判别得了：默认值是 `""`，这条会送出一个非空字符串。
+    // 「空串 → null」那个映射另有特征化用例，见下一条。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { publishTime: "2026-10-06 10:00" } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    expect(writtenArgs?.publishTime).toBe("2026-10-06 10:00");
+  });
+
+  test("特征化：halo.publishTime 为空串时送 null，不是空字符串", async () => {
+    // 特征化测试，钉的是**既有契约**而非本次接线：schema 是 ["string","null"] +
+    // format: date-time，空字符串会被服务端拒绝，所以 `toUpdateArgs` 用 `|| null` 折成 null。
+    //
+    // ⚠️ 它**无法**判别接线 —— 空串与 params 字面量默认值相同，且两条路径都收敛到 `null`，
+    // 把 `haloFields` 从调用点删掉这条照样绿。要判别接线请看上面那条非空串的用例。
+    // 留着它是因为「用户写的空串不会被原样送出去」这件事值得有断言钉住。
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
@@ -1112,7 +1147,12 @@ describe("publishPost 走 MCP", () => {
 
     await new HaloService(app, createSettings(), site, client).publishPost();
 
-    // 一个 MCP 工具都不该被调到 —— 校验必须发生在分类/标签解析（会真的建分类）之前
+    // 一个 MCP 工具都不该被调到 —— 校验必须发生在分类/标签解析（会真的建分类）之前。
+    //
+    // ⚠️ 这一条守的是**顺序**，不是接线：把 `haloFields` 从两个 `applyPostFrontmatter`
+    // 调用点上删掉，它照样绿（校验那一步独立于 `haloFields` 的消费点）。
+    // 别把它的绿读成「接线没坏」—— 那是上面 `visible` / `allowComment` / `publishTime` /
+    // `priority` 那几条的职责。
     expect(calls).toEqual([]);
     expect(notices.slice(seen)).toHaveLength(1);
     expect(notices[seen]).toContain("public");
