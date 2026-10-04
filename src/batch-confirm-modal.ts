@@ -1,6 +1,6 @@
 import i18next from "i18next";
 import { type ButtonComponent, Modal, Setting } from "obsidian";
-import type { BatchGroup, BatchPlan } from "./batch-publish";
+import type { BatchGroup, BatchPlan, BatchRunSummary } from "./batch-publish";
 import { summarizeSelection } from "./batch-publish";
 import type HaloPlugin from "./main";
 
@@ -207,6 +207,64 @@ export class BatchConfirmModal extends Modal {
 
     // 一篇都没勾时禁掉确认：允许"确认一个空操作"只会让用户以为自己的取消没生效
     this.confirmButton?.setDisabled(summary.total === 0);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/**
+ * 末尾汇总。
+ *
+ * 用弹窗而不是 Notice：失败项可能几十条，`Notice` 几秒就消失且不可复制。
+ * 用户此刻最需要的是**能停下来逐条看**的那份清单（哪一篇、为什么）。
+ *
+ * 三档数字必须**分开**报（成功 / 失败 / 执行前就跳过），不能合并成一个「完成 N 篇」——
+ * 118 篇里 3 篇失败而汇总只说「118 篇完成」，用户就被告知了一件假事：
+ * 他以为站点上齐了，实际少了三篇，而那三篇正是他需要去手工处理的。
+ */
+export function showBatchSummary(plugin: HaloPlugin, summary: BatchRunSummary): void {
+  new BatchSummaryModal(plugin, summary).open();
+}
+
+/**
+ * `export` 只为测试，与上面的 `BatchConfirmModal` 同一处置（也同一理由）：
+ * `tests/setup.ts` 的 `Modal.open()` 不调 `onOpen()`，所以 `showBatchSummary()` 在测试里
+ * 什么也渲染不到。测试直接构造本类、塞一个能记录文字的 `contentEl` 桩、再调 `onOpen()`，
+ * 从而钉住「三档数字都出现在文案里、失败项逐条列出」这条用户可见的保证。
+ * 生产代码只用 `showBatchSummary()`，不直接引用本类。
+ */
+export class BatchSummaryModal extends Modal {
+  constructor(
+    private readonly plugin: HaloPlugin,
+    private readonly summary: BatchRunSummary,
+  ) {
+    super(plugin.app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+
+    contentEl.createEl("h2", { text: i18next.t("batch.summary_title") });
+    contentEl.createEl("p", {
+      text: i18next.t("batch.summary_line", {
+        success: this.summary.successCount,
+        failed: this.summary.failureCount,
+        skipped: this.summary.skippedCount,
+      }),
+    });
+
+    // 只列失败项：成功的不需要用户做任何事，118 行「a.md 成功」会把失败的那三行淹掉。
+    // `reason ?? ""` 只是兜底 —— `runBatch` 保证失败项一定带原因（`PublishResult.reason`
+    // 或 `renderErrorMessage` 的产物），真出现空的时候宁可显示成「路径 —— 」也不要写 undefined。
+    for (const result of this.summary.results.filter((item) => !item.ok)) {
+      contentEl.createEl("div", { text: `${result.path} —— ${result.reason ?? ""}` });
+    }
+
+    new Setting(contentEl).addButton((button) =>
+      button.setButtonText(i18next.t("common.button_close")).onClick(() => this.close()),
+    );
   }
 
   onClose(): void {

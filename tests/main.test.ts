@@ -1,8 +1,25 @@
-import { expect, rs, test } from "@rstest/core";
+import { beforeAll, expect, rs, test } from "@rstest/core";
+import i18next from "i18next";
+import * as obsidianRuntime from "obsidian";
 import type { PluginManifest } from "obsidian";
+import { initializeI18n } from "../src/i18n";
 import HaloPlugin from "../src/main";
 import HaloService from "../src/service";
 import { TEST_SITE, createFile, createMockApp, createSettings } from "./helpers/obsidian-mocks";
+
+/**
+ * 初始化 i18n（生产同一条入口）：批量命令的两道空转守卫弹的是**两句不同的话**，
+ * 判定它们必须靠文案本身 —— 不初始化时 `i18next.t()` 原样返回键名，
+ * 「弹的是哪一句」这件事就只剩键名可比，而键名恰恰是被测代码自己传进来的。
+ */
+beforeAll(async () => {
+  await initializeI18n("en");
+});
+
+/** `tests/setup.ts` 里那个 Notice 构造器会把每条文案推进这个数组 */
+function capturedNotices(): string[] {
+  return (obsidianRuntime as unknown as { __notices: string[] }).__notices;
+}
 
 /**
  * `src/main.ts` 的编排层测试。
@@ -25,6 +42,7 @@ type Internals = {
   getSiteForActiveFile(): Promise<unknown>;
   resolveSiteFor(file: unknown): unknown;
   uploadImagesForPublish(service: unknown, file: unknown): Promise<{ success: boolean }>;
+  runBatchCommand(action: "draft" | "publish" | "unpublish"): Promise<void>;
 };
 
 /**
@@ -131,4 +149,78 @@ test("publish-with-defaults 不经过路由解析，直接用默认站点", asyn
   expect(upload).toHaveBeenCalledTimes(1);
   const service = upload.mock.calls[0][0] as { site: { url: string } };
   expect(service.site.url).toBe(TEST_SITE.url);
+});
+
+test("批量命令：没配站点时提示「先配站点」，且不碰 vault", async () => {
+  // `batch.error_no_sites` 这个键在本任务之前**没有任何引用点** —— 它被造出来就是为了
+  // 这一道守卫。没有这条用例，守卫被删掉也不会有人发现，而后果是用户在零站点时点下
+  // 「批量发布」，拿到的是一个空的确认弹窗（或者一个报错），而不是一句告诉他去哪儿配的话。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const getMarkdownFiles = rs.fn(() => []);
+  plugin.app = { vault: { getMarkdownFiles } } as unknown;
+  const before = capturedNotices().length;
+
+  await plugin.runBatchCommand("publish");
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("batch.error_no_sites")]);
+  // 对照物：这道守卫必须**早于**读 vault。少了它，上面那条断言在一个「先列文件、
+  // 再发现没站点」的实现下照样为真 —— 而那意味着零站点时还是把整库文件列了一遍。
+  expect(getMarkdownFiles).not.toHaveBeenCalled();
+});
+
+test("批量命令：配了站点但没有一篇能进批时，提示的是**另一句**", async () => {
+  // 与上一条成对。两句话对应两种不同的用户动作：去配站点 / 去改笔记。
+  // 合成一句「无法批量处理」，用户不知道该动哪边 —— 这正是本任务要保住的区分度。
+  const { plugin } = makePlugin();
+  const file = createFile("notes/gone.md");
+
+  plugin.app = {
+    vault: { getMarkdownFiles: () => [file] },
+    // 笔记指向一个不在站点列表里的站点 → 进 skipped，候选数为 0
+    metadataCache: {
+      getFileCache: () => ({ frontmatter: { halo: { site: "https://gone.example.com" } } }),
+    },
+  } as unknown;
+  const before = capturedNotices().length;
+
+  await plugin.runBatchCommand("publish");
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("batch.error_no_candidates")]);
+});
+
+test("批量命令：确认之前不发布、也不上传图片（预览在任何写操作之前）", async () => {
+  // 确认弹窗的 Promise 在测试脚手架里**永不 settle**（`Modal.open()` 不调 `onOpen()`），
+  // 所以 `runBatchCommand` 会挂在 `confirmBatchPlan` 上。这里刻意不 await：
+  // 断言的是「它还停在那儿」—— 而停在确认上的意思就是站点与本地都还没被动过
+  //（`uploadImages` 会真的改写笔记里的图片链接，它必须排在确认之后）。
+  const { plugin } = makePlugin();
+  const file = createFile("notes/a.md");
+
+  plugin.app = {
+    vault: { getMarkdownFiles: () => [file], read: rs.fn(async () => "") },
+    metadataCache: { getFileCache: () => ({ frontmatter: {} }) },
+  } as unknown;
+
+  const summarize = rs.spyOn(HaloService.prototype, "summarizeImages");
+  const publish = rs.spyOn(HaloService.prototype, "publishPost");
+  const upload = rs.spyOn(HaloService.prototype, "uploadImages");
+
+  try {
+    void plugin.runBatchCommand("publish");
+    // 放一个宏任务让它跑到弹窗那一步（规划是异步的：先列分类标签，再逐篇扫图片）
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // **必须先把「流程真的走到了规划」证明掉**：否则下面两条「没调」也可能只是因为它在更早的
+    // 地方就返回了（比如候选数为 0），那样这条用例永远为真 —— 一条不能失败的测试比一个
+    // 记录在案的缺口更糟。
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(summarize.mock.calls[0][0]).toBe(file);
+
+    expect(publish).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  } finally {
+    summarize.mockRestore();
+    publish.mockRestore();
+    upload.mockRestore();
+  }
 });

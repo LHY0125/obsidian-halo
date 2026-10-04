@@ -1,5 +1,7 @@
 import i18next from "i18next";
 import { Notice, Plugin, type TFile, moment } from "obsidian";
+import { confirmBatchPlan, showBatchSummary } from "./batch-confirm-modal";
+import { type BatchAction, collectBatchCandidates, planBatch, runBatch } from "./batch-publish";
 import { initializeI18n } from "./i18n";
 import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
@@ -166,6 +168,32 @@ export default class HaloPlugin extends Plugin {
             tools: report.missing.join(", "),
           }),
         );
+      },
+    });
+
+    // 三个批量命令共用 `runBatchCommand`，只在 action 上分档 —— 与 `publish` /
+    // `publish-with-defaults` 分成两条公开命令是同一取舍：命令名要能一眼看出会做什么。
+    this.addCommand({
+      id: "batch-draft",
+      name: i18next.t("command.batch_draft.name"),
+      callback: async () => {
+        await this.runBatchCommand("draft");
+      },
+    });
+
+    this.addCommand({
+      id: "batch-publish",
+      name: i18next.t("command.batch_publish.name"),
+      callback: async () => {
+        await this.runBatchCommand("publish");
+      },
+    });
+
+    this.addCommand({
+      id: "batch-unpublish",
+      name: i18next.t("command.batch_unpublish.name"),
+      callback: async () => {
+        await this.runBatchCommand("unpublish");
       },
     });
 
@@ -343,6 +371,76 @@ export default class HaloPlugin extends Plugin {
 
     const service = new HaloService(this.app, this.settings, site);
     await service.uploadImages({}, file);
+    await this.saveSettings();
+  }
+
+  /**
+   * 三个批量命令共用的入口：取候选 → 聚合规划 → 一次确认 → 执行 → 汇总。
+   *
+   * 候选来源就是**vault 里当前所有 markdown 文件**，用户靠确认弹窗里的分组清单看到全貌。
+   * 刻意不做「先选文件夹再选标签」的多选对话框：一次聚合确认（用户 2026-10-03 的裁定）
+   * 的前提正是"清单里能看到全部候选"，先让用户筛一遍再让他看清单，等于把同一件事问两遍。
+   *
+   * 站点解析不出来（多站点无规则无默认 / 指向未配置的站点 / 站点已被删）的笔记
+   * 一律进 `skipped` 并在弹窗里逐条列出原因 —— 批量路径**不弹站点选择弹窗**，
+   * 一篇一弹会把"批量"变成 118 次点击。
+   */
+  private async runBatchCommand(action: BatchAction): Promise<void> {
+    if (this.settings.sites.length === 0) {
+      new Notice(i18next.t("batch.error_no_sites"));
+      return;
+    }
+
+    const files = this.app.vault.getMarkdownFiles();
+    const { candidates, skipped } = collectBatchCandidates(files, this.app, this.settings, action);
+
+    if (candidates.length === 0) {
+      // 这句提示与上一句是两种不同的处境（没配站点 / 配了但没有一篇能进批），
+      // 所以两个键分开。合成一句「无法批量处理」会让用户不知道该去改站点还是改笔记。
+      new Notice(i18next.t("batch.error_no_candidates"));
+      return;
+    }
+
+    // 每个站点造一个 service：分类/标签的列举与图片概览都要用它，
+    // 而 118 篇里同一站点的那些共用同一个客户端。
+    // 缓存另一个作用是让**预览与执行共用同一批客户端** —— 两处各建一份不会出错，
+    // 却会把「哪一篇属于哪个站点」这件事在两条路径上各算一遍。
+    const services = new Map<string, HaloService>();
+    const serviceFor = (site: HaloSite): HaloService => {
+      let service = services.get(site.url);
+
+      if (!service) {
+        service = new HaloService(this.app, this.settings, site);
+        services.set(site.url, service);
+      }
+
+      return service;
+    };
+
+    const plan = await planBatch(candidates, skipped, action, {
+      listTaxonomy: async (site) => {
+        const service = serviceFor(site);
+        const [categories, tags] = await Promise.all([service.getCategories(), service.getTags()]);
+        return { categories, tags };
+      },
+      summarizeImages: async (item) =>
+        item.resolution.kind === "resolved"
+          ? serviceFor(item.resolution.site).summarizeImages(item.file)
+          : { pending: 0, cached: 0, overLimit: [] },
+    });
+
+    const selected = await confirmBatchPlan(this, plan);
+
+    // `undefined` = 用户取消。到此为止，站点与本地都还没被动过
+    //（预览与确认都发生在任何写操作之前，包括上传图片那一步）。
+    if (!selected) {
+      return;
+    }
+
+    showBatchSummary(this, await runBatch(plan, selected, serviceFor));
+
+    // 执行过程中图片缓存被写进了 `settings.imageUploadCache`；不落盘的话下次还得重传一遍。
+    // 放在汇总**之后**：落盘是几百毫秒级的 I/O，而用户此刻在等的是那份清单。
     await this.saveSettings();
   }
 

@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "@rstest/core";
 import i18next from "i18next";
 import type { App, TFile } from "obsidian";
-import { BatchConfirmModal } from "src/batch-confirm-modal";
-import type { BatchGroup, BatchItem, BatchPlan } from "src/batch-publish";
+import { BatchConfirmModal, BatchSummaryModal } from "src/batch-confirm-modal";
+import type { BatchGroup, BatchItem, BatchPlan, BatchRunSummary } from "src/batch-publish";
 import { initializeI18n } from "src/i18n";
 import type HaloPlugin from "src/main";
 import type { HaloSite } from "src/settings";
@@ -19,6 +19,10 @@ import { createSettings } from "./helpers/obsidian-mocks";
  * 丢弃回调）与真实 DOM 结构 —— 本仓库不为 UI 建 mock 基建。
  * `renderSummary` 与确认按钮的禁用态**已经**覆盖：给实例塞一个最小的 `summaryEl` 桩，
  * 那段原本每跑必提前返回的代码就能跑到（见 `attachSummaryStub`），不必动 `tests/setup.ts`。
+ *
+ * 末尾那份汇总弹窗（`BatchSummaryModal`）同理：`showBatchSummary()` 在测试里开不出窗口
+ *（`Modal.open()` 不调 `onOpen()`），所以直接构造导出的类、塞一个记录文字的 `contentEl` 桩，
+ * 钉住「三档数字分开报、失败项逐条列、成功项不列」。仍然验不到的只有真实排版。
  */
 
 /**
@@ -290,5 +294,130 @@ describe("BatchConfirmModal 的勾选状态", () => {
     internals.renderSummary();
 
     expect(disabled).toEqual([false]);
+  });
+});
+
+/** 造一份执行结果。`ok: false` 的那几条只有 `path` 与 `reason` 是汇总要用的 */
+function summaryOf(
+  action: BatchRunSummary["action"],
+  results: BatchRunSummary["results"],
+  skippedCount = 0,
+): BatchRunSummary {
+  return {
+    action,
+    results,
+    successCount: results.filter((item) => item.ok).length,
+    failureCount: results.filter((item) => !item.ok).length,
+    skippedCount,
+  };
+}
+
+/**
+ * 渲染一份汇总，把弹窗写出来的每一段文字收集回来。
+ *
+ * `tests/setup.ts` 的 `Modal.contentEl.createEl()` 返回 `undefined`（不记录任何东西），
+ * 所以这里跟 `attachSummaryStub` 一样，只给这一个实例喂最小桩 —— 不建 UI mock 基建，
+ * 又让 `onOpen()` 真的跑起来。`showBatchSummary()` 本身在测试里什么也开不起来
+ *（`Modal.open()` 不调 `onOpen`），所以直接构造导出的类。
+ */
+function renderSummary(summary: BatchRunSummary): string[] {
+  const plugin = { app: {} as App, settings: createSettings() } as unknown as HaloPlugin;
+  const modal = new BatchSummaryModal(plugin, summary) as unknown as {
+    contentEl: HTMLElement;
+    onOpen(): void;
+  };
+  const texts: string[] = [];
+
+  modal.contentEl = {
+    createEl: (_tag: string, options?: { text?: string }) => {
+      if (options?.text !== undefined) {
+        texts.push(options.text);
+      }
+
+      return undefined;
+    },
+    empty: () => {
+      texts.length = 0;
+    },
+  } as unknown as HTMLElement;
+
+  modal.onOpen();
+
+  return texts;
+}
+
+describe("BatchSummaryModal 的汇总渲染", () => {
+  it("成功 / 失败 / 执行前跳过三档分开报，不是一个「完成 N 篇」", () => {
+    // 判别器：把 `summary_line` 的插值只留 `success`（或者把 failed 与 skipped 对调）就会红。
+    // 后果很具体：118 篇里 3 篇失败而汇总只说「118 篇完成」—— 用户被告知了一件假事，
+    // 他以为站点上齐了，实际少了三篇，而那三篇正是他需要去手工处理的。
+    const texts = renderSummary(
+      summaryOf(
+        "publish",
+        [
+          { path: "a.md", ok: true },
+          { path: "b.md", ok: false, reason: "炸了" },
+        ],
+        2,
+      ),
+    );
+
+    expect(texts).toContain(i18next.t("batch.summary_line", { success: 1, failed: 1, skipped: 2 }));
+  });
+
+  it("失败篇数变了汇总行就跟着变（数字真的来自 summary，不是写死的）", () => {
+    // 上一条断言的是「用对了键与参数」。这一条补的是它的反面：
+    // 一个把三个参数都硬编码成常量的实现能过上一条吗？不能 —— 但它也过不了这一条。
+    // 两条合起来才把「渲染出来的数字确实随 summary 变」钉住。
+    const one = renderSummary(summaryOf("publish", [{ path: "a.md", ok: false, reason: "炸了" }], 0));
+    const two = renderSummary(
+      summaryOf(
+        "publish",
+        [
+          { path: "a.md", ok: false, reason: "炸了" },
+          { path: "b.md", ok: false, reason: "炸了" },
+        ],
+        0,
+      ),
+    );
+
+    expect(one).not.toEqual(two);
+  });
+
+  it("失败项逐条列出（路径 + 原因），成功项一条都不列", () => {
+    // 只列失败项是刻意的：118 行「x.md 成功」会把失败的那三行淹掉，
+    // 而用户此刻唯一要做的事就是处理那三行。
+    const texts = renderSummary(
+      summaryOf(
+        "publish",
+        [
+          { path: "ok.md", ok: true },
+          { path: "b.md", ok: false, reason: "上传图片失败" },
+          { path: "c.md", ok: false, reason: "站点拒绝" },
+        ],
+        0,
+      ),
+    );
+
+    expect(texts).toContain("b.md —— 上传图片失败");
+    expect(texts).toContain("c.md —— 站点拒绝");
+    // 空断言，上面两条就是它的对照物（同一份 summary 里确实有失败项可列）。
+    // 它挡的是「把成功项也一并列出来」——那正是这条用例存在的理由。
+    expect(texts.some((text) => text.includes("ok.md"))).toBe(false);
+  });
+
+  it("没有失败项时一行失败明细都不出现（但仍报三档数字）", () => {
+    const texts = renderSummary(summaryOf("unpublish", [{ path: "a.md", ok: true }], 1));
+
+    expect(texts.some((text) => text.includes(" —— "))).toBe(false);
+    // 对照物：上面那条证明「 —— 」这种明细行本来是会出现的（同一段代码、换成有失败的输入就有）。
+    expect(texts).toContain(i18next.t("batch.summary_line", { success: 1, failed: 0, skipped: 1 }));
+  });
+
+  it("失败项没有 reason 时显示空串，绝不把 undefined 印给用户", () => {
+    const texts = renderSummary(summaryOf("draft", [{ path: "b.md", ok: false }], 0));
+
+    expect(texts).toContain("b.md —— ");
+    expect(texts.some((text) => text.includes("undefined"))).toBe(false);
   });
 });

@@ -34,6 +34,15 @@
       "error_failed": "自檢失敗：{{message}}",
       "notice_ok": "自檢通過：{{name}} v{{version}}，可用工具 {{count}} 個。",
       "notice_missing": "自檢未通過，缺少 {{count}} 個工具：{{tools}}"
+    },
+    "batch_draft": {
+      "name": "批次推送草稿"
+    },
+    "batch_publish": {
+      "name": "批次發佈"
+    },
+    "batch_unpublish": {
+      "name": "批次撤回"
     }
   },
   "settings": {
@@ -227,7 +236,10 @@
     "skip_unknown_site": "筆記裡寫的 halo.site（{{url}}）不在站點清單裡。",
     "skip_unknown_rule_site": "路由規則「{{pattern}}」指向的站點（{{url}}）已不在站點清單裡。",
     "skip_not_published": "還沒有發佈到 Halo（沒有 halo.name），沒有可撤回的文章。",
+    "skip_unreadable": "讀不出這篇筆記的內容（正文或其圖片無法取得），已將它排除在本次批次之外。",
     "error_no_sites": "請先設定站點。",
-    "error_no_candidates": "沒有可批次處理的筆記。"
+    "error_no_candidates": "沒有可批次處理的筆記。",
+    "summary_title": "批次操作完成",
+    "summary_line": "成功 {{success}} 篇，失敗 {{failed}} 篇，另有 {{skipped}} 篇在執行前就被跳過（原因見確認清單）。"
   }
 }

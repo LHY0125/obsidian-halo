@@ -1,10 +1,24 @@
+import i18next from "i18next";
 import type { App, TFile } from "obsidian";
+import { renderErrorMessage } from "./i18n/error-message";
+import type HaloService from "./service";
 import type { LocalImageSummary } from "./service/image-upload";
 import type { HaloPostFrontmatter } from "./service/local-content";
 import { type McpCategoryItem, type McpTagItem, pickNewTerms } from "./service/post-mapping";
 import type { HaloSetting, HaloSite } from "./settings";
 import type { SiteResolution } from "./site-routing";
 import { resolveSite } from "./site-routing";
+
+/**
+ * 批量路径的规划与执行。
+ *
+ * **本模块不是「纯逻辑」：它会渲染文案**（`runBatch` 用 `i18next` 与 `renderErrorMessage` 把
+ * 失败原因渲染成用户能看懂的字符串）。这与 `transport/errors.ts`「不依赖 i18next」的约定
+ * 不冲突 —— 那条约束只针对 `transport/`，那里的产出是给 UI 层做料的**描述符**（key/params）。
+ * 这里相反：`BatchRunSummary` 是**终态产物**，`path` + `reason` 就是要直接喂给汇总弹窗的最终
+ * 形态，中间再插一层 `{key, params}` 只会让 `PublishResult.reason`（已经是字符串）与错误描述符
+ * 两种形态混在一起，调用方每次都得判一下手里是哪种。代价是这一层的测试需要初始化 i18next。
+ */
 
 /** 三个批量命令。`unpublish` 与另两个走的是完全不同的 MCP 工具，故显式分档 */
 export type BatchAction = "draft" | "publish" | "unpublish";
@@ -163,6 +177,12 @@ export async function planBatch(
     (candidate): candidate is ResolvedCandidate => candidate.resolution.kind === "resolved",
   );
 
+  // 复制一份而不是就地 push：`skipped` 是调用方的数组（`collectBatchCandidates` 的产物），
+  // 本函数只是把它带下去。就地改会让「调用方手里那份」也被悄悄改掉 —— 一次规划改变了入参，
+  // 而这层签名的读法是「这些是给你的原料」。概览阶段的跳过与解析阶段的跳过在这里**合流**，
+  // 顺序是「先解析、后概览」，与用户看到的原因顺序一致。
+  const allSkipped = [...skipped];
+
   // 先按站点分桶，再逐桶干活。**分桶必须在最前面**：分类标签要按站点整桶取一次，
   // 边遍历边取会让"这个站点的候选还没遍历完"变成一道需要额外小心才能维持的不变式。
   const buckets = new Map<string, ResolvedCandidate[]>();
@@ -185,7 +205,33 @@ export async function planBatch(
     const items: BatchItem[] = [];
 
     for (const candidate of bucket) {
-      items.push({ ...candidate, images: await deps.summarizeImages(candidate) });
+      let images: LocalImageSummary;
+
+      try {
+        images = await deps.summarizeImages(candidate);
+      } catch {
+        // 概览要读笔记正文（`summarizeLocalImages` 在 `vault.read` 失败时抛），而**一篇读不出来
+        // 不该让整份 118 篇的计划一起 reject**。这与上面 `listTaxonomy` 那条处置是同一条立场，
+        // 只是失败方向更凶险：`runBatchCommand` 里 `planBatch` 是**裸调用**，异常直接冒到命令
+        // 回调 —— 用户点了「批量发布」，没有弹窗、没有汇总、什么都没有，正是本计划要消灭的
+        // 「说不清是哪一种失败」。
+        //
+        // 处置是**跳过这一篇**，而不是给它一个「空概览」蒙混过去：空的概览会让确认弹窗写着
+        // 「待上传 0 张」，而执行阶段照样会把那几张贴上去 —— 用户在确认时看到的数字与实际
+        // 发生的事不符。跳过则复用了既有的「这篇进不了批，原因是……」这条出路，
+        // 用户能在确认弹窗的跳过清单里看见它、知道要去看一眼那篇笔记。
+        allSkipped.push({ path: candidate.file.path, key: "batch.skip_unreadable" });
+        continue;
+      }
+
+      items.push({ ...candidate, images });
+    }
+
+    // 整组都读不出来时不留一个 `items: []` 的空组：弹窗会为每个组渲染一行「站点名（N）」，
+    // 而「A（0）」只会让用户怀疑自己看错了（`summarizeSelection` 同样只返回有勾选的组，
+    // 为的是同一件事）。放在列分类标签**之前**顺带省掉那次无意义的 MCP 调用。
+    if (items.length === 0) {
+      continue;
     }
 
     // 分类/标签**每个站点只取一次**：118 篇各取一次会是 118 次 MCP 调用，
@@ -205,7 +251,7 @@ export async function planBatch(
     groups.push({ site, items, taxonomy });
   }
 
-  return { action, groups, skipped };
+  return { action, groups, skipped: allSkipped };
 }
 
 /** 一次勾选范围下的汇总。弹窗每变一次勾选就重算一次 */
@@ -264,4 +310,133 @@ export function summarizeSelection(plan: BatchPlan, selected: Set<string>): Batc
   }
 
   return { total, groups };
+}
+
+export interface BatchItemResult {
+  path: string;
+  ok: boolean;
+  /** 失败时**已渲染好**的用户文案（`PublishResult.reason` 或渲染后的错误） */
+  reason?: string;
+}
+
+export interface BatchRunSummary {
+  action: BatchAction;
+  results: BatchItemResult[];
+  successCount: number;
+  failureCount: number;
+  /**
+   * **执行前**就被排除的篇数（没站点、没 `halo.name`、正文读不出来等）。汇总里要能说清它们去哪了。
+   *
+   * 与 `failureCount` 是两码事，绝不能合并：`failureCount` 是「跑了但炸了」，
+   * 这个是「压根没让它跑」。混成一个数字，用户会以为有几篇被尝试过、需要去站点上确认状态。
+   */
+  skippedCount: number;
+}
+
+/**
+ * 逐篇执行，**失败不中断**。
+ *
+ * 这是对上游「任一图片失败即中止发布」的刻意偏离，用户 2026-10-03 裁定只用于批量路径 ——
+ * 单篇命令仍保留中止语义（那里用户盯着一篇，中止是最省事的处置）。
+ * 批量场景下中止的代价完全不同：118 篇里第 3 篇失败会让后面 115 篇一篇都不发，
+ * 而用户重跑时前两篇又要重走一遍。
+ *
+ * `selected` 是确认弹窗里勾选的路径集合（键是 `file.path`，与弹窗、与计划三处同一把键）。
+ * **只跑勾选的** —— 整组都没勾的站点连 `serviceFor` 都不会被调用（不白建客户端）。
+ *
+ * 逐篇**顺序**执行而不是 `Promise.all`：批量操作会真的改站点与本地文件，
+ * 顺序化让失败点可定位，也不会让一百多个并发请求撞上站点的限流。
+ */
+export async function runBatch(
+  plan: BatchPlan,
+  selected: Set<string>,
+  serviceFor: (site: HaloSite) => HaloService,
+): Promise<BatchRunSummary> {
+  const results: BatchItemResult[] = [];
+
+  // 空勾选 = 一次无操作，显式挡在最前面。
+  //
+  // 确认弹窗在零勾选时把「执行」按钮禁掉，但**那道闸门活在 UI 里**，而 `BatchConfirmModal`
+  // 是导出的类（测试要用），程序化调用能绕过按钮直接 `confirm()` 交出一个空集合。
+  // 调用方只把 `undefined` 当作「取消」，空集合就是「一篇都不发」—— 两者一旦被混淆，
+  // 用户以为自己取消了、实际上整批被执行。
+  //
+  // 这道守卫在**行为上**与下面每组过滤后的 `items.length === 0` 重合（同样什么都不做），
+  // 它多出来的是把「空集合是无操作」写成一条不依赖循环结构的不变式：
+  // 将来谁调整分组过滤的写法，这条保护还在。
+  if (selected.size === 0) {
+    return {
+      action: plan.action,
+      results: [],
+      successCount: 0,
+      failureCount: 0,
+      skippedCount: plan.skipped.length,
+    };
+  }
+
+  for (const group of plan.groups) {
+    const items = group.items.filter((item) => selected.has(item.file.path));
+
+    if (items.length === 0) {
+      continue;
+    }
+
+    const service = serviceFor(group.site);
+
+    for (const item of items) {
+      try {
+        if (plan.action === "unpublish") {
+          // 撤回只动发布状态，连正文都不读 —— 没有理由为它去上传图片或回写笔记。
+          // `remoteName` 在真实管线上必有值（`collectBatchCandidates` 对 unpublish 把没有
+          // `halo.name` 的笔记拦成了 skipped）；这里的 `?? ""` 只是让一个手工构造的计划
+          // 退化成「这一篇失败」而不是抛出去中断整批，服务端会用这个空名字回一个错误。
+          await service.changePostPublish(item.remoteName ?? "", false);
+          results.push({ path: item.file.path, ok: true });
+          continue;
+        }
+
+        // 图片先上传：上传会改写笔记里的图片链接，而 `publishPost` 要用改写后的 markdown。
+        // 任一图片失败就跳过这一篇 —— 「有的链接是远程、有的是本地」的半成品不落盘，
+        // 与单篇路径的处置一致（上游同款）。**跳过 ≠ 中止**：循环继续走下一篇。
+        const upload = await service.uploadImages({ file: item.file, silent: true });
+
+        if (upload.failedCount > 0) {
+          results.push({
+            path: item.file.path,
+            ok: false,
+            reason: i18next.t("service.error_upload_images_failed_publish_aborted", { failed: upload.failedCount }),
+          });
+          continue;
+        }
+
+        const published = await service.publishPost(item.file, {
+          markdown: upload.markdown,
+          // 「推草稿」= 强制 false，「发布」= 强制 true。命令的意图高于单篇 frontmatter —
+          // 用户点了「批量撤回」却因为某篇写着 publish: true 而被拦下，是这里最坏的表现。
+          publishOverride: plan.action === "publish",
+          // 批量路径**逐篇静默**：118 篇会弹 118 条成功便签，用户看不过来，
+          // 也把「末尾有一次汇总」这件事淹掉了（汇总才是他真正要看的那份清单）。
+          quiet: true,
+        });
+
+        results.push(
+          published.ok
+            ? { path: item.file.path, ok: true }
+            : { path: item.file.path, ok: false, reason: published.reason },
+        );
+      } catch (error) {
+        // `publishPost` 的契约是「不抛」，但整批的可用性不该押在这条契约上：
+        // 一次未捕获的异常会让已经成功的十几篇**没有任何汇总**，用户以为全军覆没。
+        results.push({ path: item.file.path, ok: false, reason: renderErrorMessage(error) });
+      }
+    }
+  }
+
+  return {
+    action: plan.action,
+    results,
+    successCount: results.filter((item) => item.ok).length,
+    failureCount: results.filter((item) => !item.ok).length,
+    skippedCount: plan.skipped.length,
+  };
 }

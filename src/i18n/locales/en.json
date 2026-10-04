@@ -34,6 +34,15 @@
       "error_failed": "Self-check failed: {{message}}",
       "notice_ok": "Self-check passed: {{name}} v{{version}}, {{count}} tools available.",
       "notice_missing": "Self-check failed, {{count}} tool(s) missing: {{tools}}"
+    },
+    "batch_draft": {
+      "name": "Batch push as drafts"
+    },
+    "batch_publish": {
+      "name": "Batch publish"
+    },
+    "batch_unpublish": {
+      "name": "Batch unpublish"
     }
   },
   "settings": {
@@ -227,7 +236,10 @@
     "skip_unknown_site": "The halo.site value in the note ({{url}}) is not in the site list.",
     "skip_unknown_rule_site": "The routing rule \"{{pattern}}\" points to a site ({{url}}) that is no longer in the site list.",
     "skip_not_published": "Not published to Halo yet (no halo.name) — there is nothing to unpublish.",
+    "skip_unreadable": "The note could not be read (its content or images are unavailable) — it was left out of this batch.",
     "error_no_sites": "Configure a site first.",
-    "error_no_candidates": "No notes to process in batch."
+    "error_no_candidates": "No notes to process in batch.",
+    "summary_title": "Batch run finished",
+    "summary_line": "{{success}} succeeded, {{failed}} failed, and {{skipped}} were skipped before the run (see the confirmation list for the reasons)."
   }
 }

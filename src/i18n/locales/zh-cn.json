@@ -34,6 +34,15 @@
       "error_failed": "自检失败：{{message}}",
       "notice_ok": "自检通过：{{name}} v{{version}}，可用工具 {{count}} 个。",
       "notice_missing": "自检未通过，缺少 {{count}} 个工具：{{tools}}"
+    },
+    "batch_draft": {
+      "name": "批量推草稿"
+    },
+    "batch_publish": {
+      "name": "批量发布"
+    },
+    "batch_unpublish": {
+      "name": "批量撤回"
     }
   },
   "settings": {
@@ -227,7 +236,10 @@
     "skip_unknown_site": "笔记里写的 halo.site（{{url}}）不在站点列表里。",
     "skip_unknown_rule_site": "路由规则「{{pattern}}」指向的站点（{{url}}）已不在站点列表里。",
     "skip_not_published": "还没有发布到 Halo（没有 halo.name），没有可撤回的文章。",
+    "skip_unreadable": "读不出这篇笔记的内容（正文或其图片不可用），已把它排除在本次批量之外。",
     "error_no_sites": "请先配置站点。",
-    "error_no_candidates": "没有可批量处理的笔记。"
+    "error_no_candidates": "没有可批量处理的笔记。",
+    "summary_title": "批量操作完成",
+    "summary_line": "成功 {{success}} 篇，失败 {{failed}} 篇，另有 {{skipped}} 篇在执行前就被跳过（原因见确认清单）。"
   }
 }

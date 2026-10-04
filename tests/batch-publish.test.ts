@@ -1,13 +1,17 @@
-import { describe, expect, it } from "@rstest/core";
+import { beforeAll, describe, expect, it } from "@rstest/core";
 import type { App, TFile } from "obsidian";
 import {
+  type BatchAction,
   type BatchCandidate,
   type BatchPlan,
   type BatchSkip,
   collectBatchCandidates,
   planBatch,
+  runBatch,
   summarizeSelection,
 } from "src/batch-publish";
+import { initializeI18n } from "src/i18n";
+import type HaloService from "src/service";
 import type { HaloSetting, HaloSite } from "src/settings";
 import type { SiteRoutingRule } from "src/site-routing";
 
@@ -18,6 +22,18 @@ import type { SiteRoutingRule } from "src/site-routing";
  * 这条纪律是被前几个任务教出来的：`expect(calls).toEqual([])` 这类断言在「代码根本没走到」
  * 时同样为真，于是它可能永久为真而没人发现。下面每处「空」断言旁边都配了它的对照物。
  */
+
+/**
+ * 初始化 i18n —— 走**生产同一条入口** `initializeI18n()`（`main.ts` 的 `onload` 调的就是它）。
+ *
+ * `runBatch` 现在会渲染文案（`PublishResult.reason` 与 `renderErrorMessage` 的产物都直接
+ * 进汇总、进弹窗），所以「失败原因里带着失败的张数」这类断言只有在 i18next 真的加载了
+ * 资源之后才有判别力：不初始化时 `i18next.t()` 原样返回**键名**，`{{failed}}` 不被插值，
+ * `toContain("1")` 会去键名字符串里找那个数字 —— 找不到，用例红得莫名其妙。
+ */
+beforeAll(async () => {
+  await initializeI18n("en");
+});
 
 const siteA: HaloSite = { name: "A", url: "https://a.example.com", token: "", mcpToken: "", default: true };
 const siteB: HaloSite = { name: "B", url: "https://b.example.com", token: "", mcpToken: "", default: false };
@@ -301,6 +317,79 @@ describe("planBatch", () => {
     expect(summarizeSelection(plan, new Set(["a.md"])).groups[0].newCategories).toEqual(["技术"]);
   });
 
+  it("某一篇的图片概览读不出来时跳过它，其余照常进计划（不整份计划 reject）", async () => {
+    // 判别器：`await deps.summarizeImages(candidate)` 不带 try/catch 时这条会红 ——
+    // `summarizeLocalImages` 在 `vault.read` 失败时抛，一篇读不出来会让**整份 118 篇的计划**
+    // 一起 reject。后果不是「发布了一篇坏文章」（那样至少还有汇总），而是用户连确认弹窗都
+    // 看不到：`runBatchCommand` 里 `planBatch` 是裸调用，异常直接冒到命令回调，
+    // 表现为「点了批量发布，什么都没发生」——正是本计划要消灭的「说不清是哪一种失败」。
+    const plan = await planBatch([candidate("a.md", siteA), candidate("b.md", siteA)], [], "draft", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: async (item) => {
+        if (item.file.path === "a.md") {
+          throw new Error("这篇读不出来");
+        }
+
+        return { pending: 2, cached: 0, overLimit: [] };
+      },
+    });
+
+    expect(plan.groups).toHaveLength(1);
+    expect(plan.groups[0].items.map((item) => item.file.path)).toEqual(["b.md"]);
+    // 对照物：剩下的那一篇**带着真实的概览**，证明循环没有在 a.md 处整体中断
+    expect(plan.groups[0].items[0].images.pending).toBe(2);
+    expect(plan.skipped).toEqual([{ path: "a.md", key: "batch.skip_unreadable" }]);
+  });
+
+  it("解析阶段与概览阶段的跳过**并集**带进计划（前者不被后者挤掉）", async () => {
+    // `planBatch` 收到的 `skipped` 来自解析阶段，它自己在概览阶段又要往里加。
+    // 一个「直接返回自己那份新数组」的实现会把解析阶段的跳过全丢掉 ——
+    // 确认弹窗上「已跳过 N 篇」随即少掉一半，用户以为那些笔记都在清单里。
+    const plan = await planBatch([candidate("a.md", siteA)], [{ path: "z.md", key: "batch.skip_no_sites" }], "draft", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: async () => {
+        throw new Error("读不出来");
+      },
+    });
+
+    expect(plan.skipped).toEqual([
+      { path: "z.md", key: "batch.skip_no_sites" },
+      { path: "a.md", key: "batch.skip_unreadable" },
+    ]);
+    // 对照物：入参数组**没有**被就地改写（`planBatch` 不持有调用方的数组）
+    const incoming: BatchSkip[] = [];
+    await planBatch([candidate("a.md", siteA)], incoming, "draft", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: async () => {
+        throw new Error("读不出来");
+      },
+    });
+    expect(incoming).toEqual([]);
+  });
+
+  it("一整组都读不出来时，那一组不进计划（不留一个 0 篇的空组）", async () => {
+    // 弹窗会为每个分组渲染一行「站点名（N）」。留着一个 `items: []` 的组，用户看到的是
+    // 「A（0）」—— 一张列着 0 的清单只会让人怀疑自己看错了（`summarizeSelection` 同样
+    // 只返回有勾选的组，为的是同一件事）。
+    const plan = await planBatch([candidate("a.md", siteA)], [], "draft", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: async () => {
+        throw new Error("读不出来");
+      },
+    });
+
+    expect(plan.groups).toEqual([]);
+    expect(plan.skipped).toEqual([{ path: "a.md", key: "batch.skip_unreadable" }]);
+    // 对照物：同一组依赖下，一个**读得出来**的候选确实会产生一个分组。
+    // 没有它的话，「空 groups」也可能只是因为这段代码根本没在干活。
+    const readable = await planBatch([candidate("a.md", siteA)], [], "draft", {
+      listTaxonomy: noTaxonomy,
+      summarizeImages: noImages,
+    });
+
+    expect(readable.groups).toHaveLength(1);
+  });
+
   it("候选全部解析不出站点时给出空 groups，不抛错", async () => {
     // 这条挡的是「planBatch 假设候选一定已解析」：那样的实现在 `bucket[0].resolution.site` 上抛。
     // 真实管线走不到这个输入（`collectBatchCandidates` 已把未解析的拦成 skipped），
@@ -432,5 +521,301 @@ describe("summarizeSelection", () => {
     expect(summary).toEqual({ total: 0, groups: [] });
     // 同上的对照物：全勾时总数是 3，证明这份 plan 里确实有三篇
     expect(summarizeSelection(plan, new Set(["a.md", "b.md", "c.md"])).total).toBe(3);
+  });
+});
+
+/** 造一个只属于某个站点的计划。`remoteNames` 只对 `unpublish` 有意义 */
+function planOf(
+  paths: string[],
+  action: BatchAction = "draft",
+  site: HaloSite = siteA,
+  remoteNames: Record<string, string> = {},
+): BatchPlan {
+  return {
+    action,
+    groups: [
+      {
+        site,
+        items: paths.map((path) => ({
+          ...candidate(path, site),
+          remoteName: remoteNames[path],
+          images: { pending: 0, cached: 0, overLimit: [] },
+        })),
+        taxonomy: { categories: [], tags: [] },
+      },
+    ],
+    skipped: [],
+  };
+}
+
+/** 「全部勾选」—— 多数用例只想验循环语义，不必逐条写路径集合 */
+function allOf(plan: BatchPlan): Set<string> {
+  return new Set(plan.groups.flatMap((group) => group.items.map((item) => item.file.path)));
+}
+
+/** 一个每篇都成功、且什么都不做的假服务；用 `overrides` 替换掉要测的那一个方法 */
+function serviceWith(overrides: Partial<Record<string, unknown>>): HaloService {
+  return {
+    uploadImages: async () => ({
+      processedCount: 0,
+      uploadedCount: 0,
+      reusedCount: 0,
+      failedCount: 0,
+      replaced: false,
+    }),
+    publishPost: async () => ({ ok: true }),
+    changePostPublish: async () => undefined,
+    ...overrides,
+  } as unknown as HaloService;
+}
+
+/**
+ * `runBatch` 的循环语义。
+ *
+ * 这里测的**不是**「撤回到底调了哪个 MCP 工具」—— 那是 `tests/service/index.test.ts` 里
+ * `changePostPublish` 的既有断言的活，在这里再验一遍只会多出一份要跟着服务端走的契约。
+ * 这里只钉循环本身：「跳过失败项继续」是用户 2026-10-03 的明确裁定，
+ * 也是本插件**唯一**一处逐项失败不中止整个操作的地方。
+ */
+describe("runBatch", () => {
+  it("只执行勾选的笔记（没勾的连碰都不碰）", async () => {
+    // 判别器：`runBatch` 若忽略 `selected` 直接跑整份 plan，这条会红 ——
+    // 而它的后果就是"用户取消了勾选，那几篇还是被发了"。
+    const attempted: string[] = [];
+    const plan = planOf(["a.md", "b.md", "c.md"]);
+    const summary = await runBatch(plan, new Set(["a.md", "c.md"]), () =>
+      serviceWith({
+        publishPost: async (file: { path: string }) => {
+          attempted.push(file.path);
+          return { ok: true };
+        },
+      }),
+    );
+
+    expect(attempted).toEqual(["a.md", "c.md"]);
+    expect(summary.successCount).toBe(2);
+  });
+
+  it("勾选集合里混进不存在的路径时忽略它，不抛错", async () => {
+    const plan = planOf(["a.md"]);
+
+    const summary = await runBatch(plan, new Set(["a.md", "幽灵.md"]), () => serviceWith({}));
+
+    expect(summary.successCount).toBe(1);
+    // 对照物：`results` 是按**计划里真实存在的条目**攒出来的，不是按勾选集合。
+    // 少了它，「成功 1 篇」也可能是「幽灵.md 也被当成一篇跑了」。
+    expect(summary.results.map((item) => item.path)).toEqual(["a.md"]);
+  });
+
+  it("中间一篇失败时后面的照常执行（跳过失败项继续）", async () => {
+    // 判别器：循环体里任何一个 `break` / `throw` / `return` 都会让这条红。
+    // 这是用户 2026-10-03 明确裁定的语义，也是对上游「一失败即中止」的刻意偏离。
+    const attempted: string[] = [];
+    const plan = planOf(["a.md", "b.md", "c.md"]);
+    const summary = await runBatch(plan, allOf(plan), () =>
+      serviceWith({
+        publishPost: async (file: { path: string }) => {
+          attempted.push(file.path);
+          return file.path === "b.md" ? { ok: false, reason: "炸了" } : { ok: true };
+        },
+      }),
+    );
+
+    expect(attempted).toEqual(["a.md", "b.md", "c.md"]);
+    expect(summary.successCount).toBe(2);
+    expect(summary.failureCount).toBe(1);
+    expect(summary.results.find((item) => item.path === "b.md")).toEqual({ path: "b.md", ok: false, reason: "炸了" });
+  });
+
+  it("图片上传失败的那一篇被记成失败，且**不进** publishPost（半成品 markdown 不落盘）", async () => {
+    // 判别器：把 `if (upload.failedCount > 0) { …continue }` 删掉就会红。
+    // 后果是拿一份「有的链接是远程、有的是本地」的半成品 markdown 去发布 ——
+    // 与单篇路径的中止语义背道而驰，而站点上已经留下了一篇链接半坏的正文。
+    const publishedPaths: string[] = [];
+    const plan = planOf(["a.md", "b.md"]);
+    const summary = await runBatch(plan, allOf(plan), () =>
+      serviceWith({
+        uploadImages: async () => ({
+          processedCount: 1,
+          uploadedCount: 0,
+          reusedCount: 0,
+          failedCount: 1,
+          replaced: false,
+        }),
+        publishPost: async (file: { path: string }) => {
+          publishedPaths.push(file.path);
+          return { ok: true };
+        },
+      }),
+    );
+
+    // `publishedPaths` 为空是**空**断言，它自己证明不了循环跑过 —— 下面两条是它的对照物：
+    // 两篇都被记了结果，且原因里带着失败的张数（只有真的调了 uploadImages 才拿得到这个数）。
+    expect(publishedPaths).toEqual([]);
+    expect(summary.failureCount).toBe(2);
+    expect(summary.results[0].reason).toContain("1");
+  });
+
+  it("撤回走 changePostPublish(name, false)，不碰文章正文", async () => {
+    const calls: [string, boolean][] = [];
+    const plan = planOf(["a.md", "b.md"], "unpublish", siteA, { "a.md": "post-1", "b.md": "post-2" });
+    const summary = await runBatch(plan, allOf(plan), () =>
+      serviceWith({
+        changePostPublish: async (name: string, publish: boolean) => {
+          calls.push([name, publish]);
+        },
+        publishPost: async () => {
+          throw new Error("撤回路径不该碰 publishPost —— 那会重新上传图片并改写本地笔记");
+        },
+      }),
+    );
+
+    expect(calls).toEqual([
+      ["post-1", false],
+      ["post-2", false],
+    ]);
+    expect(summary.successCount).toBe(2);
+  });
+
+  it("推草稿与发布都走 publishPost，区别只在 publishOverride", async () => {
+    const seen: (boolean | undefined)[] = [];
+    const draft = planOf(["a.md"], "draft");
+    const publish = planOf(["a.md"], "publish");
+    const record = () =>
+      serviceWith({
+        publishPost: async (_file: unknown, options: { publishOverride?: boolean }) => {
+          seen.push(options.publishOverride);
+          return { ok: true };
+        },
+      });
+
+    await runBatch(draft, allOf(draft), record);
+    await runBatch(publish, allOf(publish), record);
+
+    expect(seen).toEqual([false, true]);
+  });
+
+  it("quiet 为真：批量路径不逐篇弹便签", async () => {
+    const optionsSeen: { quiet?: boolean }[] = [];
+    const plan = planOf(["a.md"]);
+
+    await runBatch(plan, allOf(plan), () =>
+      serviceWith({
+        publishPost: async (_file: unknown, options: { quiet?: boolean }) => {
+          optionsSeen.push(options);
+          return { ok: true };
+        },
+      }),
+    );
+
+    expect(optionsSeen).toEqual([expect.objectContaining({ quiet: true })]);
+  });
+
+  it("跨站点的计划按组各取一次 service（同一个站点共用同一个客户端）", async () => {
+    const built: string[] = [];
+    const items = (paths: string[], site: HaloSite) =>
+      paths.map((path) => ({ ...candidate(path, site), images: { pending: 0, cached: 0, overLimit: [] } }));
+    const plan: BatchPlan = {
+      action: "draft",
+      groups: [
+        { site: siteA, items: items(["a.md", "b.md"], siteA), taxonomy: { categories: [], tags: [] } },
+        { site: siteB, items: items(["c.md"], siteB), taxonomy: { categories: [], tags: [] } },
+      ],
+      skipped: [],
+    };
+
+    await runBatch(plan, allOf(plan), (site) => {
+      built.push(site.url);
+      return serviceWith({});
+    });
+
+    expect(built).toEqual([siteA.url, siteB.url]);
+  });
+
+  it("整组没勾时那一组的 service 根本不会被构造（不白建客户端）", async () => {
+    const built: string[] = [];
+    const items = (paths: string[], site: HaloSite) =>
+      paths.map((path) => ({ ...candidate(path, site), images: { pending: 0, cached: 0, overLimit: [] } }));
+    const plan: BatchPlan = {
+      action: "draft",
+      groups: [
+        { site: siteA, items: items(["a.md"], siteA), taxonomy: { categories: [], tags: [] } },
+        { site: siteB, items: items(["c.md"], siteB), taxonomy: { categories: [], tags: [] } },
+      ],
+      skipped: [],
+    };
+
+    await runBatch(plan, new Set(["a.md"]), (site) => {
+      built.push(site.url);
+      return serviceWith({});
+    });
+
+    expect(built).toEqual([siteA.url]);
+  });
+
+  it("一次异常不终止整批：循环体自己接住每一篇的异常", async () => {
+    // publishPost 的契约是「不抛」，但批量循环不该把整批的可用性押在这条契约上 ——
+    // 一次未捕获的异常会让 100 篇已经成功的笔记**没有任何汇总**，用户以为全军覆没。
+    const plan = planOf(["a.md", "b.md"]);
+    const summary = await runBatch(plan, allOf(plan), () =>
+      serviceWith({
+        publishPost: async (file: { path: string }) => {
+          if (file.path === "a.md") {
+            throw new Error("boom");
+          }
+          return { ok: true };
+        },
+      }),
+    );
+
+    expect(summary.failureCount).toBe(1);
+    expect(summary.successCount).toBe(1);
+    // 失败原因必须是**能看懂的文案**，不是 `undefined`（那样汇总里只有文件名，用户无从下手）
+    expect(summary.results[0].reason).toBeTruthy();
+  });
+
+  it("概览阶段的跳过原样带进 summary.skippedCount（用户要知道那些笔记去哪了）", async () => {
+    // 「跳过」有两个不同的时刻：**执行前**（站点解析不出、正文读不出来）与**执行中**（发布失败）。
+    // 汇总里把两者分开报，用户才分得清「这几篇我根本没让它跑」与「这几篇跑了但炸了」——
+    // 混成一个数字会让他以为有 3 篇被尝试过。
+    const plan: BatchPlan = {
+      ...planOf(["a.md"]),
+      skipped: [{ path: "z.md", key: "batch.skip_not_published" }],
+    };
+
+    const summary = await runBatch(plan, allOf(plan), () => serviceWith({}));
+
+    expect(summary.skippedCount).toBe(1);
+    // 对照物：同一次运行里 `results` 只有计划里的那一篇 ——
+    // `skippedCount` 数的是**没进 results 的那些**，两者不能是同一个来源。
+    expect(summary.results.map((item) => item.path)).toEqual(["a.md"]);
+    expect(summary.failureCount).toBe(0);
+  });
+
+  it("空勾选集合：一篇都不执行、一个客户端都不建（程序化确认也挡得住）", async () => {
+    // 确认弹窗在零勾选时把「执行」按钮禁掉，但 `BatchConfirmModal` 是**导出的类** ——
+    // 程序化调用能绕过按钮直接 `confirm()`，交出的是空集合，而调用方只把 `undefined`
+    // 当作「取消」。所以「空集合 = 无操作」必须由 `runBatch` 自己保证，不能只活在 UI 里。
+    const built: string[] = [];
+    const plan = planOf(["a.md", "b.md"]);
+
+    const summary = await runBatch(plan, new Set(), (site) => {
+      built.push(site.url);
+      return serviceWith({});
+    });
+
+    // 空的断言，配下面两条对照物用
+    expect(built).toEqual([]);
+    expect(summary.results).toEqual([]);
+    expect(summary.successCount + summary.failureCount).toBe(0);
+
+    // 对照物：同一份 plan、只勾一篇时**循环确实跑起来了**（否则上面三条也可能只是因为
+    // 这段代码压根没被执行到）。
+    const ran: string[] = [];
+    await runBatch(plan, new Set(["a.md"]), (site) => {
+      ran.push(site.url);
+      return serviceWith({});
+    });
+    expect(ran).toEqual([siteA.url]);
   });
 });
