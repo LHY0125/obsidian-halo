@@ -77,10 +77,8 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 环在打包器里未必直接报错，而是在某些 import 顺序下让某个绑定变成 `undefined`（本地测试跑得通，发出去的 `main.js` 才出问题）。
 匹配**大小写不敏感**（`globToRegExp` 构造正则时带 `i` 标志），因为用户在 Windows 上看到的目录名与实际
 大小写未必一致，而**没命中是没有任何提示的**。`matchGlob()` 归一化的是**模式**、**不**归一化**路径**：
-传进来的 `filePath` 必须是 `/` 分隔的库内相对路径：归一化只作用于模式，**给错形态既不报错，
-也不保证不命中** —— 实测 `matchGlob("**", "博客\a.md")` 与 `matchGlob("*.md", "博客\a.md")` 都为真，
-而 `matchGlob("博客/*.md", "博客\a.md")` 为假。细节见 `src/glob.ts`
-的 `matchGlob()` 文档。
+传进来的 `filePath` 必须是 `/` 分隔的库内相对路径 —— 传反斜杠路径**可能导致规则不命中**。
+细节见 `src/glob.ts` 的 `matchGlob()` 文档。
 
 **批量操作**：三个命令（推草稿 / 发布 / 撤回）共用 `HaloPlugin.runBatchCommand(action)`，只在 `action` 上分档。
 候选是**全库的 markdown 笔记**；规划（`planBatch()`）与执行（`runBatch()`）都在 `src/batch-publish.ts`，

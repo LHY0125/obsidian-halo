@@ -88,9 +88,7 @@ halo:
 
 **若不符，最可能的错在哪**：`src/site-routing.ts` 的 `resolveSite()` —— 规则表的循环是否在
 默认站点之前（顺序反了就会一律发到默认站点）；或 `src/glob.ts` 的 `matchGlob()` 没命中
-（`file.path` 必须是 `/` 分隔的库内相对路径 —— `matchGlob()` 归一化的是**模式**、**不**归一化**路径**，
-所以给错形态**既不报错、也不保证不命中**：实测 `matchGlob("**", "博客\a.md")` 与
-`matchGlob("*.md", "博客\a.md")` 都为真，而 `matchGlob("博客/*.md", "博客\a.md")` 为假）。
+（`file.path` 必须是 `/` 分隔的库内相对路径 —— 传反斜杠路径**可能导致规则不命中**）。
 预览里的来源标注来自 `src/publish-preview-modal.ts` 对 `preview.site.source === "rule"` 的分支。
 
 ## 6. 规则指向一个已删除的站点 —— 报错而不改道
