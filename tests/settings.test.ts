@@ -101,6 +101,14 @@ describe("siteRouting 迁移", () => {
   });
 
   it("已有的规则被原样保留（顺序就是优先级，绝不能在迁移里重排或去重）", () => {
+    // 这一条是**规范钉子**，不是**变更探测器** —— 它**在实现之前就是绿的**，
+    // 所以不能用它判断「迁移写没写对」。原因：`migrateSettings` 里的
+    // `Object.assign({}, DEFAULT_SETTINGS, source)` 本来就会把 `source.siteRouting` 原样带过去，
+    // 本断言在 `normalizeRoutingRules()` 存在与否两种情况下都成立。
+    //
+    // 它守的是**将来**：谁要给迁移加「去重」「按站点归并」「按模式排序」之类的"整理"，
+    // 这条会立刻变红 —— 而那种整理正是本阶段明令禁止的。数组顺序就是优先级，
+    // 被重排或被悄悄丢掉的规则会把笔记发到另一个站上，且全程没有任何提示。
     const rules = [
       { pattern: "博客/日记/**", site: "https://a.example.com" },
       { pattern: "博客/**", site: "https://b.example.com" },

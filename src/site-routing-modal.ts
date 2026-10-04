@@ -12,12 +12,28 @@ export function openSiteRoutingModal(plugin: HaloPlugin, rule?: SiteRoutingRule)
 }
 
 class SiteRoutingModal extends Modal {
+  /**
+   * 本弹窗自己的草案副本。**必须复制，不能直接持有调用方传进来的那个对象。**
+   *
+   * 编辑既有规则时，传进来的是 `plugin.settings.siteRouting` 里的**活对象**，而下面每个
+   * `onChange` 都是就地写它。不复制的话，「取消」只丢弃了返回值，内存里的改动**还在** ——
+   * 用户之后做任何触发 `saveSettings()` 的事（哪怕只是切一下别的开关）就会把这次已被
+   * 放弃的编辑落进 `data.json`：他以为没改，实际改了路由目标，下次发布发到另一个站。
+   * 这属于静默 + 延迟的数据变更，比报错难查得多。
+   *
+   * 复制放在构造函数而非各调用点：这条不变量该由**拥有草案的对象**自己保证，
+   * 放在调用方意味着每多一个调用点就多一次「记得先复制」的机会。
+   */
+  private readonly draft: SiteRoutingRule;
+
   constructor(
     private readonly plugin: HaloPlugin,
-    private readonly draft: SiteRoutingRule,
+    draft: SiteRoutingRule,
     private readonly onSubmit: (rule: SiteRoutingRule | undefined) => void,
   ) {
     super(plugin.app);
+
+    this.draft = { ...draft };
   }
 
   onOpen(): void {
