@@ -167,6 +167,28 @@ const plan = planWith([
   { site: siteB, paths: ["c.md"] },
 ]);
 
+/**
+ * 在 spy 生效期间跑 `run`，把每个 `Setting` 的**名称**收集回来。
+ *
+ * 手法是给 `Setting.prototype.setName` 打 spy：`tests/setup.ts` 的 `Setting` 是个丢弃参数的壳
+ * （`setName(): this`），文案读不回来，而 spy 记录的是**调用参数**，不受壳影响。
+ * 与 `tests/settings.test.ts` 用 `Modal.prototype.open` 拿实例是同一套办法 —— 不新建 UI mock 基建。
+ *
+ * `finally` 里必须还原：`Setting.prototype` 是**全局共享**的，泄漏出去的 spy 会让后面所有用例
+ * 都收不到真实的 `Setting` 行为，那种故障会以别的测试失败的形式出现，极难反查。
+ */
+function captureSettingNames(run: () => void): string[] {
+  const spy = rs.spyOn(Setting.prototype, "setName");
+
+  try {
+    run();
+
+    return spy.mock.calls.map((call) => String(call[0]));
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 describe("BatchConfirmModal 的勾选状态", () => {
   it("默认全勾：什么都不动就确认 = 整批都发（这是默认值，不是遗漏）", () => {
     const { modal, decision } = openModal(plan);
@@ -437,26 +459,11 @@ describe("BatchSummaryModal 的汇总渲染", () => {
 });
 
 describe("确认弹窗的「笔记会被改写」提示", () => {
-  /**
-   * 渲染一次确认弹窗，把每个 `Setting` 的**名称**收集回来。
-   *
-   * 手法是给 `Setting.prototype.setName` 打 spy：`tests/setup.ts` 的 `Setting` 是个丢弃参数的壳
-   * （`setName(): this`），文案读不回来，而 spy 记录的是**调用参数**，不受壳影响。
-   * 与 `tests/settings.test.ts` 用 `Modal.prototype.open` 拿实例是同一套办法 —— 不新建 UI mock 基建。
-   */
+  /** 渲染一次确认弹窗，收回每个 `Setting` 的名称（spy 手法见 `captureSettingNames`） */
   function settingNames(plan: BatchPlan, settings?: HaloSetting): string[] {
-    const spy = rs.spyOn(Setting.prototype, "setName");
-
-    try {
-      const { modal } = openModal(plan, settings);
-      modal.renderContent();
-
-      return spy.mock.calls.map((call) => String(call[0]));
-    } finally {
-      // `Setting.prototype` 是**全局共享**的，泄漏出去的 spy 会污染后面所有用例 ——
-      // 与 `tests/settings.test.ts` 还原 `Modal.prototype.open` 同一条纪律。
-      spy.mockRestore();
-    }
+    return captureSettingNames(() => {
+      openModal(plan, settings).modal.renderContent();
+    });
   }
 
   it("关掉「替换图片链接」也照提示：回写 frontmatter 与那个开关无关", () => {
@@ -484,5 +491,63 @@ describe("确认弹窗的「笔记会被改写」提示", () => {
     // 同上：先证明渲染真的跑到了，再说「没有那条提示」
     expect(names).toContain("A（1）");
     expect(names).not.toContain(i18next.t("batch.notice_rewrites_notes"));
+  });
+});
+
+/**
+ * 一份「笔记写的显示名与站点现有清单对不上」的计划：站点的分类/标签快照为空，而笔记写着两个
+ * 显示名 —— `summarizeSelection` 的 `pickNewTerms` 因此把它们算成「将新建」。
+ * 对撤回而言这**绝不会发生**（撤回一个分类/标签都不建），正是下面两条要钉的那件事。
+ */
+function planWithNewTerms(action: BatchPlan["action"]): BatchPlan {
+  return {
+    action,
+    groups: [
+      {
+        site: siteA,
+        items: [{ ...item("a.md", siteA), categories: ["技术"], tags: ["Halo"] }],
+        taxonomy: { categories: [], tags: [] },
+      },
+    ],
+    skipped: [],
+  };
+}
+
+describe("确认弹窗的「将新建」汇总按 action 分档", () => {
+  /** 跑一次 `renderSummary()`，同时收回 `Setting` 的名称与写进汇总容器的文字 */
+  function renderSummarySettings(plan: BatchPlan): { names: string[]; texts: string[] } {
+    let texts: string[] = [];
+    const names = captureSettingNames(() => {
+      const { modal } = openModal(plan);
+      texts = attachSummaryStub(modal).texts;
+      modal.renderSummary();
+    });
+
+    return { names, texts };
+  }
+
+  it("撤回不渲染「将新建的分类 / 标签」：撤回什么也不建", () => {
+    // 判别器：把 `mayCreateTaxonomy` 那道门控去掉（恢复成只看 `length > 0`）就会红。
+    //
+    // 为什么这属于「说一套做一套」：撤回连 `executePublish()` 都不进，一个分类/标签都不会建。
+    // 只要某篇笔记写的显示名与站点现有清单对不上（站点侧改名/删除，或用户手改过 frontmatter），
+    // 一次「批量撤回」的确认弹窗就会宣称要新建它们 —— 用户在按下「确认」之前看到的是一件
+    // **本次绝不会发生**的事。这与图片那一行原本的毛病同源（都不按 action 分档），
+    // 处置也照抄 A18：撤回时 `planBatch` 把 `images` 归零、那一行自然不渲染。
+    const { names, texts } = renderSummarySettings(planWithNewTerms("unpublish"));
+
+    // 在场对照物：汇总**确实重画过**（「将处理 1 篇」那一行在）。
+    // 没有它，下面两个「不在」在 `renderSummary()` 提前返回时也永久为真。
+    expect(texts).toContain(i18next.t("batch.summary_count", { count: 1 }));
+    expect(names).not.toContain(i18next.t("batch.row_new_categories"));
+    expect(names).not.toContain(i18next.t("batch.row_new_tags"));
+  });
+
+  it("同样的候选换成 publish 时两行都在（上一条「不渲染」的对照物）", () => {
+    const { names, texts } = renderSummarySettings(planWithNewTerms("publish"));
+
+    expect(texts).toContain(i18next.t("batch.summary_count", { count: 1 }));
+    expect(names).toContain(i18next.t("batch.row_new_categories"));
+    expect(names).toContain(i18next.t("batch.row_new_tags"));
   });
 });

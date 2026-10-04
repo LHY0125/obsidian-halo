@@ -187,16 +187,28 @@ export class BatchConfirmModal extends Modal {
 
     this.summaryEl.createEl("p", { text: i18next.t("batch.summary_count", { count: summary.total }) });
 
+    // 撤回**什么也不建** —— 它连 `executePublish()` 都不进（`runBatch()` 的 unpublish 分支
+    // 只调 `changePostPublish()` 就 `continue`），所以「将新建的分类 / 标签」对它是一句
+    // **本次绝不会发生**的话。不门控的话只要某篇笔记写的显示名与站点现有清单对不上
+    //（站点侧改名/删除，或用户手改过 frontmatter），一次「批量撤回」的确认弹窗就会宣称
+    // 要新建它们 —— 与图片那一行原本的毛病同源（都不按 action 分档），处置也照抄 A18 那条：
+    // 撤回时 `planBatch` 把 `images` 归零、那一行自然不渲染；这里把分类/标签两行直接按 action 分档。
+    //
+    // ⚠️ **`listTaxonomy` 该跑还跑** —— 「这两行不渲染」不等于「`planBatch` 为撤回打的那批
+    // MCP 调用该省」。那是另一个问题（要改的是 `planBatch`，且得先决定撤回是否还需要 taxonomy
+    // 快照），本次刻意**不动**。
+    const mayCreateTaxonomy = this.plan.action !== "unpublish";
+
     for (const group of summary.groups) {
       this.summaryEl.createEl("h3", { text: `${group.site.name || group.site.url}（${group.count}）` });
 
-      if (group.newCategories.length > 0) {
+      if (mayCreateTaxonomy && group.newCategories.length > 0) {
         new Setting(this.summaryEl)
           .setName(i18next.t("batch.row_new_categories"))
           .setDesc(group.newCategories.join("、"));
       }
 
-      if (group.newTags.length > 0) {
+      if (mayCreateTaxonomy && group.newTags.length > 0) {
         new Setting(this.summaryEl).setName(i18next.t("batch.row_new_tags")).setDesc(group.newTags.join("、"));
       }
 
