@@ -358,19 +358,27 @@ export async function uploadImage(file: TFile, ctx: ImageUploadContext): Promise
 }
 
 /**
- * 上传当前笔记里的全部本地图片，可选地回写 markdown。
+ * 上传一篇笔记里的全部本地图片，可选地回写 markdown。
+ *
+ * 目标笔记由 `options.file` 显式给出；缺席时才回落到活动编辑器（单篇命令的路径）。
  *
  * 逐张容错：某一张失败只累加 `failedCount`，不影响其余图片。
  * 但只要有任何一张失败，就**整体不写回**本地文件——避免把「有的链接是远程、有的是本地」的
  * 半成品 markdown 落盘。
  */
 export async function uploadImages(
-  options: { silent?: boolean; replaceMarkdown?: boolean },
+  options: { silent?: boolean; replaceMarkdown?: boolean; file?: TFile },
   ctx: ImageUploadContext,
 ): Promise<UploadImagesResult> {
-  const { activeEditor } = ctx.app.workspace;
+  // 显式传入的文件优先。批量操作走的就是这条路 —— 它手上是**一个目录里的一批文件**，
+  // 而「活动编辑器」只有一个，且与批量的进度毫无关系：若回落到它，批量操作会把每一篇
+  // 都当成当前打开的那一篇来上传与回写。
+  //
+  // `?? ` 而不是真值判断：`TFile` 是对象，但契约上「缺席」只由 `undefined` / `null` 表达，
+  // 与全仓的 `null ≡ 缺席` 保持一致。
+  const targetFile = options.file ?? ctx.app.workspace.activeEditor?.file;
 
-  if (!activeEditor || !activeEditor.file) {
+  if (!targetFile) {
     return {
       processedCount: 0,
       uploadedCount: 0,
@@ -380,8 +388,8 @@ export async function uploadImages(
     };
   }
 
-  const md = await ctx.app.vault.read(activeEditor.file);
-  const imageReferences = collectLocalImageReferences(md, activeEditor.file, ctx.app);
+  const md = await ctx.app.vault.read(targetFile);
+  const imageReferences = collectLocalImageReferences(md, targetFile, ctx.app);
   const replaceMarkdown = options.replaceMarkdown ?? ctx.settings.replaceImageLinks;
 
   if (imageReferences.length === 0) {
@@ -458,7 +466,7 @@ export async function uploadImages(
   const shouldReplaceMarkdown = replaceMarkdown && failedCount === 0 && updatedMarkdown !== md;
 
   if (shouldReplaceMarkdown) {
-    await ctx.app.vault.modify(activeEditor.file, updatedMarkdown);
+    await ctx.app.vault.modify(targetFile, updatedMarkdown);
   }
 
   if (!options.silent) {

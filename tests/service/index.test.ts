@@ -211,7 +211,7 @@ describe("HaloService.uploadImages", () => {
     });
     const service = new HaloService(app, settings, site, client);
 
-    const result = await service.uploadImages({ silent: true });
+    const result = await service.uploadImages({ silent: true }, note);
 
     const expectedMarkdown = [
       "![Logo](https://halo.example.com/uploads/logo.png)",
@@ -257,7 +257,7 @@ describe("HaloService.uploadImages", () => {
     });
     const service = new HaloService(app, createSettings(), site, client);
 
-    const result = await service.uploadImages({ silent: true });
+    const result = await service.uploadImages({ silent: true }, note);
 
     expect(result).toMatchObject({
       failedCount: 0,
@@ -281,7 +281,7 @@ describe("HaloService.uploadImages", () => {
     const { client } = fakeUploads({ "my logo.png": "/uploads/my-logo.png" });
     const service = new HaloService(app, createSettings(), site, client);
 
-    const result = await service.uploadImages({ silent: true });
+    const result = await service.uploadImages({ silent: true }, note);
 
     expect(result).toMatchObject({
       failedCount: 0,
@@ -300,7 +300,7 @@ describe("HaloService.uploadImages", () => {
     const { client } = fakeUploads({ "logo.png": "/uploads/logo.png" });
     const service = new HaloService(app, createSettings({ replaceImageLinks: false }), site, client);
 
-    const result = await service.uploadImages({ silent: true });
+    const result = await service.uploadImages({ silent: true }, note);
 
     expect(result).toMatchObject({
       failedCount: 0,
@@ -336,7 +336,7 @@ describe("HaloService.uploadImages", () => {
     });
     const service = new HaloService(app, settings, site, client);
 
-    const result = await service.uploadImages({ silent: true });
+    const result = await service.uploadImages({ silent: true }, note);
 
     expect(result).toMatchObject({
       failedCount: 0,
@@ -369,7 +369,7 @@ describe("HaloService.uploadImages", () => {
     const { client, calls } = fakeUploads({ "logo.png": "/uploads/new-logo.png" });
     const service = new HaloService(app, settings, site, client);
 
-    const result = await service.uploadImages({ silent: true });
+    const result = await service.uploadImages({ silent: true }, note);
 
     // 失效的缓存条目必须真的触发一次上传
     expect(calls.map((call) => call.name)).toEqual(["halo_upload_attachment"]);
@@ -408,7 +408,7 @@ describe("HaloService.uploadImages", () => {
     const service = new HaloService(app, createSettings(), site, client);
 
     try {
-      const result = await service.uploadImages({ silent: true });
+      const result = await service.uploadImages({ silent: true }, note);
 
       expect(result).toMatchObject({
         failedCount: 1,
@@ -442,7 +442,7 @@ describe("HaloService.uploadImages", () => {
     const seen = notices.length;
 
     try {
-      const result = await service.uploadImages({ silent: true });
+      const result = await service.uploadImages({ silent: true }, note);
 
       expect(result.failedCount).toBe(1);
       // silent 只压常规汇总，「为什么失败」必须说出来 —— 否则用户只看到「1 张失败」，
@@ -468,7 +468,7 @@ describe("HaloService.uploadImages", () => {
     const seen = notices.length;
 
     try {
-      const result = await service.uploadImages({ silent: true });
+      const result = await service.uploadImages({ silent: true }, note);
 
       expect(result.failedCount).toBe(1);
       // 关键：用户必须看到**为什么**。只报一个数字的话，他无从知道是密钥没填 ——
@@ -690,7 +690,7 @@ describe("HaloService.publishPost", () => {
 
     metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     // 红线：首次失败 + 一次重试成功 ⇒ 恰好 2 次写入，且重试前重新读了远端状态
     expect(updateAttempts).toBe(2);
@@ -720,7 +720,7 @@ describe("HaloService.publishPost", () => {
     rs.useFakeTimers();
 
     try {
-      const pending = service.publishPost();
+      const pending = service.publishPost(note);
       await rs.advanceTimersByTimeAsync(5_000);
       await pending;
     } finally {
@@ -766,7 +766,7 @@ describe("HaloService.publishPost", () => {
     rs.useFakeTimers();
 
     try {
-      const pending = service.publishPost();
+      const pending = service.publishPost(note);
       await rs.advanceTimersByTimeAsync(5_000);
       await pending;
     } finally {
@@ -800,7 +800,7 @@ describe("HaloService.publishPost", () => {
 
     const publishedMarkdown = "published markdown ![Logo](https://halo.example.com/uploads/logo.png)";
 
-    await service.publishPost({ markdown: publishedMarkdown });
+    await service.publishPost(note, { markdown: publishedMarkdown });
 
     // 写出去的 `raw` 就是传进来的 markdown，而不是重新读盘拿到的那份
     const create = calls.find((call) => call.name === "halo_create_post");
@@ -821,7 +821,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const create = calls.find((call) => call.name === "halo_create_post");
     expect(create).toBeDefined();
@@ -836,7 +836,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const create = calls.find((call) => call.name === "halo_create_post");
     // 先钉住调用真的发生了，否则下一行在「压根没调工具」的实现下也会通过（判决力为零）
@@ -851,7 +851,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const create = calls.find((call) => call.name === "halo_create_post");
     // 先钉住调用真的发生了，否则下面读一个 undefined 上的字段也会「通过」
@@ -868,7 +868,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const names = calls.map((call) => call.name);
     expect(names).toContain("halo_update_post");
@@ -884,7 +884,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const state = calls.find((call) => call.name === "halo_set_post_publish_state");
     expect(state?.args).toEqual({ name: expect.any(String), publish: true });
@@ -897,7 +897,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     // 先钉住发布路径真的跑到了写入那一步：否则「没调状态工具」在「什么都没调」的实现下同样成立
     expect(calls.map((call) => call.name)).toContain("halo_create_post");
@@ -914,7 +914,7 @@ describe("publishPost 走 MCP", () => {
     // publishByDefault 为 true 也不能覆盖显式的 false —— 「写了就听它的，没写才看默认值」
     const service = new HaloService(app, createSettings({ publishByDefault: true }), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const state = calls.find((call) => call.name === "halo_set_post_publish_state");
     expect(state?.args).toEqual({ name: expect.any(String), publish: false });
@@ -927,7 +927,7 @@ describe("publishPost 走 MCP", () => {
     const { client, calls } = fakeService();
     const service = new HaloService(app, createSettings({ publishByDefault: true }), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     const state = calls.find((call) => call.name === "halo_set_post_publish_state");
     expect(state?.args).toEqual({ name: expect.any(String), publish: true });
@@ -964,7 +964,7 @@ describe("publishPost 走 MCP", () => {
     rs.useFakeTimers();
 
     try {
-      const pending = service.publishPost();
+      const pending = service.publishPost(note);
       await rs.advanceTimersByTimeAsync(5_000);
       await pending;
     } finally {
@@ -1008,7 +1008,7 @@ describe("publishPost 走 MCP", () => {
     const notices = capturedNotices();
     const seen = notices.length;
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     expect(notices.slice(seen)).not.toContain(i18next.t("service.error_publish_failed"));
 
@@ -1038,7 +1038,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { title: "Post title", halo: { visible: "INTERNAL" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     expect(writtenArgs?.visible).toBe("INTERNAL");
   });
@@ -1064,7 +1064,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { title: "Post title", halo: { allowComment: false } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     expect(writtenArgs?.allowComment).toBe(false);
   });
@@ -1082,7 +1082,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { title: "Post title", halo: { name: "post-1", priority: 9 } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     // 走的是更新分支（有 halo.name），参数走 halo_update_post
     expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
@@ -1106,7 +1106,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { title: "Post title", halo: { publishTime: "2026-10-06 10:00" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     expect(writtenArgs?.publishTime).toBe("2026-10-06 10:00");
   });
@@ -1130,7 +1130,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { title: "Post title", halo: { publishTime: "" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     expect(writtenArgs?.publishTime).toBeNull();
   });
@@ -1145,7 +1145,7 @@ describe("publishPost 走 MCP", () => {
       frontmatter: { title: "Post title", halo: { visible: "public" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     // 一个 MCP 工具都不该被调到 —— 校验必须发生在分类/标签解析（会真的建分类）之前。
     //
@@ -1181,7 +1181,7 @@ describe("publishPost 走 MCP", () => {
       },
     );
 
-    await new HaloService(app, createSettings(), site, client).publishPost();
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     expect((written?.halo as { publishTime?: string } | undefined)?.publishTime).toBe("2026-10-06T10:00:00.000Z");
   });
@@ -1391,7 +1391,7 @@ describe("发布成功后的回读", () => {
     const notices = capturedNotices();
     const seen = notices.length;
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     // 写已经落库，用户必须看到成功 —— 报失败会让他重发一遍
     expect(notices.slice(seen)).toEqual([i18next.t("service.notice_publish_success")]);
@@ -1445,7 +1445,7 @@ describe("发布成功后的回读", () => {
 
     const service = new HaloService(app, createSettings(), site, client);
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     // 两条分支的陈旧值来源不同（新建＝本地字面量，更新＝服务端改状态前的值），
     // 但都必须被本次意图覆盖 —— 否则下一次发布会把文章退回草稿
@@ -1499,7 +1499,7 @@ describe("发布成功后的回读", () => {
     const notices = capturedNotices();
     const seen = notices.length;
 
-    await service.publishPost();
+    await service.publishPost(note);
 
     // 写已经落库 —— 收尾读失败既不能被报成「发布失败」，更不能把异常放出去：
     // 放出去的话 Obsidian 只把它记进控制台，用户什么都看不到，frontmatter 也不会回写。
@@ -1694,14 +1694,19 @@ describe("分类/标签解析失败时的三处收口", () => {
     const notices = capturedNotices();
     const seen = notices.length;
 
-    const thrown = await service.publishPost().catch((error: unknown) => error);
+    const result = await service.publishPost(note).catch((error: unknown) => error);
 
-    // 异常不再穿出 —— 穿出去的话 Obsidian 只把它记进控制台，用户什么都看不到
-    expect(thrown).toBeUndefined();
+    // 异常不再穿出 —— 穿出去的话 Obsidian 只把它记进控制台，用户什么都看不到。
+    //
+    // ⚠️ 这条原先断言的是 `undefined`（返回值是 `Promise<void>` 时的「没抛异常」代理）。
+    // 返回值改成 `PublishResult` 之后，同一个性质由**这一条**继续钉住：真抛了的话 `result`
+    // 会是那个 Error，`toEqual` 立刻红。所以它没有变松，反而顺带钉住了「原因从返回值交出来」。
+    expect(result).toEqual({ ok: false, reason: i18next.t("transport.error.forbidden", { status: 403 }) });
     // 且不是「提示了但照写不误」：两个写工具一次都没被调用，frontmatter 也没动
     expect(calls.filter((call) => call.name === "halo_create_post" || call.name === "halo_update_post")).toEqual([]);
     expect(fileManager.processFrontMatter).not.toHaveBeenCalled();
-    // 用户看得见真实原因（这里是权限，不是泛泛的「发布失败」）
+    // 用户看得见真实原因（这里是权限，不是泛泛的「发布失败」）——
+    // 与上面那条合起来，「便签」与「返回值」两条通道说的是同一件事
     expect(notices.slice(seen)).toEqual([i18next.t("transport.error.forbidden", { status: 403 })]);
   });
 
@@ -1790,5 +1795,86 @@ describe("分类/标签解析失败时的三处收口", () => {
     expect(notices.slice(seen)).toEqual([
       `${i18next.t("service.notice_taxonomy_not_resolved")}\n${i18next.t("transport.error.forbidden", { status: 403 })}`,
     ]);
+  });
+});
+
+/**
+ * 批量路径赖以为生的两条新契约，以及它们与便签的关系：
+ *
+ * - `quiet` 让**返回值**成为唯一通道 —— 批量不能用 118 条便签报进度；
+ * - `publishOverride` 是**新增的最高优先级**，不是替换掉原有那两级规则；
+ * - 「返回值与便签说的是同一件事」—— 否则单篇与批量会对同一次失败给出两种说法，
+ *   用户无从判断哪个是真的。
+ */
+describe("publishPost 的返回值、quiet 与 publishOverride", () => {
+  beforeEach(() => {
+    forbidRest();
+  });
+
+  test("quiet 时不弹成功便签，但返回值仍是 ok", async () => {
+    // 判别器：把 quiet 判断删掉 → 这条红。它钉的是「批量路径不会被 118 条提示淹掉」。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client } = fakeService();
+    const notices = capturedNotices();
+    const seen = notices.length;
+    metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
+
+    const result = await new HaloService(app, createSettings(), site, client).publishPost(note, { quiet: true });
+
+    expect(result).toEqual({ ok: true });
+    expect(notices.slice(seen)).toEqual([]);
+  });
+
+  test("失败时返回的 reason 与便签文案**逐字一致**", async () => {
+    // 不要断言 reason 等于 `i18next.t("service.error_publish_failed")`：那条路上
+    // `publishFailureMessage` 还会拼上服务端原文（`withErrorDetail`），逐字相等本来就是错的。
+    // 真正要钉的不变式是「返回值与便签说的是同一件事」—— 否则单篇与批量两条路径
+    // 会对**同一次失败**给出两种说法，用户无从判断哪个是真的。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client } = fakeService({
+      onWrite: () => {
+        throw new McpError("unauthorized", {});
+      },
+    });
+    const notices = capturedNotices();
+    const seen = notices.length;
+    metadataCache.getFileCache.mockImplementation(() => ({ frontmatter: { title: "Post title" } }));
+
+    const result = await new HaloService(app, createSettings(), site, client).publishPost(note);
+
+    expect(result.ok).toBe(false);
+    expect(notices.slice(seen)).toEqual([(result as { reason: string }).reason]);
+  });
+
+  test("publishOverride 压过 frontmatter 里的 publish: true", async () => {
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client, calls } = fakeService();
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", publish: true } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost(note, { publishOverride: false });
+
+    const states = calls.filter((call) => call.name === "halo_set_post_publish_state");
+    expect(states[states.length - 1]?.args?.publish).toBe(false);
+  });
+
+  test("单篇路径不传 override 时，frontmatter 的 publish 仍然说了算", async () => {
+    // 与上一条成对：override 是**新增的最高优先级**，不是替换掉原有规则。
+    // 缺了这条，一个「永远听 override」的错误实现也能全绿。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client, calls } = fakeService();
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", publish: true } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
+
+    const states = calls.filter((call) => call.name === "halo_set_post_publish_state");
+    expect(states[states.length - 1]?.args?.publish).toBe(true);
   });
 });

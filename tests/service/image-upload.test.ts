@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { App, TFile } from "obsidian";
-import { ImageUploadError, MCP_UPLOAD_MAX_BYTES, toBase64, uploadImage } from "../../src/service/image-upload";
+import {
+  ImageUploadError,
+  MCP_UPLOAD_MAX_BYTES,
+  toBase64,
+  uploadImage,
+  uploadImages,
+} from "../../src/service/image-upload";
 import type { HaloSetting, HaloSite } from "../../src/settings";
 import { createFakeClient } from "../helpers/mcp-mock";
-import { createFile, createMockApp, createSettings, requestUrlMock } from "../helpers/obsidian-mocks";
+import { createFile, createMockApp, createSettings, requestUrlMock, TEST_SITE } from "../helpers/obsidian-mocks";
 
 describe("toBase64", () => {
   it("编码已知字节", () => {
@@ -144,5 +150,32 @@ describe("uploadImage（≤7 MiB 走 MCP，>7 MiB 回退 REST）", () => {
     await expect(uploadImage(file, { app, settings, site, client })).rejects.toThrow(
       "Halo MCP attachment response has no permalink",
     );
+  });
+});
+
+describe("uploadImages 的显式 file", () => {
+  it("显式传入 file 时不再看活动编辑器", async () => {
+    // 判别器：把 `options.file ??` 这一半删掉、只留活动编辑器回落，这条就会红 ——
+    // 它钉的正是「批量操作能对着**不是当前打开**的那篇笔记干活」。
+    const explicit = createFile("notes/other.md");
+    const active = createFile("active.md");
+    const image = createFile("a.png");
+    // 内容挂在 explicit 上：`vault.read` 是按 `file.path` 查表的，**查不到就返回空串**。
+    // 这也是本用例唯一能分辨「读的是哪一个文件」的入口 —— 见下一条注释。
+    const { app, vault } = createMockApp("![A](a.png)", explicit, [image]);
+    const { client, calls } = createFakeClient(() => ({ permalink: "/uploads/a.png" }));
+
+    // 活动编辑器指向**另一个**文件：`options.file` 若被忽略，读到的就是它（内容是空串，
+    // 于是本地图片引用一个都收集不到 → 后面的 MCP 断言也会红）。
+    (app.workspace as unknown as { activeEditor: { file: TFile } }).activeEditor = { file: active };
+
+    await uploadImages({ file: explicit, silent: true }, { app, client, settings: createSettings(), site: TEST_SITE });
+
+    expect(vault.read).toHaveBeenCalledWith(explicit);
+    expect(vault.read).not.toHaveBeenCalledWith(active);
+    // 顺带钉住「真的对着那个文件干完了活」，而不是读一下就返回 ——
+    // 光看 `vault.read` 的话，一个「读了显式文件但随后用活动编辑器回写」的实现也能绿。
+    expect(calls.map((call) => call.name)).toEqual(["halo_upload_attachment"]);
+    expect(vault.modify).toHaveBeenCalledWith(explicit, "![A](https://halo.example.com/uploads/a.png)");
   });
 });

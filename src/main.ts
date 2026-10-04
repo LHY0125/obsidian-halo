@@ -65,14 +65,22 @@ export default class HaloPlugin extends Plugin {
           return;
         }
 
+        // `canPublishToSite` 已经确认过有活动文件；这里再取一次是为了把**文件本身**拿在手上 ——
+        // `publishPost` / `uploadImages` 现在都收显式文件，不再各自去读活动编辑器。
+        const { activeEditor } = this.app.workspace;
+
+        if (!activeEditor?.file) {
+          return;
+        }
+
         const service = new HaloService(this.app, this.settings, site);
-        const uploadResult = await this.uploadImagesForPublish(service);
+        const uploadResult = await this.uploadImagesForPublish(service, activeEditor.file);
 
         if (!uploadResult.success) {
           return;
         }
 
-        await service.publishPost({ markdown: uploadResult.markdown });
+        await service.publishPost(activeEditor.file, { markdown: uploadResult.markdown });
       },
     });
 
@@ -234,16 +242,25 @@ export default class HaloPlugin extends Plugin {
     }
 
     const service = new HaloService(this.app, this.settings, site);
-    const uploadResult = await this.uploadImagesForPublish(service);
+    const uploadResult = await this.uploadImagesForPublish(service, activeEditor.file);
 
     if (!uploadResult.success) {
       return;
     }
 
-    await service.publishPost({ markdown: uploadResult.markdown });
+    await service.publishPost(activeEditor.file, { markdown: uploadResult.markdown });
   }
 
   private async uploadImagesCommand() {
+    const { activeEditor } = this.app.workspace;
+
+    // 守卫与 `getSiteForActiveFile()` 内部那道重复 —— 但这里需要把**文件本身**拿在手上
+    //（`uploadImages` 现在收显式文件），所以先取一份，再让它去解析站点。
+    if (!activeEditor || !activeEditor.file) {
+      return;
+    }
+
+    const file = activeEditor.file;
     const site = await this.getSiteForActiveFile();
 
     if (!site) {
@@ -251,7 +268,7 @@ export default class HaloPlugin extends Plugin {
     }
 
     const service = new HaloService(this.app, this.settings, site);
-    await service.uploadImages();
+    await service.uploadImages({}, file);
     await this.saveSettings();
   }
 
@@ -325,8 +342,11 @@ export default class HaloPlugin extends Plugin {
     return this.siteForResolution(this.resolveSiteFor(activeEditor.file));
   }
 
-  private async uploadImagesForPublish(service: HaloService): Promise<{ success: boolean; markdown?: string }> {
-    const uploadResult = await service.uploadImages({ silent: true });
+  private async uploadImagesForPublish(
+    service: HaloService,
+    file: TFile,
+  ): Promise<{ success: boolean; markdown?: string }> {
+    const uploadResult = await service.uploadImages({ silent: true }, file);
     await this.saveSettings();
 
     if (uploadResult.failedCount > 0) {

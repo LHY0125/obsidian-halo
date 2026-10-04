@@ -28,6 +28,18 @@ import {
 const PUBLISH_RETRY_COUNT = 3;
 const PUBLISH_RETRY_DELAY_MS = 500;
 
+/**
+ * 一次发布的结果。
+ *
+ * 引入它是因为**批量操作需要把每篇的结果汇总起来**：调用方必须能分辨
+ * 「这篇成功了」与「这篇因为什么失败了」，而 `void` + 内部 `Notice` 做不到这件事
+ * （118 篇会弹 118 条提示，用户看不过来，代码也拿不到结果）。
+ *
+ * 失败的 `reason` 是**已渲染好的用户文案** —— 与 `renderErrorMessage` 的分层一致：
+ * 渲染发生在产出原因的那一处，调用方只负责决定「怎么告诉用户」（单篇弹提示、批量汇总）。
+ */
+export type PublishResult = { ok: true } | { ok: false; reason: string };
+
 class HaloService {
   private readonly site: HaloSite;
   private readonly app: App;
@@ -100,14 +112,20 @@ class HaloService {
     }
   }
 
-  public async publishPost(options: { markdown?: string } = {}): Promise<void> {
-    const { activeEditor } = this.app.workspace;
-
-    if (!activeEditor || !activeEditor.file) {
-      return;
-    }
-
-    const activeFile = activeEditor.file;
+  /**
+   * 发布（或更新）一篇笔记。
+   *
+   * `file` 是显式的，不再从 `activeEditor` 取：批量操作要发的是一批文件，
+   * 而活动编辑器只有一个。单篇命令传 `activeEditor.file`，行为与改动前一致。
+   *
+   * `options.quiet` 只是**不做便签播报**，结果照常从返回值给出 —— 两条通道里
+   * 返回值是权威那份，便签只是单篇路径的呈现方式。
+   */
+  public async publishPost(
+    file: TFile,
+    options: { markdown?: string; publishOverride?: boolean; quiet?: boolean } = {},
+  ): Promise<PublishResult> {
+    const activeFile = file;
 
     let params: Post = {
       apiVersion: "content.halo.run/v1alpha1",
@@ -150,8 +168,9 @@ class HaloService {
 
     // check site url
     if (matterData?.halo?.site && !isSameSiteUrl(matterData.halo.site, this.site.url)) {
-      new Notice(i18next.t("service.error_site_not_match"));
-      return;
+      const reason = i18next.t("service.error_site_not_match");
+      this.report(reason, options.quiet);
+      return { ok: false, reason };
     }
 
     // 6 个元数据字段的校验放在**最前面**，理由是它必须早于任何副作用：
@@ -160,8 +179,9 @@ class HaloService {
     const haloFields = parseHaloPostFields(matterData?.halo);
 
     if (!haloFields.ok) {
-      new Notice(i18next.t(haloFields.key, haloFields.params));
-      return;
+      const reason = i18next.t(haloFields.key, haloFields.params);
+      this.report(reason, options.quiet);
+      return { ok: false, reason };
     }
 
     // 分类/标签的解析发生在**写入之前**：此刻站点上还什么都没有，所以失败的正确处置是
@@ -182,8 +202,9 @@ class HaloService {
         tagNames = await this.getTagNames(matterData.tags);
       }
     } catch (error) {
-      new Notice(this.resolutionFailureMessage(error));
-      return;
+      const reason = this.resolutionFailureMessage(error);
+      this.report(reason, options.quiet);
+      return { ok: false, reason };
     }
 
     let remotePostName = matterData?.halo?.name;
@@ -247,10 +268,18 @@ class HaloService {
         }
 
         // 发布状态独立于内容：上游用 changePostPublish，MCP 是 set_post_publish_state。
-        // 优先级与上游一致——frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
+        // 优先级：命令的显式覆盖 > frontmatter 的 `publish` > 设置里的 publishByDefault。
+        //
+        // 覆盖存在的原因是批量命令：用户点了「批量撤回」，意图是这批全部退回草稿，
+        // 不该被某一篇笔记里写着的 `publish: true` 拦下来 —— 那样他会看到「撤回完成」
+        // 而这些笔记仍然在线。单篇命令**不传** override，所以那一条路径的行为完全不变。
+        // 后两级与上游一致 —— frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
         // 只有没写时才看 publishByDefault。
-        // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
-        if (matterData?.halo?.hasOwnProperty("publish")) {
+        if (options.publishOverride !== undefined) {
+          intendedPublish = options.publishOverride;
+          await this.changePostPublish(params.metadata.name, intendedPublish);
+          // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
+        } else if (matterData?.halo?.hasOwnProperty("publish")) {
           intendedPublish = Boolean(matterData.halo.publish);
           await this.changePostPublish(params.metadata.name, intendedPublish);
         } else if (this.settings.publishByDefault) {
@@ -273,8 +302,9 @@ class HaloService {
           ? refreshed
           : { ...refreshed, spec: { ...refreshed.spec, publish: intendedPublish } };
     } catch (error) {
-      new Notice(this.publishFailureMessage(error));
-      return;
+      const reason = this.publishFailureMessage(error);
+      this.report(reason, options.quiet);
+      return { ok: false, reason };
     }
 
     // 显示名解析是**写成功之后**的收尾读，和 `refreshPostAfterWrite` 同一类：必须自己吞掉失败。
@@ -293,7 +323,20 @@ class HaloService {
       });
     });
 
-    new Notice(i18next.t("service.notice_publish_success"));
+    // 成功便签只在单篇路径上弹。批量路径由调用方汇总成一条 —— 118 条「发布成功」
+    // 会把真正需要被看见的失败淹掉。
+    if (!options.quiet) {
+      new Notice(i18next.t("service.notice_publish_success"));
+    }
+
+    return { ok: true };
+  }
+
+  /** 便签播报。`quiet` 为真时什么也不做 —— 返回值仍然带着原因，调用方自己去汇总 */
+  private report(reason: string, quiet?: boolean): void {
+    if (!quiet) {
+      new Notice(reason);
+    }
   }
 
   /**
@@ -601,14 +644,19 @@ class HaloService {
   }
 
   /**
-   * 上传当前笔记里的图片，必要时回写 markdown。
+   * 上传一篇笔记里的图片，必要时回写 markdown。
+   *
+   * ⚠️ 两个入口的参数顺序**刻意不一致**：这里是 `uploadImages(options, file?)`（options 在前），
+   * 而 `publishPost(file, options?)` 是 file 在前。别顺手「统一」成同一种顺序 ——
+   * 下游按这个签名往下写，改动会静默改掉调用点。
    *
    * 实现在 `./image-upload`——这里只负责拼出运行上下文。
    */
   public async uploadImages(
     options: { silent?: boolean; replaceMarkdown?: boolean } = {},
+    file?: TFile,
   ): Promise<UploadImagesResult> {
-    return uploadImages(options, this.imageUploadContext());
+    return uploadImages({ ...options, file }, this.imageUploadContext());
   }
 
   /**
