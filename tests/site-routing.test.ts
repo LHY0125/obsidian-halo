@@ -41,6 +41,12 @@ describe("matchGlob", () => {
     expect(matchGlob("", "a.md")).toBe(false);
     expect(matchGlob("   ", "a.md")).toBe(false);
   });
+
+  it("`?` 只吃一个非 `/` 字符，不跨目录分隔符", () => {
+    // 守的是实现里的 `[^/]`：若有人把 `?` 简化成正则的 `.`，`博客/?.md` 就会命中 `博客//.md`
+    // —— 一个 `?` 悄悄变成「任意字符（含 /）」。表驱动里那两条 `?` 用例拦不住这种退化。
+    expect(matchGlob("博客/?.md", "博客//.md")).toBe(false);
+  });
 });
 
 describe("normalizeRulePattern", () => {
@@ -50,6 +56,17 @@ describe("normalizeRulePattern", () => {
 
   it("反斜杠分隔符换成斜杠（vault 路径永远是斜杠，但用户从资源管理器复制来的是反斜杠）", () => {
     expect(normalizeRulePattern("博客\\**")).toBe("博客/**");
+  });
+
+  it.each([
+    // [用户实际会敲出来的写法, 期望归一化结果]
+    ["./博客/**", "博客/**"], // 编辑器「复制相对路径」与 `ls` 输出都带这个前缀
+    [".\\博客\\**", "博客/**"], // 前缀与分隔符同时是 Windows 形态
+  ])("%s 归一化后是 %s，且真的能命中 博客/a.md", (input, expected) => {
+    expect(normalizeRulePattern(input)).toBe(expected);
+    // 只断言归一化字符串还不够：本用例守的其实是「规则真的命中」这个结局。
+    // 一条只把 `./` 删掉却没接上匹配的退化实现，也不该通过。
+    expect(matchGlob(input, "博客/a.md")).toBe(true);
   });
 });
 
@@ -71,6 +88,24 @@ describe("resolveSite —— 优先级", () => {
     // 静默改用默认站点会把笔记发到另一个站上（可能已在别处存在同名文章）。
     // 报错是可恢复的，发错站不是。
     expect(resolveSite(sites, [], "x.md", "https://c.example.com")).toEqual({
+      kind: "unknown-site",
+      url: "https://c.example.com",
+    });
+  });
+
+  it("frontmatter 写了空串也算「写了」：报错，不当作没写而改道", () => {
+    // 空串是用户**显式**写下的值（模板/变量没展开时很常见）。若用真假判断读它，这篇会被判成
+    // 「没写 frontmatter」，转而落到下面那条 `**` 规则指向的站点上 —— 一个与 frontmatter
+    // 毫无关系的站点，且不可恢复。所以期望值刻意是 unknown-site，而不是任何 resolved。
+    expect(resolveSite(sites, [{ pattern: "**", site: "https://a.example.com" }], "x.md", "")).toEqual({
+      kind: "unknown-site",
+      url: "",
+    });
+  });
+
+  it("unknown-site 报的是归一化后的 URL，与 unknown-rule-site 形态一致", () => {
+    // 两档错误同类同形，否则将来拼提示文案会出现「一个带尾斜杠、一个不带」的不一致。
+    expect(resolveSite(sites, [], "x.md", "https://c.example.com///")).toEqual({
       kind: "unknown-site",
       url: "https://c.example.com",
     });

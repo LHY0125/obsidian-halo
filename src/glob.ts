@@ -1,8 +1,22 @@
 /**
+ * 路径 glob 匹配 —— 本模块是**零项目内依赖的叶子**。
+ *
+ * 这条不变式不是洁癖，它存在是为了破一个真的 import 环：`site-routing.ts` 要用 `settings.ts` 的
+ * `isSameSiteUrl()`，而 `settings.ts`（设置面板要显示每条规则命中多少篇）又要用本模块的 `matchGlob()`。
+ * 一旦把本模块的实现写进 `site-routing.ts`，就成了 `settings.ts ⇄ site-routing.ts` 的**真环**。
+ * 环在打包器里未必直接报错，而是在某些 import 顺序下让某个绑定变成 `undefined` ——
+ * 本地测试跑得通，发布出去的 `main.js` 才出问题，属于最难反查的一类故障。
+ *
+ * **往本文件加任何 `import` 之前，先读 `site-routing.ts` 顶部那段拆分理由。**
+ * 保持本文件不依赖任何项目内模块，环才是**结构上不可能**，而不只是「目前恰好没出问题」。
+ */
+
+/**
  * 一条路由规则：把某类路径的笔记送到某个站点。
  *
  * `site` 存的是**站点 URL**而不是站点名：`halo.site` 用的就是 URL，
- * 两处形态一致才能在 `resolveSite` 里共用 `isSameSiteUrl()` 比较（尾斜杠、大小写都不算差异）。
+ * 两处形态一致才能在 `resolveSite` 里共用 `isSameSiteUrl()` 比较（尾斜杠不算差异）。
+ * 注意 `isSameSiteUrl()` 走的是 `normalizeSiteUrl()`，它只做 trim + 去尾斜杠，**大小写敏感**。
  */
 export interface SiteRoutingRule {
   /** vault 库内相对路径的 glob，如 `博客/**`。支持 `*`（不跨 `/`）、`**`（跨 `/`）、`?`（单个非 `/` 字符） */
@@ -10,9 +24,18 @@ export interface SiteRoutingRule {
   site: string;
 }
 
-/** 把用户手写的模式规整成库内路径的形态：去空白、去开头斜杠、反斜杠换正斜杠 */
+/**
+ * 把用户手写的模式规整成库内路径的形态：去空白、去开头的 `./`、去开头斜杠、反斜杠换正斜杠。
+ *
+ * 这里刻意把用户**实际会敲出来的**几种写法都收进来，因为漏掉任何一种的后果是同一种：
+ * 模式编译出来带上了库内路径里不存在的字面量 → **永远不命中** → 规则静默失效 →
+ * 笔记落到默认站点。而「没命中」是没有任何提示的，用户只会觉得规则时灵时不灵。
+ * - `\` → `/`：从资源管理器/编辑器复制来的相对路径是反斜杠；
+ * - 开头的 `./`：编辑器「复制相对路径」与 `ls` 输出都带这个前缀；
+ * - 开头的 `/`：用户会顺手写成 `/博客/**`，把它当"从库根开始"。
+ */
 export function normalizeRulePattern(pattern: string): string {
-  return pattern.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  return pattern.trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
 }
 
 /**
@@ -56,7 +79,14 @@ function globToRegExp(pattern: string): RegExp {
   return new RegExp(`^${source}$`, "i");
 }
 
-/** 模式是否匹配某条库内相对路径。空模式恒不匹配（绝不能退化成「命中一切」） */
+/**
+ * 模式是否匹配某条库内相对路径。空模式恒不匹配（绝不能退化成「命中一切」）。
+ *
+ * @param pattern 用户手写的 glob，`/博客/**`、`.\博客\**` 等形态都行 —— 由 `normalizeRulePattern` 归一化。
+ * @param filePath **必须是 `/` 分隔的库内相对路径**（如 `博客/a.md`）。
+ *   本函数归一化的是**模式**，**不**归一化**路径**：传反斜杠路径（`博客\a.md`）或绝对路径都会
+ *   静默不命中 —— 也就是规则静默失效、笔记落到默认站点，没有任何提示。调用方负责给对形态。
+ */
 export function matchGlob(pattern: string, filePath: string): boolean {
   const normalized = normalizeRulePattern(pattern);
 

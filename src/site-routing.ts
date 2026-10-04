@@ -28,6 +28,8 @@ export type SiteResolution =
  * 两处「报错而不是继续往下找」是刻意的：`unknown-site` / `unknown-rule-site` 都表示
  * **用户的配置有问题**，而这两种情况下继续往下找的后果是把笔记发到**另一个站**上 ——
  * 那是不可恢复的（可能已在目标站建了同名文章），而报错只是让他去改一行配置。
+ *
+ * `frontmatterUrl` 的缺席只认 `undefined` / `null`：显式空串也是「写了」，同样去报错（理由见函数内注释）。
  */
 export function resolveSite(
   sites: HaloSite[],
@@ -39,12 +41,19 @@ export function resolveSite(
     return { kind: "no-sites" };
   }
 
-  if (frontmatterUrl) {
+  // 只把「没写」当缺席：显式空串 `halo.site: ""` 也是用户写下的值，必须走 frontmatter 分支去报错。
+  // 用真假判断读它会把「写了但写错」当成「没写」，于是笔记被送到一个与 frontmatter 完全无关的站点上
+  // —— 正是 `unknown-site` 要拦的那件事，后果同样不可恢复（目标站可能已有同名文章）。
+  if (frontmatterUrl !== undefined && frontmatterUrl !== null) {
     const matched = sites.find((site) => isSameSiteUrl(site.url, frontmatterUrl));
 
-    return matched
-      ? { kind: "resolved", site: matched, source: "frontmatter" }
-      : { kind: "unknown-site", url: frontmatterUrl };
+    if (matched) {
+      return { kind: "resolved", site: matched, source: "frontmatter" };
+    }
+
+    // 报**归一化后**的 URL：`unknown-rule-site` 报的就是归一化值，同类错误保持同一形态，
+    // 否则将来拼提示文案会出现「一个带尾斜杠、一个不带」的不一致。
+    return { kind: "unknown-site", url: normalizeSiteUrl(frontmatterUrl) };
   }
 
   for (const rule of rules) {
