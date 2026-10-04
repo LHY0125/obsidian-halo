@@ -1120,14 +1120,16 @@ describe("publishPost 走 MCP", () => {
   });
 
   test("显式 false 不被默认值翻盘：halo.allowComment: false 送出 allowComment: false", async () => {
-    // 为什么是 allowComment 而不是 pinned：五个「有意义的假值」字段里，**只有它的默认值与它相反**
-    //（`publishPost` 的 params 字面量给的是 `allowComment: true`），所以它是唯一既能守住
-    //「显式假值不被默认值翻盘」的原意、又**同时**能判别接线的一条。
+    // 为什么这一条非用 allowComment 不可：它验的是**显式假值不被默认值翻盘**，而六个字段里
+    // 只有它的默认值与断言值**相反**（`createEmptyPost()` 给的是 `allowComment: true`）——
+    // 换任何别的字段都验不了「假值没被默认值吃掉」这件事。
     //
-    // `pinned: false` / `priority: 0` / `template: ""` 三条的默认值恰与断言值相同，
-    // 接线在不在都绿 —— 拿它们做端到端判别器等于放一条空洞测试在这儿（本轮修复前正是如此）。
-    // 那三条的语义已由 `tests/frontmatter-map.test.ts` 的表驱动用例在**单元层**守住，
-    // 端到端这一层只需要管接线。
+    // ⚠️ 但这**不是**「pinned / template 不必在端到端层守」的理由（本轮修复前的注释正是这么写的，
+    // 那是错的结论）。它们之所以不能判别，是**取值**的问题而不是**字段**的问题：
+    // `pinned: false` / `template: ""` 接线在不在都绿，只因为值恰好等于默认值。
+    // 换成 `pinned: true` / `template: "custom"`（**都与默认值不同**）就既保住原意、又判别接线
+    // —— 见下面两条。少一条的话，把 `toUpdateArgs` 里的 `pinned:` 改名或整行删掉，
+    // 全套测试照样全绿，而用户写了 `halo.pinned: true` 后**站点不置顶、预览弹窗却显示「置顶：是」**。
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
@@ -1143,6 +1145,49 @@ describe("publishPost 走 MCP", () => {
     await new HaloService(app, createSettings(), site, client).publishPost(note);
 
     expect(writtenArgs?.allowComment).toBe(false);
+  });
+
+  test("halo.pinned 被送进写工具的参数（用与默认值相反的 true 才判别得了接线）", async () => {
+    // 判别器：把 `toUpdateArgs` 里的 `pinned: params.spec.pinned` 改名成 `pinnedFlag:` 或整行删掉，
+    // 这一条就红（拿到的是远端/空文章的 `false`）。用 `pinned: false` 写的判别器做不到这件事
+    // —— 它恰好等于默认值，接线在不在都绿。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client, calls } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", pinned: true } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
+
+    expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
+    expect(writtenArgs?.pinned).toBe(true);
+  });
+
+  test("halo.template 被送进写工具的参数（用与默认值相反的 \"custom\" 才判别得了接线）", async () => {
+    // 判别器同上：`template` 的默认值是空串，而 `toUpdateArgs` 用 `|| null` 把它折成 null，
+    // 所以 `template: ""` 写不出判别力（接线在不在都是 null）。非空字符串才判别得了。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client, calls } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", template: "custom" } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
+
+    expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
+    expect(writtenArgs?.template).toBe("custom");
   });
 
   test("更新分支同样消费 halo.* 字段", async () => {
@@ -1187,28 +1232,85 @@ describe("publishPost 走 MCP", () => {
     expect(writtenArgs?.publishTime).toBe("2026-10-06 10:00");
   });
 
-  test("特征化：halo.publishTime 为空串时送 null，不是空字符串", async () => {
-    // 特征化测试，钉的是**既有契约**而非本次接线：schema 是 ["string","null"] +
-    // format: date-time，空字符串会被服务端拒绝，所以 `toUpdateArgs` 用 `|| null` 折成 null。
+  test("更新分支：本地写 halo.publishTime: \"\" 会把远端的定时发布清成 null", async () => {
+    // 判别器：把 `haloFields: haloFields.fields` 从 `planPublish` 的 `applyPostFrontmatter`
+    // 调用点上删掉就会红 —— 那时 `spec.publishTime` 保留**远端**的定时时间，这一条读到的是
+    // 那个时间而不是 null。下一条是它「本可以发生」的对照物。
     //
-    // ⚠️ 它**无法**判别接线 —— 空串与 params 字面量默认值相同，且两条路径都收敛到 `null`，
-    // 把 `haloFields` 从调用点删掉这条照样绿。要判别接线请看上面那条非空串的用例。
-    // 留着它是因为「用户写的空串不会被原样送出去」这件事值得有断言钉住。
+    // 为什么这是约束 1 的头号语义：`publishTime: ""` 是用户**取消**一篇已排定定时发布的
+    // **唯一**手段（删掉那一行只会让它继续跟随远端，见 README 与 CLAUDE.md 的 frontmatter 契约）。
+    // 这条静默失效的表现是：笔记与他都以为取消了，而站点上那篇**仍在原定时间发布**。
+    //
+    // 为什么断言 null 而不是空串：约束 15 —— schema 是 ["string","null"] + format: date-time，
+    // 空串会被服务端拒绝，`toUpdateArgs` 因此用 `|| null` 折成 null。断言必须钉在这一层。
     const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
-    const { client } = fakeService({
+    const { client, calls } = fakeService({
+      itemFor: (name) => remoteItem(name, { publishTime: "2026-10-06T10:00:00.000Z" }),
       onWrite: (_name, args) => {
         writtenArgs = args;
       },
     });
     metadataCache.getFileCache.mockImplementation(() => ({
-      frontmatter: { title: "Post title", halo: { publishTime: "" } },
+      frontmatter: { title: "Post title", halo: { name: "post-1", publishTime: "" } },
     }));
 
     await new HaloService(app, createSettings(), site, client).publishPost(note);
 
+    expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
     expect(writtenArgs?.publishTime).toBeNull();
+  });
+
+  test("同样的远端、本地改成**删掉那一行**时，入参是远端的定时时间（上一条的对照物）", async () => {
+    // 与上一条**成对**：同一个远端（有定时时间）、同一个用例形状，只差本地写不写
+    // `publishTime: ""`。它证明上一条拿到的 null **不是**「远端本来就没有定时时间」造成的假绿
+    // —— 删掉那一行时入参确实拿得到远端那个时间，所以上一条的 null 只可能来自那个空串。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client, calls } = fakeService({
+      itemFor: (name) => remoteItem(name, { publishTime: "2026-10-06T10:00:00.000Z" }),
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1" } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost(note);
+
+    expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
+    expect(writtenArgs?.publishTime).toBe("2026-10-06T10:00:00.000Z");
+  });
+
+  test("预览里的 halo.publishTime 已经是套过 frontmatter 的值（预览与执行不许分叉）", async () => {
+    // 判别器：把 `haloFields: haloFields.fields` 从 `planPublish` 的 `applyPostFrontmatter`
+    // 调用点上删掉就红。那时 `plan.post.spec.publishTime` 保留**远端**的定时时间，而执行阶段
+    // 会用 `plan.haloFields` **重新套一遍**、照样把空串折成 null —— 于是预览弹窗写着
+    // 「定时发布：2026-10-06T10:00:00.000Z」，实际上文章**立刻**就发了。
+    //
+    // 为什么必须**在规划这一层**另立一条：上面两条断言的是**执行入参**，对这次改动完全无感
+    // —— 所以「只删这一个调用点、其余测试全绿」是真的（本轮实测过）。而预览是用户按下
+    // 「确认」时唯一的依据；`planPublish` 的注释也把「预览里给用户看过的取值就是最终会发出去
+    // 的那份」写成了契约，这条就是那份契约的判别器。
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client } = fakeService({
+      itemFor: (name) => remoteItem(name, { publishTime: "2026-10-06T10:00:00.000Z" }),
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", publishTime: "" } },
+    }));
+
+    const planned = await new HaloService(app, createSettings(), site, client).planPublish(note);
+
+    if (!planned.ok) {
+      throw new Error(`规划本应成功，却失败了：${planned.reason}`);
+    }
+
+    expect(planned.plan.post.spec.publishTime).toBe("");
   });
 
   test("halo.visible 非法时**中止发布**，一个写工具都不调，并报出具体原因", async () => {

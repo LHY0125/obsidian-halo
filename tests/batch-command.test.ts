@@ -128,6 +128,11 @@ test("用户取消（confirmBatchPlan 交回 undefined）：一篇都不发，�
   try {
     await plugin.runBatchCommand("publish");
 
+    // 本用例内**自己的**在场对照物：确认那一步确实走到了。没有它，下面两个「没有发生」
+    // 的断言在「流程根本没走到弹窗」的实现下也永久为真（本阶段最主要的缺陷类）。
+    // 上一条用例虽然也证明了这一点，但那是**跨用例**的依赖 —— 单跑这一条时它不成立。
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+
     expect(published).toEqual([]);
     // 取消不该弹出一份「成功 0 篇」的汇总 —— 那会让用户以为操作执行过了
     expect(summaryMock).not.toHaveBeenCalled();

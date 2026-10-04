@@ -228,6 +228,24 @@ describe("applyPostToFrontmatter", () => {
     expect(frontmatter.categories).toEqual([]);
   });
 
+  it("tagNames 是空数组时**照写**（与 categories 那条同形，但两条分支各自独立）", () => {
+    // 判别器：把 `applyPostToFrontmatter` 里 `if (options.tagNames)` 那一块删掉就红 ——
+    // `tags` 会保持笔记原值。`categories` 那条分支有独立守卫（上面一条用例），`tags` 此前没有：
+    // 两条分支代码同形，只改其中一条不会让任何用例变红。
+    const frontmatter: Record<string, unknown> = { categories: ["旧分类"], tags: ["旧标签"] };
+
+    applyPostToFrontmatter(frontmatter, makePost(), {
+      siteUrl: "https://blog.example.com",
+      name: "post-1",
+      tagNames: [],
+    });
+
+    expect(frontmatter.tags).toEqual([]);
+    // 对照物：本次**只传了 tagNames**，所以 categories 那条分支压根没被走到。
+    // 它保持原值证明上面那个 `[]` 是 `tagNames` 自己那条守卫的结果，不是 categories 顺带做的。
+    expect(frontmatter.categories).toEqual(["旧分类"]);
+  });
+
   it("halo.name 取 options.name，不取 post.metadata.name", () => {
     // 拉取路径必须传调用方的入参 name：toPost() 在服务端没回 name 时给的是空串，
     // 写进去会让下次发布认不出这篇已发布的笔记，**再建一篇重复文章**。
