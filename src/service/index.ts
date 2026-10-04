@@ -478,7 +478,8 @@ class HaloService {
     // 显示名解析是**写成功之后**的收尾读，和 `refreshPostAfterWrite` 同一类：必须自己吞掉失败。
     // 让异常逃出去的话，用户什么都看不到（Obsidian 只把未捕获异常记进控制台）、frontmatter
     // 也不会回写 —— 而文章其实已经写进 Halo 了。失败时返回 `undefined`，下面的回写据此**跳过**
-    // 这两个字段（刻意不落回任何值，理由见那里）。
+    // 这两个字段（刻意不落回任何值 —— 理由在 `src/frontmatter-map.ts` 的 `applyPostToFrontmatter()`
+    // 里那段「绝不落回任何值」，那里解释了为什么落回 `spec` 里的 metadata.name 会造出垃圾分类/标签）。
     const postCategories = await this.resolveDisplayNames(() => this.getCategoryDisplayNames(params.spec.categories));
     const postTags = await this.resolveDisplayNames(() => this.getTagDisplayNames(params.spec.tags));
 

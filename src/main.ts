@@ -254,10 +254,8 @@ export default class HaloPlugin extends Plugin {
    */
   private async publishFile(file: TFile): Promise<void> {
     // 这一处的解析顺序是**行为变更**（刻意的）：改动前 `publishCommand` 在没有 `halo.site` 时
-    // 一律弹窗选站点，**完全忽略设置里的默认站点与唯一站点**；而 `CLAUDE.md` 一直写着
-    // 的优先级是「frontmatter → 默认站点 → 单站点直取 → 弹窗」。改动后两端一致。
-    // 注意 `resolveSite` 的实际顺序比那句**多一层**：frontmatter → **路由规则表** → 默认站点
-    // → 单站点直取 → 弹窗（规则表是 Task 5 新加的，`CLAUDE.md` 那句还没跟上）。
+    // 一律弹窗选站点，**完全忽略设置里的默认站点与唯一站点**。现在的顺序由 `resolveSite` 决定：
+    // frontmatter → **路由规则表** → 默认站点 → 单站点直取 → 弹窗。
     // 差别是实质性的：笔记一旦命中某条规则，目标就由规则决定，轮不到默认站点。
     // 最直观的差别：只配了一个站点的用户不再每次发布都看一眼只有一个选项的弹窗。
     const resolution = this.resolveSiteFor(file);
