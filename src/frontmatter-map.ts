@@ -215,9 +215,18 @@ export function applyPostToFrontmatter(
     frontmatter.tags = options.tagNames;
   }
 
+  // 6 个元数据字段也写回去 —— 与上面 4 个字段同理：让笔记成为远端的忠实镜像，
+  // 下次发布才是幂等的，用户也才能在本地看见并编辑这些值。
+  // 取值一律来自 `post.spec`（服务端归一化之后的产物），不来自 matterData 或本地字面量。
   frontmatter.halo = {
     site: options.siteUrl,
     name: options.name,
     publish: post.spec.publish,
+    visible: post.spec.visible,
+    pinned: post.spec.pinned,
+    priority: post.spec.priority,
+    publishTime: post.spec.publishTime,
+    allowComment: post.spec.allowComment,
+    template: post.spec.template,
   };
 }

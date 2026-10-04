@@ -237,4 +237,31 @@ describe("applyPostToFrontmatter", () => {
 
     expect((frontmatter.halo as { name: string }).name).toBe("requested-name");
   });
+
+  it("halo 块带上 6 个元数据字段（值取自 post.spec，不是本地字面量）", () => {
+    const post = makePost();
+    Object.assign(post.spec, {
+      visible: "INTERNAL",
+      pinned: true,
+      priority: 3,
+      publishTime: "2026-10-06T10:00:00+08:00",
+      allowComment: false,
+      template: "custom",
+    });
+    const frontmatter: Record<string, unknown> = {};
+
+    applyPostToFrontmatter(frontmatter, post, { siteUrl: "https://blog.example.com", name: "post-1" });
+
+    expect(frontmatter.halo).toEqual({
+      site: "https://blog.example.com",
+      name: "post-1",
+      publish: true,
+      visible: "INTERNAL",
+      pinned: true,
+      priority: 3,
+      publishTime: "2026-10-06T10:00:00+08:00",
+      allowComment: false,
+      template: "custom",
+    });
+  });
 });

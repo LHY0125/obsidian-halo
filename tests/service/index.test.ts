@@ -1024,6 +1024,127 @@ describe("publishPost 走 MCP", () => {
     expect(written?.slug).toBe("post-title");
     expect((written?.halo as { name?: string } | undefined)?.name).toEqual(expect.any(String));
   });
+
+  test("frontmatter 的 halo.visible 被送进写工具的参数", async () => {
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { visible: "INTERNAL" } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    expect(writtenArgs?.visible).toBe("INTERNAL");
+  });
+
+  test("显式 false 不被默认值翻盘：halo.pinned: false 送出 pinned: false", async () => {
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { pinned: false } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    expect(writtenArgs?.pinned).toBe(false);
+  });
+
+  test("更新分支同样消费 halo.* 字段", async () => {
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client, calls } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", priority: 9 } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    // 走的是更新分支（有 halo.name），参数走 halo_update_post
+    expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
+    expect(writtenArgs?.priority).toBe(9);
+  });
+
+  test("halo.publishTime 为空串时送 null，不是空字符串", async () => {
+    // schema 是 ["string","null"] + format: date-time —— 空字符串会被服务端拒绝
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    let writtenArgs: Record<string, unknown> | undefined;
+    const { client } = fakeService({
+      onWrite: (_name, args) => {
+        writtenArgs = args;
+      },
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { publishTime: "" } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    expect(writtenArgs?.publishTime).toBeNull();
+  });
+
+  test("halo.visible 非法时**中止发布**，一个写工具都不调，并报出具体原因", async () => {
+    const note = createFile("post.md");
+    const { app, metadataCache } = createMockApp("local markdown", note, []);
+    const { client, calls } = fakeService();
+    const notices = capturedNotices();
+    const seen = notices.length;
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { visible: "public" } },
+    }));
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    // 一个 MCP 工具都不该被调到 —— 校验必须发生在分类/标签解析（会真的建分类）之前
+    expect(calls).toEqual([]);
+    expect(notices.slice(seen)).toHaveLength(1);
+    expect(notices[seen]).toContain("public");
+  });
+
+  test("回写 halo.publishTime 用的是服务端归一化后的值，不是本地送出去的那个", async () => {
+    // 判别器：把回写改成从 `matterData.halo.publishTime` 取值就会红。
+    // 本地送的是 "2026-10-06 10:00"（服务端会归一成带时区的形式），
+    // 若回写用了本地值，笔记里留下的是一个服务端并不认可原样的字符串 —— 下次发布再送一遍，
+    // 而用户在站点前台看到的时间与笔记里写的不一致。
+    const note = createFile("posts/post.md");
+    const { app, fileManager, metadataCache } = createMockApp("local markdown", note, []);
+    const { client } = fakeService({
+      // 服务端归一化后的形态与本地写的不同
+      itemFor: (name) => remoteItem(name, { publishTime: "2026-10-06T10:00:00.000Z" }),
+    });
+    metadataCache.getFileCache.mockImplementation(() => ({
+      frontmatter: { title: "Post title", halo: { name: "post-1", publishTime: "2026-10-06 10:00" } },
+    }));
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    await new HaloService(app, createSettings(), site, client).publishPost();
+
+    expect((written?.halo as { publishTime?: string } | undefined)?.publishTime).toBe("2026-10-06T10:00:00.000Z");
+  });
 });
 
 describe("changePostPublish 走 MCP", () => {

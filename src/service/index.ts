@@ -3,7 +3,7 @@ import i18next from "i18next";
 import { type App, Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
-import { applyPostToFrontmatter } from "../frontmatter-map";
+import { applyPostToFrontmatter, parseHaloPostFields } from "../frontmatter-map";
 import { renderErrorMessage, withErrorDetail } from "../i18n/error-message";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
 import { McpError } from "../transport/errors";
@@ -154,6 +154,16 @@ class HaloService {
       return;
     }
 
+    // 6 个元数据字段的校验放在**最前面**，理由是它必须早于任何副作用：
+    // 分类/标签解析会真的在站点上建分类（`getCategoryNames`），一旦走到那一步再报"字段写错了"，
+    // 站点上已经留下了新建的标签，而文章没发出去 —— 用户看到的是"发布失败"和一堆新标签。
+    const haloFields = parseHaloPostFields(matterData?.halo);
+
+    if (!haloFields.ok) {
+      new Notice(i18next.t(haloFields.key, haloFields.params));
+      return;
+    }
+
     // 分类/标签的解析发生在**写入之前**：此刻站点上还什么都没有，所以失败的正确处置是
     // **中止本次发布**并把原因带给用户。此前异常会直接穿出 `publishPost`，Obsidian 只把它记进
     // 控制台 —— 用户看到「什么都没发生」，而站点上确实什么都没发生，他却无从知道为什么。
@@ -196,6 +206,7 @@ class HaloService {
           params = applyPostFrontmatter(latestPost, {
             activeFile,
             categoryNames,
+            haloFields: haloFields.fields,
             matterData,
             tagNames,
             useActiveFileDefaults: false,
@@ -220,6 +231,7 @@ class HaloService {
           params = applyPostFrontmatter(params, {
             activeFile,
             categoryNames,
+            haloFields: haloFields.fields,
             matterData,
             tagNames,
             useActiveFileDefaults: true,
