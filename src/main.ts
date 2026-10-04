@@ -222,6 +222,9 @@ export default class HaloPlugin extends Plugin {
     // 这一处是**行为变更**（刻意的）：改动前 `publishCommand` 在没有 `halo.site` 时
     // 一律弹窗选站点，**完全忽略设置里的默认站点与唯一站点**；而 `CLAUDE.md` 一直写着
     // 的优先级是「frontmatter → 默认站点 → 单站点直取 → 弹窗」。改动后两端一致。
+    // 注意 `resolveSite` 的实际顺序比那句**多一层**：frontmatter → **路由规则表** → 默认站点
+    // → 单站点直取 → 弹窗（规则表是 Task 5 新加的，`CLAUDE.md` 那句还没跟上）。
+    // 差别是实质性的：笔记一旦命中某条规则，目标就由规则决定，轮不到默认站点。
     // 最直观的差别：只配了一个站点的用户不再每次发布都看一眼只有一个选项的弹窗。
     const resolution = this.resolveSiteFor(activeEditor.file);
     const site = await this.siteForResolution(resolution);
@@ -298,6 +301,15 @@ export default class HaloPlugin extends Plugin {
         return undefined;
       case "needs-choice":
         return openSiteSelectionModal(this);
+      // 穷尽性安全网。返回类型含 `undefined`，且 `tsconfig.json` **没开** `noImplicitReturns`，
+      // 所以少写一个 case 时 TypeScript 会**默默**接受「什么也不做就返回 undefined」——
+      // 表现为操作中止却不弹任何提示，正是本计划要消灭的「说不清是哪一种失败」。
+      // 这个子句今天恒不可达，但它把「忘了处理新的 kind」从**运行期静默**变成**编译期报错**：
+      // 联合一旦加第六种，`resolution` 就不再是 `never`，`const unhandled: never` 会编译失败。
+      default: {
+        const unhandled: never = resolution;
+        return unhandled;
+      }
     }
   }
 

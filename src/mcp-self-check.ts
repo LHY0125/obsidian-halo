@@ -95,7 +95,7 @@ export function describeSelfCheckFailure(error: unknown): string {
   // 是**已经渲染好的用户文案**（可能含服务端原文），Obsidian 的 Notice 按纯文本显示，不解析 HTML。
   // 开着转义的后果很具体：网关类失败的 `detail` 是一段 HTML 片段，会被转义成 `&lt;!doctype …&gt;`，
   // 用户看到的是一堆实体字符而不是服务端原话 —— 比不给原文更糟。
-  // （其余调用点不经 i18next 插值，故没有这个问题。）
+  // （其余调用点若有插值，也需同样处置。）
   return i18next.t("command.mcp_self_check.error_failed", {
     message: renderErrorMessage(error),
     interpolation: { escapeValue: false },
