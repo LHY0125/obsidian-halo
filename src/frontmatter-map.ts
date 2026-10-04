@@ -1,3 +1,5 @@
+import type { Post } from "@halo-dev/api-client";
+
 /** `halo.visible` 的三个合法取值，与 Halo Post 的 schema 一致 */
 export type PostVisible = "PUBLIC" | "INTERNAL" | "PRIVATE";
 
@@ -147,4 +149,75 @@ export function parseHaloPostFields(halo: unknown): HaloFieldsResult {
   }
 
   return { ok: true, fields };
+}
+
+export interface PostToFrontmatterOptions {
+  /** 写入 `halo.site` 的站点 URL */
+  siteUrl: string;
+  /**
+   * 写入 `halo.name` 的值。**必须由调用方显式给**。
+   *
+   * 拉取路径要传的是**入参 name**，不是 `post.metadata.name`：`toPost()` 在服务端没回 `name` 时
+   * 填的是空串，那会把 `halo.name` 写成 `""` —— 下次发布读不到它，于是**再建一篇重复文章**，
+   * 而用户看到的是「发布成功」。把「给什么」变成调用方的显式决定，是让这个差异不会被顺手抹平的唯一办法。
+   */
+  name: string;
+  /** 分类显示名。`undefined` = **没解析出来**，跳过该字段（保持笔记原值）；`[]` = 确实没有 */
+  categoryNames?: string[];
+  tagNames?: string[];
+}
+
+/**
+ * 把一篇（服务端归一化之后的）Post 回写进 frontmatter。
+ *
+ * 三条路径（发布 / 更新 / 拉取）共用这一份实现。此前它们各写一遍、只差几个词，
+ * 而本阶段要往里面加 6 个字段 —— 三份实现必然漏掉其中一处，表现是「拉取回来的笔记
+ * 丢了这些字段」，本地完全看不出异常。
+ *
+ * **取值一律来自 `post.spec`**，那是 `applyPostFrontmatter` + 服务端回读之后的产物。
+ * 从 `matterData` 或本地字面量回写会重犯 1-A 的 I1（把陈旧值写进 frontmatter，
+ * 下次发布据此静默改掉远端状态）。
+ */
+export function applyPostToFrontmatter(
+  frontmatter: Record<string, unknown>,
+  post: Post,
+  options: PostToFrontmatterOptions,
+): void {
+  frontmatter.title = post.spec.title;
+  frontmatter.slug = post.spec.slug;
+  frontmatter.cover = post.spec.cover;
+  frontmatter.excerpt = post.spec.excerpt.autoGenerate ? undefined : post.spec.excerpt.raw;
+
+  // 分类/标签承载的是**显示名**，消费方 `getCategoryNames()` / `getTagNames()` 按 displayName
+  // 精确匹配。落回 `post.spec` 里的 metadata.name（`category-sc9pomuo`）看着像「不丢信息」，
+  // 实际会反过来咬人：下次发布会拿它当新的显示名去找、找不到就建到站点上 —— 垃圾分类/标签
+  // 永久留存。所以解析不出来时**跳过**该字段（保持笔记原值），绝不落回任何值。
+  //
+  // 判据沿用原有的**真值判断**，与改动前的三份代码逐字一致。它实际区分的是
+  // `undefined`（入参缺席 / 解析失败）与「拿到了结果」这一档 —— 对 `string[] | undefined`
+  // 而言 `if (x)` 与 `if (x !== undefined)` 行为**完全相同**（数组恒为真值），
+  // 所以不必把两者「统一」，保持原样就好。
+  //
+  // ⚠️ **已知缺口，属改动前既有行为，本次纯重构刻意不动**：
+  // `getCategoryDisplayNames()` 的返回值同样可能是 `[]`，而 `[]` 是**真值**、能通过这道判据，
+  // 于是会被原样写进 frontmatter。它的 `[]` 有两种来源且不可分辨 ——
+  // ① 这篇确实没有分类；② 这篇有 N 个分类但**一个都没解析出来**
+  //（`map(...).filter(Boolean)` 会把解析不到的项整个滤掉）。② 之下会把笔记里现有的分类
+  // **静默清空** —— 用改动前的 `pullPost` 实测复现过（`{ categories: [], tags: [] }`，
+  // 笔记里原有的 `["旧分类"]` / `["旧标签"]` 被覆盖）。
+  // 真要拦住它，判据得改成 `if (options.categoryNames?.length)`；那是**行为变更**，
+  // 应由后续任务单独决策，不能顺手混进这次收口。
+  if (options.categoryNames) {
+    frontmatter.categories = options.categoryNames;
+  }
+
+  if (options.tagNames) {
+    frontmatter.tags = options.tagNames;
+  }
+
+  frontmatter.halo = {
+    site: options.siteUrl,
+    name: options.name,
+    publish: post.spec.publish,
+  };
 }

@@ -1,5 +1,6 @@
+import type { Post } from "@halo-dev/api-client";
 import { describe, expect, it } from "@rstest/core";
-import { parseHaloPostFields } from "src/frontmatter-map";
+import { applyPostToFrontmatter, parseHaloPostFields } from "src/frontmatter-map";
 
 describe("parseHaloPostFields —— 缺席语义", () => {
   it("halo 整个缺席时给空对象（等于「一个字段都不要动」）", () => {
@@ -142,5 +143,98 @@ describe("parseHaloPostFields —— 多个非法字段时的确定性", () => {
       key: "frontmatter.error_visible",
       params: { value: "public" },
     });
+  });
+});
+
+function makePost(): Post {
+  return {
+    metadata: { name: "post-1", annotations: {} },
+    spec: {
+      title: "标题",
+      slug: "slug",
+      cover: "/upload/a.webp",
+      excerpt: { autoGenerate: false, raw: "摘要" },
+      categories: ["category-1"],
+      tags: ["tag-1"],
+      publish: true,
+    },
+  } as unknown as Post;
+}
+
+describe("applyPostToFrontmatter", () => {
+  it("写入 4 个元数据字段与 halo 块", () => {
+    const frontmatter: Record<string, unknown> = {};
+
+    applyPostToFrontmatter(frontmatter, makePost(), {
+      siteUrl: "https://blog.example.com",
+      name: "post-1",
+      categoryNames: ["技术思考"],
+      tagNames: ["Halo"],
+    });
+
+    expect(frontmatter).toEqual({
+      title: "标题",
+      slug: "slug",
+      cover: "/upload/a.webp",
+      excerpt: "摘要",
+      categories: ["技术思考"],
+      tags: ["Halo"],
+      halo: { site: "https://blog.example.com", name: "post-1", publish: true },
+    });
+  });
+
+  it("excerpt 由服务端自动生成时写 undefined（等于不写这个键）", () => {
+    const post = makePost();
+    post.spec.excerpt = { autoGenerate: true, raw: "" };
+    const frontmatter: Record<string, unknown> = { excerpt: "旧的摘要" };
+
+    applyPostToFrontmatter(frontmatter, post, { siteUrl: "https://blog.example.com", name: "post-1" });
+
+    expect(frontmatter.excerpt).toBeUndefined();
+  });
+
+  it("显示名解析失败（undefined）时跳过该字段，保持笔记原值", () => {
+    // 落回 spec 里的 metadata.name（`category-sc9pomuo`）看着像「不丢信息」，
+    // 实际会在下次发布时被当成新的显示名建到站点上 —— 垃圾分类永久留存。
+    const frontmatter: Record<string, unknown> = { categories: ["旧分类"], tags: ["旧标签"] };
+
+    applyPostToFrontmatter(frontmatter, makePost(), { siteUrl: "https://blog.example.com", name: "post-1" });
+
+    expect(frontmatter.categories).toEqual(["旧分类"]);
+    expect(frontmatter.tags).toEqual(["旧标签"]);
+  });
+
+  it("入参是空数组时**照写**（真值判断拦不住 `[]`），与改动前的三份代码逐字一致", () => {
+    // 这一条是**特征化测试**：钉的是「重构没改行为」，不是「这个行为是对的」。
+    //
+    // 事实：`[]` 在 JS 里是**真值**，所以 `if (options.categoryNames)` 拦不住它，空数组会被
+    // 原样写进 frontmatter。改动前的三份代码同样如此 —— 已用**改动前的 `pullPost`** 实测确认：
+    // 远端分类一个都解析不出来时观测到 `{ categories: [], tags: [] }`，
+    // 笔记里原有的 `["旧分类"]` / `["旧标签"]` 被覆盖。所以断言是 `[]` 而不是 `["旧分类"]`。
+    //
+    // ⚠️ 由此暴露一个**改动前既有**的缺口（不在本任务范围内，本任务是纯重构）：
+    // `getCategoryDisplayNames()` 的 `[]` 有两种来源且不可分辨 ——「这篇确实没有分类」与
+    // 「这篇的分类一个都没解析出来」，后者会把用户笔记里现有的分类清空。
+    // 真要拦住它，判据得是 `if (options.categoryNames?.length)`；那是**行为变更**，
+    // 应由后续任务单独决策。
+    const frontmatter: Record<string, unknown> = { categories: ["旧分类"] };
+
+    applyPostToFrontmatter(frontmatter, makePost(), {
+      siteUrl: "https://blog.example.com",
+      name: "post-1",
+      categoryNames: [],
+    });
+
+    expect(frontmatter.categories).toEqual([]);
+  });
+
+  it("halo.name 取 options.name，不取 post.metadata.name", () => {
+    // 拉取路径必须传调用方的入参 name：toPost() 在服务端没回 name 时给的是空串，
+    // 写进去会让下次发布认不出这篇已发布的笔记，**再建一篇重复文章**。
+    const frontmatter: Record<string, unknown> = {};
+
+    applyPostToFrontmatter(frontmatter, makePost(), { siteUrl: "https://blog.example.com", name: "requested-name" });
+
+    expect((frontmatter.halo as { name: string }).name).toBe("requested-name");
   });
 });

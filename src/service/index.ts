@@ -3,6 +3,7 @@ import i18next from "i18next";
 import { type App, Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
+import { applyPostToFrontmatter } from "../frontmatter-map";
 import { renderErrorMessage, withErrorDetail } from "../i18n/error-message";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
 import { McpError } from "../transport/errors";
@@ -272,27 +273,12 @@ class HaloService {
     const postTags = await this.resolveDisplayNames(() => this.getTagDisplayNames(params.spec.tags));
 
     this.app.fileManager.processFrontMatter(activeFile, (frontmatter) => {
-      frontmatter.title = params.spec.title;
-      frontmatter.slug = params.spec.slug;
-      frontmatter.cover = params.spec.cover;
-      frontmatter.excerpt = params.spec.excerpt.autoGenerate ? undefined : params.spec.excerpt.raw;
-      // 这两个字段**解析成功才写**，失败时保持笔记原值 —— 它们与其他字段不同：
-      // 承载的是**显示名**，而消费方 `getCategoryNames()` / `getTagNames()` 只按 displayName
-      // 精确匹配。落回 `params.spec` 里的 metadata.name（`category-sc9pomuo`）看着像"不丢信息"，
-      // 实际会**反过来咬人**：下次发布会拿它当新的显示名去找、找不到就建到站点上，
-      // 正是 CLAUDE.md 警告的「垃圾标签永久留存」。
-      // 留原值最差只是显示名旧了一点，下次发布会被重新解析 —— 不写比写个下游不认识的值更安全。
-      if (postCategories) {
-        frontmatter.categories = postCategories;
-      }
-      if (postTags) {
-        frontmatter.tags = postTags;
-      }
-      frontmatter.halo = {
-        site: this.site.url,
+      applyPostToFrontmatter(frontmatter, params, {
+        siteUrl: this.site.url,
         name: params.metadata.name,
-        publish: params.spec.publish,
-      };
+        categoryNames: postCategories,
+        tagNames: postTags,
+      });
     });
 
     new Notice(i18next.t("service.notice_publish_success"));
@@ -542,23 +528,12 @@ class HaloService {
     await this.app.vault.modify(activeEditor.file, raw);
 
     this.app.fileManager.processFrontMatter(activeEditor.file, (frontmatter) => {
-      frontmatter.title = post.post.spec.title;
-      frontmatter.slug = post.post.spec.slug;
-      frontmatter.cover = post.post.spec.cover;
-      frontmatter.excerpt = post.post.spec.excerpt.autoGenerate ? undefined : post.post.spec.excerpt.raw;
-      // 只在解析成功时才写这两个字段：它们承载的是**显示名**，而消费方按 displayName 匹配，
-      // 写错东西会在下次发布时造出垃圾分类/标签（同 `publishPost` 里那道守卫）
-      if (postCategories) {
-        frontmatter.categories = postCategories;
-      }
-      if (postTags) {
-        frontmatter.tags = postTags;
-      }
-      frontmatter.halo = {
-        site: this.site.url,
+      applyPostToFrontmatter(frontmatter, post.post, {
+        siteUrl: this.site.url,
         name: post.post.metadata.name,
-        publish: post.post.spec.publish,
-      };
+        categoryNames: postCategories,
+        tagNames: postTags,
+      });
     });
   }
 
@@ -603,21 +578,13 @@ class HaloService {
     this.app.workspace.getLeaf().openFile(file);
 
     this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter.title = post.post.spec.title;
-      frontmatter.slug = post.post.spec.slug;
-      frontmatter.cover = post.post.spec.cover;
-      frontmatter.excerpt = post.post.spec.excerpt.autoGenerate ? undefined : post.post.spec.excerpt.raw;
-      if (postCategories) {
-        frontmatter.categories = postCategories;
-      }
-      if (postTags) {
-        frontmatter.tags = postTags;
-      }
-      frontmatter.halo = {
-        site: this.site.url,
-        name: name,
-        publish: post.post.spec.publish,
-      };
+      applyPostToFrontmatter(frontmatter, post.post, {
+        siteUrl: this.site.url,
+        // ⚠️ 是**入参** name，不是 post.post.metadata.name —— 理由见 PostToFrontmatterOptions.name
+        name,
+        categoryNames: postCategories,
+        tagNames: postTags,
+      });
     });
   }
 

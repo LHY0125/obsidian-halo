@@ -1151,6 +1151,37 @@ describe("HaloService.pullPost", () => {
     // 与文案无关的判别器：失败时绝不能在库里留下一个空文件
     expect(vault.create).not.toHaveBeenCalled();
   });
+
+  test("服务端返回的 item 没带 name 时，halo.name 仍写成请求时用的那个 name", async () => {
+    // 判别器：把 pullPost 里那个 `name,` 换成 `name: post.post.metadata.name`
+    // （一个看起来更"整洁"的写法）就会红 —— 而既有那条用例**不会**红：它的 fixture 里
+    // item 是带着 name 的，两种写法结果相同。
+    // 红掉之后的表现才是重点：halo.name 变成 ""，下次发布读不到它，于是**再建一篇重复文章**，
+    // 而用户两次都看到「发布成功」。
+    const note = createFile("post.md");
+    const { app, fileManager } = createMockApp("", note, []);
+    const { client } = createFakeClient((name) => {
+      if (name !== "halo_get_post") {
+        throw new Error(`Unexpected tool: ${name}`);
+      }
+
+      // `remoteItem` 的 overrides 是展开覆盖，传 `undefined` 就能真的把 name 抹掉。
+      // 这不是人为构造：`halo_get_post` 的 outputSchema 里 name **不是** required 字段。
+      return { item: remoteItem("placeholder", { name: undefined }), content: { raw: "" } };
+    });
+
+    let written: Record<string, unknown> | undefined;
+    fileManager.processFrontMatter.mockImplementation(
+      (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
+        written = {};
+        callback(written);
+      },
+    );
+
+    await new HaloService(app, createSettings(), site, client).pullPost("post-1");
+
+    expect((written?.halo as { name?: string } | undefined)?.name).toBe("post-1");
+  });
 });
 
 describe("发布成功后的回读", () => {
