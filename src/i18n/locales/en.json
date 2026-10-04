@@ -229,7 +229,7 @@
     "row_images_over_limit": "Over 7 MiB (needs a PAT)",
     "value_images": "{{pending}} to upload, {{cached}} from cache",
     "notice_rewrites_notes": "Note: local notes are rewritten too",
-    "notice_rewrites_notes_desc": "With \"Replace image links\" enabled, local image paths in the notes are replaced with Halo URLs during the run.",
+    "notice_rewrites_notes_desc": "The run writes the post metadata (title / slug / cover / excerpt / categories / tags) and the whole `halo` block back into the notes. With \"Replace image links\" enabled, local image paths are replaced with Halo URLs as well.",
     "skipped_title": "{{count}} note(s) skipped",
     "skip_needs_choice": "Several sites are available but none is the default and no routing rule matched — set a routing rule or a default site in the settings.",
     "skip_no_sites": "No site has been configured yet.",

@@ -229,7 +229,7 @@
     "row_images_over_limit": "超過 7 MiB（需要 PAT）",
     "value_images": "待上傳 {{pending}} 張，快取命中 {{cached}} 張",
     "notice_rewrites_notes": "注意：本機筆記也會被改寫",
-    "notice_rewrites_notes_desc": "勾選「替換圖片連結」時，執行過程中會把筆記裡的本機圖片位址換成 Halo 位址。",
+    "notice_rewrites_notes_desc": "執行過程中會把文章中繼資料（title / slug / cover / excerpt / categories / tags）與整個 `halo` 區塊回寫進筆記；開了「替換圖片連結」時，本機圖片位址還會被換成 Halo 位址。",
     "skipped_title": "已跳過 {{count}} 篇",
     "skip_needs_choice": "有多個站點可用但沒有預設站點，也沒有規則命中 —— 請到設定裡設一條路由規則或指定預設站點。",
     "skip_no_sites": "還沒有設定任何站點。",

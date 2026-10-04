@@ -229,7 +229,7 @@
     "row_images_over_limit": "超过 7 MiB（需要 PAT）",
     "value_images": "待上传 {{pending}} 张，缓存命中 {{cached}} 张",
     "notice_rewrites_notes": "注意：本地笔记也会被改写",
-    "notice_rewrites_notes_desc": "勾选了「替换图片链接」时，执行过程中会把笔记里的本地图片地址换成 Halo 地址。",
+    "notice_rewrites_notes_desc": "执行过程中会把文章元数据（title / slug / cover / excerpt / categories / tags）与整个 `halo` 块回写进笔记；开了「替换图片链接」时，本地图片地址还会被换成 Halo 地址。",
     "skipped_title": "已跳过 {{count}} 篇",
     "skip_needs_choice": "有多个站点可用但没有默认站点，也没有规则命中 —— 请到设置里配一条路由规则或指定默认站点。",
     "skip_no_sites": "还没有配置任何站点。",

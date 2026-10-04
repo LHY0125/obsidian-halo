@@ -119,9 +119,17 @@ export class BatchConfirmModal extends Modal {
     // 但测试脚手架的 `contentEl` 只有 `createEl` —— 这一行决定了整块重画能否在测试里跑到。
     this.summaryEl = contentEl.createEl("div");
 
-    // 这条提示必须在确认**之前**出现：`uploadImages` 会真的改写笔记里的图片链接。
-    // 「批量发布」听起来像是只动远端，实际会改一批本地文件。
-    if (this.plugin.settings.replaceImageLinks) {
+    // 这条提示必须在确认**之前**出现：「批量发布」听起来像只动远端，实际会改一批本地文件。
+    //
+    // ⚠️ 门控条件是 **action**，不是 `settings.replaceImageLinks`。回写 frontmatter 那一步
+    //（`executePublish()` 里的 `processFrontMatter()`）是**无条件**的 —— 关掉「替换图片链接」
+    // 之后跑批量推草稿 / 发布，笔记里的 `title` / `slug` / `cover` / `excerpt` / `categories` /
+    // `tags` 与整个 9 键 `halo` 块**照样被改写**。此前按那个设置门控，等于在最需要提醒的时候
+    //（用户以为关掉开关笔记就不会被动）**一条提示都不显示**，是「该响不响的警告」。
+    //
+    // 撤回不显示：`runBatch()` 的 unpublish 分支只调 `changePostPublish()` 就 `continue`，
+    // 从不进 `executePublish()`，本地笔记一个字节都不动 —— 对它显示这条提示才是说一套做一套。
+    if (this.plan.action !== "unpublish") {
       new Setting(contentEl)
         .setName(i18next.t("batch.notice_rewrites_notes"))
         .setDesc(i18next.t("batch.notice_rewrites_notes_desc"));

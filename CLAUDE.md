@@ -91,10 +91,14 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
   逐条列出的是**失败项**。「执行前跳过」的逐条原因**只在确认弹窗里**（`BatchSkip` 带 key/params，
   由弹窗渲染）。把跳过原因也逐条重列到汇总是**终审留下的开放项，尚未实现** —— 文档不许写成已实现。
 
-**批量推草稿与批量发布也会改写本地笔记**，不是只动远端：`uploadImages()` 在「替换图片链接」打开时会把
-笔记里的本地图片地址换成 Halo 地址（并可能把远程链接还原成本地，`restoreCachedLocalImageLinks()`），
-发布状态也会回写进 `halo.publish`。确认弹窗里有一条显式提示（`batch.notice_rewrites_notes`），
-且它必须出现在**确认之前**。**批量撤回是个例外：它只在远端把发布状态退回草稿**，不**改写**正文、
+**批量推草稿与批量发布也会改写本地笔记**，不是只动远端，而且**不止图片链接这一项**：
+`executePublish()` 里的 `processFrontMatter()` **无条件**回写 `title` / `slug` / `cover` / `excerpt` /
+`categories` / `tags` 与整个 9 键 `halo` 块（发布状态 `halo.publish` 也在其中）—— **关掉「替换图片链接」
+也照写**；`uploadImages()` 另外在「替换图片链接」打开时把笔记里的本地图片地址换成 Halo 地址
+（并可能把远程链接还原成本地，`restoreCachedLocalImageLinks()`）。
+确认弹窗里有一条显式提示（`batch.notice_rewrites_notes`），它**门控在 action 上**（撤回不显示，
+因为撤回一个字节都不改），且必须出现在**确认之前**。
+**批量撤回是个例外：它只在远端把发布状态退回草稿**，不**改写**正文、
 也**不回写本地笔记** —— `runBatch()` 的 unpublish 分支直接 `changePostPublish()` 后 `continue`，
 从不进 `executePublish()`（`applyPostToFrontmatter` 的三个调用点里没有它）。
 所以撤回后笔记里的 `halo.publish` **仍是原值**，而 `batch-publish` 对每一篇强制传

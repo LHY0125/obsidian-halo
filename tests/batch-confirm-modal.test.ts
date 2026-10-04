@@ -1,11 +1,11 @@
-import { beforeAll, describe, expect, it } from "@rstest/core";
+import { beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18next from "i18next";
-import type { App, TFile } from "obsidian";
+import { type App, Setting, type TFile } from "obsidian";
 import { BatchConfirmModal, BatchSummaryModal } from "src/batch-confirm-modal";
 import type { BatchGroup, BatchItem, BatchPlan, BatchRunSummary } from "src/batch-publish";
 import { initializeI18n } from "src/i18n";
 import type HaloPlugin from "src/main";
-import type { HaloSite } from "src/settings";
+import type { HaloSetting, HaloSite } from "src/settings";
 import { createSettings } from "./helpers/obsidian-mocks";
 
 /**
@@ -50,9 +50,9 @@ function item(path: string, site: HaloSite): BatchItem {
   };
 }
 
-function planWith(spec: { site: HaloSite; paths: string[] }[]): BatchPlan {
+function planWith(spec: { site: HaloSite; paths: string[] }[], action: BatchPlan["action"] = "publish"): BatchPlan {
   return {
-    action: "publish",
+    action,
     groups: spec.map(({ site, paths }) => ({
       site,
       items: paths.map((path) => item(path, site)),
@@ -89,12 +89,14 @@ interface Harness {
  * 这与 `tests/main.test.ts` 对插件私有方法用的是同一套办法 —— 不新建 UI mock 基建，
  * 也不把安全攸关的勾选状态留在测不到的地方。
  */
-function openModal(plan: BatchPlan): Harness {
+function openModal(plan: BatchPlan, settings: HaloSetting = createSettings()): Harness {
   let decided = false;
   let result: Set<string> | undefined;
 
-  // 只要满足弹窗构造与渲染的读取面（`app` 传给 Modal 基类、`settings.replaceImageLinks`）
-  const plugin = { app: {} as App, settings: createSettings() } as unknown as HaloPlugin;
+  // 只要满足弹窗构造与渲染的读取面（`app` 传给 Modal 基类）。`settings` 曾经也被读到
+  //（改写提示门控在 `replaceImageLinks` 上），那条门控已改成按 action —— 但仍显式传进来，
+  // 好让「关掉那个开关时的行为」有地方可测，也避免 fixture 与生产读取面悄悄脱节。
+  const plugin = { app: {} as App, settings } as unknown as HaloPlugin;
 
   const modal = new BatchConfirmModal(plugin, plan, (value) => {
     decided = true;
@@ -431,5 +433,56 @@ describe("BatchSummaryModal 的汇总渲染", () => {
     expect(unpublish).toContain(i18next.t("batch.summary_title_unpublish"));
     // 反面：写死一个标题的实现能过上一条、过不了这一条
     expect(draft).not.toContain(i18next.t("batch.summary_title_unpublish"));
+  });
+});
+
+describe("确认弹窗的「笔记会被改写」提示", () => {
+  /**
+   * 渲染一次确认弹窗，把每个 `Setting` 的**名称**收集回来。
+   *
+   * 手法是给 `Setting.prototype.setName` 打 spy：`tests/setup.ts` 的 `Setting` 是个丢弃参数的壳
+   * （`setName(): this`），文案读不回来，而 spy 记录的是**调用参数**，不受壳影响。
+   * 与 `tests/settings.test.ts` 用 `Modal.prototype.open` 拿实例是同一套办法 —— 不新建 UI mock 基建。
+   */
+  function settingNames(plan: BatchPlan, settings?: HaloSetting): string[] {
+    const spy = rs.spyOn(Setting.prototype, "setName");
+
+    try {
+      const { modal } = openModal(plan, settings);
+      modal.renderContent();
+
+      return spy.mock.calls.map((call) => String(call[0]));
+    } finally {
+      // `Setting.prototype` 是**全局共享**的，泄漏出去的 spy 会污染后面所有用例 ——
+      // 与 `tests/settings.test.ts` 还原 `Modal.prototype.open` 同一条纪律。
+      spy.mockRestore();
+    }
+  }
+
+  it("关掉「替换图片链接」也照提示：回写 frontmatter 与那个开关无关", () => {
+    // 判别器：把门控条件改回 `this.plugin.settings.replaceImageLinks` 就会红。
+    //
+    // 为什么这条提示必须**不**依赖那个开关：`executePublish()` 的 `processFrontMatter()` 是
+    // **无条件**的 —— 关掉开关后跑批量推草稿 / 发布，笔记里的 title / slug / cover / excerpt /
+    // categories / tags 与整个 `halo` 块照样被改写。按那个开关门控 = 在最需要提醒的时候
+    //（用户刚关掉它、以为笔记不会再被动）**一条提示都不显示**，是「该响不响的警告」。
+    const names = settingNames(
+      planWith([{ site: siteA, paths: ["a.md"] }]),
+      createSettings({ replaceImageLinks: false }),
+    );
+
+    // 在场对照物：同一个弹窗确实把内容渲染出来了（分组标题在），
+    // 所以下面那条「包含」不会是「什么都没渲染」的假绿。
+    expect(names).toContain("A（1）");
+    expect(names).toContain(i18next.t("batch.notice_rewrites_notes"));
+  });
+
+  it("撤回时不提示：撤回一个字节都不改本地笔记", () => {
+    // 判别器：把门控改回「恒显示」就会红。
+    const names = settingNames(planWith([{ site: siteA, paths: ["a.md"] }], "unpublish"));
+
+    // 同上：先证明渲染真的跑到了，再说「没有那条提示」
+    expect(names).toContain("A（1）");
+    expect(names).not.toContain(i18next.t("batch.notice_rewrites_notes"));
   });
 });
