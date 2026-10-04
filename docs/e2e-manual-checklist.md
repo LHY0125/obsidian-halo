@@ -88,7 +88,8 @@ halo:
 
 **若不符，最可能的错在哪**：`src/site-routing.ts` 的 `resolveSite()` —— 规则表的循环是否在
 默认站点之前（顺序反了就会一律发到默认站点）；或 `src/glob.ts` 的 `matchGlob()` 没命中
-（`file.path` 必须是 `/` 分隔的库内相对路径 —— 传反斜杠路径**可能导致规则不命中**）。
+（`file.path` 必须是 `/` 分隔的库内相对路径 —— 传反斜杠路径**可能导致规则不命中，
+也可能命中本不该命中的规则**）。
 预览里的来源标注来自 `src/publish-preview-modal.ts` 对 `preview.site.source === "rule"` 的分支。
 
 ## 6. 规则指向一个已删除的站点 —— 报错而不改道
@@ -118,10 +119,7 @@ halo:
 > 与上面这条行为**相反**（匹配本来就是大小写不敏感的），会把人往错的方向引 —— 三语 locale 里已删掉。
 > 同一次修掉的还有同组的另两句：`settings.siteRouting.description` 里「`?` 是单个字符」
 >（实现是 `[^/]`，不跨 `/`），以及 `settings.siteRouting.empty` 里「所有笔记都会走默认站点或弹窗选择」
->（漏了 `halo.site` 优先与单站点直取）。**这三句 locale 从此不再复述规则细节**：`description` 与
-> `no_match` 只管说明有哪些元字符、并把细节指给 README，`empty` 缩到只剩「还没有配置路由规则。」。
->（**不是**「规则细节从此只在 README 有一份」：README 的「站点路由规则」一节、`CLAUDE.md` 的 glob 段、
-> 以及本清单的第 5 项与第 7 项都还在复述它。这里要说的是 **locale 不再是其中面向用户的那一份**。）
+>（漏了 `halo.site` 优先与单站点直取）。
 
 ## 8. 预览开关
 
