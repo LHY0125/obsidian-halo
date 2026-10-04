@@ -92,7 +92,8 @@
 | 文件                           | 状态     | 唯一职责                                                                                                        |
 | -------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------- |
 | `src/frontmatter-map.ts`       | **新增** | frontmatter`halo:` 下 6 个元数据字段的校验（`parseHaloPostFields`）与两个方向的落地（`applyPostToFrontmatter`） |
-| `src/site-routing.ts`          | **新增** | 路径 glob 编译与匹配（`matchGlob`）、站点解析决策（`resolveSite`）—— 全部纯函数                               |
+| `src/glob.ts`                  | **新增** | **零依赖叶子模块**：`SiteRoutingRule` 类型、`normalizeRulePattern`、`matchGlob`。它不 import 任何项目内模块，所以谁都能安全 import 它 |
+| `src/site-routing.ts`          | **新增** | 站点解析决策（`resolveSite`）。再导出 `glob.ts` 的三个符号，让调用方只需认一个入口                          |
 | `src/site-routing-modal.ts`    | **新增** | 单条路由规则的编辑弹窗（模式 + 站点）                                                                           |
 | `src/publish-preview.ts`       | **新增** | 预览数据的纯构造（`buildPublishPreview`）+ 预览弹窗                                                             |
 | `src/batch-publish.ts`         | **新增** | 批量候选收集、聚合计划、执行循环 —— 纯逻辑，UI 无关                                                           |
@@ -1131,6 +1132,7 @@ pnpm test tests/frontmatter-map.test.ts
 
 ```ts
   test("frontmatter 的 halo.visible 被送进写工具的参数", async () => {
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
     const { client } = fakeService({ onWrite: (_name, args) => (writtenArgs = args) });
@@ -1138,12 +1140,13 @@ pnpm test tests/frontmatter-map.test.ts
       frontmatter: { title: "Post title", halo: { visible: "INTERNAL" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost(note);
+    await new HaloService(app, createSettings(), site, client).publishPost();
 
     expect(writtenArgs?.visible).toBe("INTERNAL");
   });
 
   test("显式 false 不被默认值翻盘：halo.pinned: false 送出 pinned: false", async () => {
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
     const { client } = fakeService({ onWrite: (_name, args) => (writtenArgs = args) });
@@ -1151,12 +1154,13 @@ pnpm test tests/frontmatter-map.test.ts
       frontmatter: { title: "Post title", halo: { pinned: false } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost(note);
+    await new HaloService(app, createSettings(), site, client).publishPost();
 
     expect(writtenArgs?.pinned).toBe(false);
   });
 
   test("更新分支同样消费 halo.* 字段", async () => {
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
     const { client, calls } = fakeService({ onWrite: (_name, args) => (writtenArgs = args) });
@@ -1164,7 +1168,7 @@ pnpm test tests/frontmatter-map.test.ts
       frontmatter: { title: "Post title", halo: { name: "post-1", priority: 9 } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost(note);
+    await new HaloService(app, createSettings(), site, client).publishPost();
 
     // 走的是更新分支（有 halo.name），参数走 halo_update_post
     expect(calls.some((call) => call.name === "halo_update_post")).toBe(true);
@@ -1173,6 +1177,7 @@ pnpm test tests/frontmatter-map.test.ts
 
   test("halo.publishTime 为空串时送 null，不是空字符串", async () => {
     // schema 是 ["string","null"] + format: date-time —— 空字符串会被服务端拒绝
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     let writtenArgs: Record<string, unknown> | undefined;
     const { client } = fakeService({ onWrite: (_name, args) => (writtenArgs = args) });
@@ -1180,12 +1185,13 @@ pnpm test tests/frontmatter-map.test.ts
       frontmatter: { title: "Post title", halo: { publishTime: "" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost(note);
+    await new HaloService(app, createSettings(), site, client).publishPost();
 
     expect(writtenArgs?.publishTime).toBeNull();
   });
 
   test("halo.visible 非法时**中止发布**，一个写工具都不调，并报出具体原因", async () => {
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client, calls } = fakeService();
     const notices = capturedNotices();
@@ -1194,7 +1200,7 @@ pnpm test tests/frontmatter-map.test.ts
       frontmatter: { title: "Post title", halo: { visible: "public" } },
     }));
 
-    await new HaloService(app, createSettings(), site, client).publishPost(note);
+    await new HaloService(app, createSettings(), site, client).publishPost();
 
     // 一个 MCP 工具都不该被调到 —— 校验必须发生在分类/标签解析（会真的建分类）之前
     expect(calls).toEqual([]);
@@ -1203,8 +1209,19 @@ pnpm test tests/frontmatter-map.test.ts
   });
 ```
 
-> `note` / `site` 取本文件既有的顶部常量。`fakeService()` 的 `onWrite` 钩子在
-> 创建分支与更新分支上都会被调用，所以上面几条不需要分别写两遍。
+> **两条关于既有测试脚手架的提醒（预检时核过，别再自己摸）：**
+>
+> 1. **`site` 是本文件顶部的常量**（`import { … TEST_SITE as site } from "../helpers/obsidian-mocks"`），
+>    可以直接用。**`note` 不是** —— 每个用例自己 `const note = createFile("post.md");` 造一个，
+>    上面每条测试的第一行就是它。别写成裸 `note` 然后以为它在作用域里。
+> 2. **`publishPost()` 是刻意不带参数的**：本任务执行时它的签名还是 `publishPost(options = {})`，
+>    文件从 `app.workspace.activeEditor` 取（`createMockApp` 已把 `activeFile` 设成了 activeEditor）。
+>    **Task 7 会把签名改成 `publishPost(file, options)`，届时这批调用要跟着补上文件参数** ——
+>    这是计划里写明的步骤，不是遗漏。现在写成 `publishPost(note)` 会让 `note` 被当成 options
+>    传进去，靠巧合通过（`options.markdown` 恰好是 undefined，回落读 activeEditor），
+>    而那份巧合一旦不成立就会静默走错分支。
+>
+> `fakeService()` 的 `onWrite` 钩子在创建分支与更新分支上都会被调用，所以上面几条不需要分别写两遍。
 
 - [ ]  **Step 6：跑测试确认失败**
 
@@ -1282,7 +1299,7 @@ pnpm test
       },
     );
 
-    await new HaloService(app, createSettings(), site, client).publishPost(note);
+    await new HaloService(app, createSettings(), site, client).publishPost();
 
     expect((written?.halo as { publishTime?: string } | undefined)?.publishTime).toBe("2026-10-06T10:00:00.000Z");
   });
@@ -1303,22 +1320,43 @@ git commit -m "feat(frontmatter): 6 个元数据字段贯通发布/更新/拉取
 
 ---
 
-## Task 4：`src/site-routing.ts` —— glob 匹配与站点解析（纯函数）
+## Task 4：`src/glob.ts` + `src/site-routing.ts` —— glob 匹配与站点解析（纯函数）
+
+**为什么是两个文件而不是一个（预检发现的真缺陷，务必读懂再动手）**：
+`settings.ts` 需要 `SiteRoutingRule` 类型与 `matchGlob`（设置面板要显示每条规则命中多少篇），
+而 `site-routing.ts` 需要 `settings.ts` 的 `isSameSiteUrl` / `normalizeSiteUrl`。
+一个文件装全部就构成 **`settings.ts ⇄ site-routing.ts` 的真循环 import** ——
+这是 rslib/rspack 打包时的真实风险，也违反本计划的 Global Constraint #3（依赖方向单一）。
+
+解法是把**不依赖任何东西**的那部分抽成叶子模块 `src/glob.ts`：
+
+```
+glob.ts         （零 import，叶子）
+   ↑
+site-routing.ts （import glob + settings）
+   ↑
+settings.ts     （import glob，**不** import site-routing）
+```
+
+`site-routing.ts` **再导出** `glob.ts` 的三个符号（`export { … } from "./glob"`），
+这样所有 `from "src/site-routing"` 的调用点（含测试）**一字不用改**。
+再导出不是第二份实现，不违反「单一实现」。
 
 **Files:**
 
+- Create: `src/glob.ts`
 - Create: `src/site-routing.ts`
-- Test: `tests/site-routing.test.ts`
+- Test: `tests/site-routing.test.ts`（一个测试文件吃两个模块 —— 它们是一件事的两半，分开测只会让读者来回跳）
 
 **Interfaces:**
 
-- Consumes: `HaloSite`、`isSameSiteUrl`、`normalizeSiteUrl`（`src/settings.ts`）
-- Produces:
+- Consumes: `HaloSite`、`isSameSiteUrl`、`normalizeSiteUrl`（`src/settings.ts`）—— **只有 `site-routing.ts` 消费**
+- Produces（`src/glob.ts` 定义，`src/site-routing.ts` 再导出全部四个）：
   - `interface SiteRoutingRule { pattern: string; site: string }`
-  - `type SiteResolution = { kind: "resolved"; site: HaloSite; source: "frontmatter" | "rule" | "default" | "single"; pattern?: string } | { kind: "needs-choice" } | { kind: "no-sites" } | { kind: "unknown-site"; url: string } | { kind: "unknown-rule-site"; url: string; pattern: string }`
   - `function normalizeRulePattern(pattern: string): string`
   - `function matchGlob(pattern: string, filePath: string): boolean`
   - `function resolveSite(sites: HaloSite[], rules: SiteRoutingRule[], filePath: string, frontmatterUrl?: string): SiteResolution`
+  - `type SiteResolution = { kind: "resolved"; site: HaloSite; source: "frontmatter" | "rule" | "default" | "single"; pattern?: string } | { kind: "needs-choice" } | { kind: "no-sites" } | { kind: "unknown-site"; url: string } | { kind: "unknown-rule-site"; url: string; pattern: string }`
 
 ---
 
@@ -1494,11 +1532,10 @@ pnpm test tests/site-routing.test.ts
 
 - [ ]  **Step 3：实现**
 
-新建 `src/site-routing.ts`：
+**先建叶子模块 `src/glob.ts`。** 它**一个项目内模块都不 import** —— 这正是本次拆分的全部意义。
+如果你发现自己想往它里面加 import，说明拆错了，停下来报告。
 
 ```ts
-import { type HaloSite, isSameSiteUrl, normalizeSiteUrl } from "./settings";
-
 /**
  * 一条路由规则：把某类路径的笔记送到某个站点。
  *
@@ -1510,20 +1547,6 @@ export interface SiteRoutingRule {
   pattern: string;
   site: string;
 }
-
-/**
- * 站点解析的结果。
- *
- * 刻意做成**带 kind 的联合**而不是 `HaloSite | undefined`：批量操作必须能分辨
- * 「这篇没有可用站点」的**具体原因**并逐条告诉用户，而 `undefined` 把这些原因全揉成了一团。
- * 这也是本阶段反复出现的那条立场 —— 失败要说得出是哪种失败。
- */
-export type SiteResolution =
-  | { kind: "resolved"; site: HaloSite; source: "frontmatter" | "rule" | "default" | "single"; pattern?: string }
-  | { kind: "needs-choice" }
-  | { kind: "no-sites" }
-  | { kind: "unknown-site"; url: string }
-  | { kind: "unknown-rule-site"; url: string; pattern: string };
 
 /** 把用户手写的模式规整成库内路径的形态：去空白、去开头斜杠、反斜杠换正斜杠 */
 export function normalizeRulePattern(pattern: string): string {
@@ -1581,6 +1604,33 @@ export function matchGlob(pattern: string, filePath: string): boolean {
 
   return globToRegExp(normalized).test(filePath);
 }
+```
+
+**再建** `src/site-routing.ts`。它 import 上面那个叶子与 `./settings`，并**再导出**叶子的公开面 ——
+于是所有 `from "src/site-routing"` 的调用点（含测试）一字不用改。
+**再导出不是第二份实现**：实现只有一份，在 `glob.ts` 里，这里只是一条转发。
+
+```ts
+import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./glob";
+import { type HaloSite, isSameSiteUrl, normalizeSiteUrl } from "./settings";
+
+// 调用方（settings.ts 的设置面板、site-routing-modal.ts、main.ts、测试）只需认
+// "src/site-routing" 一个入口。glob.ts 是内部实现细节，将来要换匹配算法只动那一处。
+export { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./glob";
+
+/**
+ * 站点解析的结果。
+ *
+ * 刻意做成**带 kind 的联合**而不是 `HaloSite | undefined`：批量操作必须能分辨
+ * 「这篇没有可用站点」的**具体原因**并逐条告诉用户，而 `undefined` 把这些原因全揉成了一团。
+ * 这也是本阶段反复出现的那条立场 —— 失败要说得出是哪种失败。
+ */
+export type SiteResolution =
+  | { kind: "resolved"; site: HaloSite; source: "frontmatter" | "rule" | "default" | "single"; pattern?: string }
+  | { kind: "needs-choice" }
+  | { kind: "no-sites" }
+  | { kind: "unknown-site"; url: string }
+  | { kind: "unknown-rule-site"; url: string; pattern: string };
 
 /**
  * 决定一篇笔记发布到哪个站点。
@@ -1645,7 +1695,7 @@ pnpm test tests/site-routing.test.ts
 - [ ]  **Step 5：提交**
 
 ```bash
-git add src/site-routing.ts tests/site-routing.test.ts
+git add src/glob.ts src/site-routing.ts tests/site-routing.test.ts
 git commit -m "feat(routing): 路径 glob 与站点解析（纯函数，四级优先级）"
 ```
 
@@ -1705,7 +1755,7 @@ pnpm test tests/settings.test.ts
 修改 `src/settings.ts`：
 
 ```ts
-import { type SiteRoutingRule, normalizeRulePattern } from "./site-routing";
+import { type SiteRoutingRule, normalizeRulePattern } from "./glob";
 
 export interface HaloSetting {
   settingsVersion: number;
@@ -1782,8 +1832,8 @@ pnpm test tests/settings.test.ts
 import i18next from "i18next";
 import { Modal, Setting } from "obsidian";
 import type HaloPlugin from "./main";
-import type { SiteRoutingRule } from "./site-routing";
-import { normalizeRulePattern } from "./site-routing";
+import type { SiteRoutingRule } from "./glob";
+import { normalizeRulePattern } from "./glob";
 
 export function openSiteRoutingModal(
   plugin: HaloPlugin,
@@ -1960,7 +2010,7 @@ class SiteRoutingModal extends Modal {
   }
 ```
 
-文件顶部补 import：`import { matchGlob } from "./site-routing";`、`import { openSiteRoutingModal } from "./site-routing-modal";`，
+文件顶部补 import：`import { matchGlob } from "./glob";`、`import { openSiteRoutingModal } from "./site-routing-modal";`，
 并确认 `isSameSiteUrl` 已在既有 import 里。
 
 - [ ]  **Step 7：加三语文案**
@@ -2017,13 +2067,20 @@ for (const a of sets) for (const b of sets) { const d=[...a].filter(k=>!b.has(k)
 - [ ]  **Step 9：确认没有漏掉 `HaloSetting` 的构造点**
 
 ```bash
-grep -rn "publishByDefault" src/ tests/ | grep -v "i18n/locales"
+grep -rn "publishByDefault\|DEFAULT_SETTINGS" src/ tests/ | grep -v "i18n/locales"
 ```
 
-`DEFAULT_SETTINGS` 是唯一的字面量来源，但测试里有手写的 settings 对象 —— 逐一看过去，
-凡是显式列字段的地方都要补 `siteRouting: []` / `skipPreviewOnPublish: false`，
-否则那些测试里 `resolveSite` 会拿到 `undefined`。**注意：`normalizeRoutingRules` 只在
-`migrateSettings` 里跑，测试里手拼的设置对象绕过了它**，所以手拼的地方要自己给全。
+`DEFAULT_SETTINGS` 是生产代码里唯一的字面量来源，但**测试里还有一个**：
+**`tests/helpers/obsidian-mocks.ts` 的 `createSettings()`**（约第 47 行）。它的返回类型标注是
+`HaloSetting`，所以本任务给 `HaloSetting` 加两个必填字段后，**它不补就会 tsc 报错**。
+补两行：`siteRouting: []`、`skipPreviewOnPublish: false`。
+它是 `tests/service/index.test.ts` / `image-upload.test.ts` / `settings.test.ts` 三处的共用工厂，
+补一处就够，**不要**去各测试文件里逐个改。
+
+> ⚠️ 除了它之外还有一处容易被忽略：`src/settings.ts` 里 `HaloSettingTab.display()` 之外，
+> **`src/site-editing-modal.ts:15` 的 `openSiteEditingModal`** 构造站点字面量时用的是
+> `{ name: "", url: "", default: false, token: "", mcpToken: "" }` —— 那是 `HaloSite` 不是
+> `HaloSetting`，**不需要动**。别顺手给它加字段。
 
 - [ ]  **Step 10：跑全套 + 构建 + 提交**
 
@@ -2128,8 +2185,9 @@ git commit -m "feat(settings): 站点路由规则表（顺序即优先级，含�
   }
 ```
 
-> ⚠️ Task 8 会把 `publishPost` 的参数改成显式 `file`；先保持现有调用形状，
-> 在 Task 8 里一并改。
+> ⚠️ **Task 7** 会把 `publishPost` 的参数改成显式 `file`（→ `publishPost(activeEditor.file, { markdown })`），
+> **Task 8** 再把这段编排整体换成 `publishFile(file)`。先保持现有调用形状，不要提前改 ——
+> 每一步都要留下一个能跑通、能单独审查的状态。
 
 - [ ]  **Step 3：把 `getSiteForActiveFile` 改成用它**
 
@@ -2383,6 +2441,7 @@ pnpm test tests/service/index.test.ts
 ```ts
   test("quiet 时不弹成功便签，但返回值仍是 ok", async () => {
     // 判别器：把 quiet 判断删掉 → 这条红。它钉的是「批量路径不会被 118 条提示淹掉」。
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client } = fakeService();
     const notices = capturedNotices();
@@ -2400,6 +2459,7 @@ pnpm test tests/service/index.test.ts
     // `publishFailureMessage` 还会拼上服务端原文（`withErrorDetail`），逐字相等本来就是错的。
     // 真正要钉的不变式是「返回值与便签说的是同一件事」—— 否则单篇与批量两条路径
     // 会对**同一次失败**给出两种说法，用户无从判断哪个是真的。
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client } = fakeService({
       onWrite: () => {
@@ -2417,6 +2477,7 @@ pnpm test tests/service/index.test.ts
   });
 
   test("publishOverride 压过 frontmatter 里的 publish: true", async () => {
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client, calls } = fakeService();
     metadataCache.getFileCache.mockImplementation(() => ({
@@ -2431,6 +2492,7 @@ pnpm test tests/service/index.test.ts
   test("单篇路径不传 override 时，frontmatter 的 publish 仍然说了算", async () => {
     // 与上一条成对：override 是**新增的最高优先级**，不是替换掉原有规则。
     // 缺了这条，一个「永远听 override」的错误实现也能全绿。
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client, calls } = fakeService();
     metadataCache.getFileCache.mockImplementation(() => ({
@@ -2890,6 +2952,7 @@ pnpm test
   test("planPublish 不建分类标签，也不调任何写工具", async () => {
     // 判别器：把 `getCategories()`（只列）换回 `getCategoryNames()`（会建）就会红。
     // 这条是预览能成立的全部依据：用户在弹窗里点「取消」之后，站点上不能多出任何东西。
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client, calls } = fakeService();
     metadataCache.getFileCache.mockImplementation(() => ({
@@ -2907,6 +2970,7 @@ pnpm test
   test("planPublish 失败时不抛，把原因放进 reason", async () => {
     // 预览路径的调用方是命令回调。异常穿到 Obsidian 只会进控制台 ——
     // 用户点了「发布」，什么都没发生，也没有任何提示。
+    const note = createFile("post.md");
     const { app, metadataCache } = createMockApp("local markdown", note, []);
     const { client } = fakeService({
       itemFor: () => {
