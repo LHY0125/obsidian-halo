@@ -5,10 +5,12 @@ import { type BatchAction, collectBatchCandidates, planBatch, runBatch } from ".
 import { initializeI18n } from "./i18n";
 import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
+import { openPageSelectionModal } from "./page-selection-model";
 import { openPostSelectionModal } from "./post-selection-model";
 import { type PublishPreviewInput, buildPublishPreview } from "./publish-preview";
 import { confirmPublishPreview } from "./publish-preview-modal";
 import HaloService from "./service";
+import PageService from "./service/page-service";
 import {
   type HaloSetting,
   HaloSettingTab,
@@ -127,6 +129,33 @@ export default class HaloPlugin extends Plugin {
         const service = new HaloService(this.app, this.settings, site);
         // 选择器给的是扁平条目（MCP 的表示），不再是 REST 的 `post.post.metadata.name`
         await service.pullPost(post.name);
+      },
+    });
+
+    // 独立页面的三条命令。注册顺序与文章那几条交错着看并不整齐，但**语义分组**是清楚的：
+    // 推 / 拉是单向的，管理是双向的（还要能回收与恢复），所以管理单独一条 ——
+    // 合成一条的话，「拉取」这个动作会被一个它不需要的「回收」按钮陪着，而回收不可逆。
+    this.addCommand({
+      id: "push-page",
+      name: i18next.t("command.push_page.name"),
+      callback: async () => {
+        await this.pushPageCommand();
+      },
+    });
+
+    this.addCommand({
+      id: "pull-page",
+      name: i18next.t("command.pull_page.name"),
+      callback: async () => {
+        await this.pullPageCommand();
+      },
+    });
+
+    this.addCommand({
+      id: "manage-pages",
+      name: i18next.t("command.manage_pages.name"),
+      callback: async () => {
+        await this.managePagesCommand();
       },
     });
 
@@ -373,6 +402,78 @@ export default class HaloPlugin extends Plugin {
   }
 
   /**
+   * `push-page` 的入口：把当前笔记推成独立页面。
+   *
+   * 与单篇发布的差别只有「用哪个 service」与「页面没有规划 / 预览 / 图片上传」——
+   * 页面通常是「关于」「友链」这类短文档，预览与传图对它的收益远小于复杂度
+   *（真需要传图的页面，用户可以先用「Halo: 上传图片」那条命令）。
+   */
+  private async pushPageCommand(): Promise<void> {
+    const { activeEditor } = this.app.workspace;
+
+    // 与 `publishCommand` 同款的守卫，且同样**静默**：打开一个空库就点命令，
+    // 不该挨一句「没有活动文件」的报错。
+    if (!activeEditor || !activeEditor.file) {
+      return;
+    }
+
+    // 站点解析与发布走**同一个**入口，理由同 `getSiteForActiveFile`：
+    // 两处各解析一遍会让页面推到 A 站、而它的图片传到 B 站，两个操作都报成功。
+    const resolution = this.resolveSiteFor(activeEditor.file);
+    const site = await this.siteForResolution(resolution);
+
+    if (!site) {
+      return;
+    }
+
+    const service = new PageService(this.app, this.settings, site);
+    await service.pushPage(activeEditor.file);
+  }
+
+  /**
+   * `pull-page` 的入口：从站点拉一个页面到本地，建一篇新笔记。
+   *
+   * 与 `manage-pages` 分成两条命令而不是加个开关：拉取是**单向**的（站点 → 本地），
+   * 而管理是**双向**的（还要能回收与恢复）。合成一条的话，「拉取」这个动作会被
+   * 一个它不需要的「回收」按钮陪着，而回收是不可逆的。
+   */
+  private async pullPageCommand(): Promise<void> {
+    const site = await this.pickSiteForPull("command.pull_page.error_no_sites");
+
+    if (!site) {
+      return;
+    }
+
+    const page = await openPageSelectionModal(this, site);
+    const service = new PageService(this.app, this.settings, site);
+    await service.pullPage(page.name);
+  }
+
+  /**
+   * `manage-pages` 的入口：列出站点上的全部页面，逐行给出「打开」与「回收 / 恢复」。
+   *
+   * ⚠️ **本任务只接线，弹窗尚未实现** —— `PageManagerModal` 属于 Task 12 的回收站弹窗家族，
+   * 建在 `recycle-model.ts` 那套取数之上。这一段是**刻意的中间态**，
+   * Task 12 会把它换成 `new PageManagerModal(this, site).open()`。
+   */
+  private async managePagesCommand(): Promise<void> {
+    const site = await this.pickSiteForPull("command.manage_pages.error_no_sites");
+
+    if (!site) {
+      return;
+    }
+
+    // 占位用的是**已存在**的键（命令自己的名字），不为占位新造一个键 ——
+    // Task 12 会把这一整段删掉，新造的键还要跟着删一轮。
+    //
+    // 代价如实记在这里：这条提示**没有说出「尚未实现」**。现有文案里没有一句是这个意思，
+    // 而编一句假话（「连接失败」之类）会把用户引去排查一个完全正常的系统 ——
+    // 在「少说」与「说错」之间选少说。Task 12 替换后这一点随之消失（它也会改掉
+    // `tests/main.test.ts` 里钉住这段占位的那条用例）。
+    new Notice(i18next.t("command.manage_pages.name"));
+  }
+
+  /**
    * 三个批量命令共用的入口：取候选 → 聚合规划 → 一次确认 → 执行 → 汇总。
    *
    * 候选来源就是**vault 里当前所有 markdown 文件**，用户靠确认弹窗里的分组清单看到全貌。
@@ -510,6 +611,33 @@ export default class HaloPlugin extends Plugin {
     // 与发布走**同一个**解析入口。两处各解析一遍是错的：图片会传到 A 站、文章发到 B 站，
     // 两个操作都报成功，而文章里的图片链接指向另一个域名。
     return this.siteForResolution(this.resolveSiteFor(activeEditor.file));
+  }
+
+  /**
+   * 作用于**远端**的命令共用的站点选择：单站点直取，多站点弹窗。
+   *
+   * 抽出来是因为它们面对的是**同一个**问题：拉取文章 / 拉取页面 / 管理页面 /
+   * 查重 / 附件管理 / 回收站都作用于远端，手上**没有本地文件**，所以走不了 `resolveSite` ——
+   * 那个要 `file.path`（见 `resolveSiteFor`）。处置与 `pull-post` 里内联的那段一致。
+   *
+   * `noSitesKey` 由调用方给，而不是在函数里挑一句写死：各条命令要弹的是**自己**那句话，
+   * 写死会让「是哪条命令缺站点」这件事在提示里消失，而用户可能同时装了多个内容类型的命令。
+   *
+   * ⚠️ 既有的 `pull-post` **刻意没有**改成调用它：把那段逻辑换成这个 helper 会带来一次
+   * 与「新增页面命令」无关的行为变更，混进本次 diff 里就没法单独审阅了。两处今天是同一套
+   * 处置，合流留给专门的重构。
+   */
+  private async pickSiteForPull(noSitesKey: string): Promise<HaloSite | undefined> {
+    if (this.settings.sites.length === 0) {
+      new Notice(i18next.t(noSitesKey));
+      return undefined;
+    }
+
+    if (this.settings.sites.length === 1) {
+      return this.settings.sites[0];
+    }
+
+    return openSiteSelectionModal(this);
   }
 
   private async uploadImagesForPublish(

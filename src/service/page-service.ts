@@ -4,7 +4,7 @@ import { Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { CONTENT_TOOLSETS } from "../content-kind";
 import { renderErrorMessage } from "../i18n/error-message";
-import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../pagination";
+import { type FetchAllPagesResult, LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../pagination";
 import { isSameSiteUrl } from "../settings";
 import { McpError } from "../transport/errors";
 import { HaloServiceBase, type PublishResult } from "./index";
@@ -69,15 +69,31 @@ class PageService extends HaloServiceBase {
    *
    * 翻页而不是只取一页：页面数量没有上限，静默少一截的表现是「选择器里找不到某个页面」，
    * 而用户会以为它不存在。
+   *
+   * ⚠️ **本函数的契约是「不抛」**：失败时自己弹提示并返回**空数组**，与
+   * `post-selection-model.ts` 的 `fetchSelectablePosts` 逐字同款。两个取数函数的契约必须一致，
+   * 否则每个调用方都得先看一眼「这个函数抛不抛」。而调用方（拉取选择器）的 `.then()` 后面
+   * **没有** catch —— 抛出去就是一条未捕获异常：Obsidian 只把它记进控制台，用户看到的是
+   * 一个空列表加零条提示，分不清「站点上没有页面」与「请求失败了」。
    */
   public async getPages(): Promise<McpSinglePageItem[]> {
-    const { items, truncated } = await fetchAllPages<McpSinglePageItem>(
-      async (page, size) =>
-        await this.client.callToolJson<PagedResult<McpSinglePageItem>>(this.tools.list, { page, size }),
-      { pageSize: LIST_PAGE_SIZE },
-    );
+    let result: FetchAllPagesResult<McpSinglePageItem>;
 
-    if (truncated) {
+    try {
+      result = await fetchAllPages<McpSinglePageItem>(
+        async (page, size) =>
+          await this.client.callToolJson<PagedResult<McpSinglePageItem>>(this.tools.list, { page, size }),
+        { pageSize: LIST_PAGE_SIZE },
+      );
+    } catch (error) {
+      // 文案统一由 `renderErrorMessage` 出（与服务层其它读路径共用一份实现）：命中 McpError 就是
+      // **可操作的处置指引**（核对密钥 / 为该密钥勾工具授权 / 检查端点与插件），并附上服务端原文。
+      // 这条路径最怕退化成「反正都是连接失败」—— 那样用户只能瞎猜。
+      new Notice(renderErrorMessage(error));
+      return [];
+    }
+
+    if (result.truncated) {
       // 触顶（`fetchAllPages` 的 maxPages，默认 20）时**必须提示**，不能静默截断。
       // `size` 与分类 / 标签两处同源，都是「页大小 × maxPages」。
       new Notice(
@@ -88,7 +104,7 @@ class PageService extends HaloServiceBase {
       );
     }
 
-    return items;
+    return result.items;
   }
 
   public async setPagePublish(name: string, publish: boolean): Promise<void> {

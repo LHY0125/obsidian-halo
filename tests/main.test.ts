@@ -43,6 +43,10 @@ type Internals = {
   resolveSiteFor(file: unknown): unknown;
   uploadImagesForPublish(service: unknown, file: unknown): Promise<{ success: boolean }>;
   runBatchCommand(action: "draft" | "publish" | "unpublish"): Promise<void>;
+  pushPageCommand(): Promise<void>;
+  pullPageCommand(): Promise<void>;
+  managePagesCommand(): Promise<void>;
+  pickSiteForPull(noSitesKey: string): Promise<{ url: string } | undefined>;
 };
 
 /**
@@ -223,4 +227,77 @@ test("批量命令：确认之前不发布、也不上传图片（预览在任�
     publish.mockRestore();
     upload.mockRestore();
   }
+});
+
+/**
+ * 独立页面三条命令（`push-page` / `pull-page` / `manage-pages`）的编排层。
+ *
+ * 这里断言的是**接线**（命令调了哪个入口、在哪一步返回），不是服务行为 ——
+ * 推送与拉取本身由 `tests/service/page-service.test.ts` 覆盖。
+ */
+test("push-page 命令在没有活动文件时静默返回，不弹任何提示", async () => {
+  // 「静默」是刻意的：打开一个空库就点命令，不该挨一句「没有活动文件」的报错。
+  // 与 `publishCommand` 同款（它也在这一步直接 return）。
+  //
+  // ⚠️ 断言取**增量**而不是 `expect(capturedNotices()).toHaveLength(0)`：那个数组由
+  // `tests/setup.ts` 的模块级 mock 持有，**本文件内所有用例共享**，前面的批量用例已经推进去
+  // 4 条。写成绝对值的话，这条用例的成败取决于它在文件里的位置 —— 一条会随无关改动变红/变绿的
+  // 断言。本文件其余用例用的都是同一个增量写法。
+  const { plugin } = makePlugin(createSettings({ skipPreviewOnPublish: true }));
+  (plugin.app as { workspace: { activeEditor: unknown } }).workspace.activeEditor = null;
+  const before = capturedNotices().length;
+
+  await plugin.pushPageCommand();
+
+  expect(capturedNotices().slice(before)).toEqual([]);
+});
+
+test("pickSiteForPull：单站点时直取该站点，不经过选择弹窗", async () => {
+  // 「没走弹窗」的判据是**它能返回**：站点选择弹窗的 Promise 既不 resolve 也不 reject
+  //（`site-selection-modal.ts` 的 `onClose` 没有 resolve），一旦走进去这里会永久挂起，
+  // 而不是断言失败。所以不需要去 spy 那个弹窗。
+  const { plugin } = makePlugin();
+
+  const site = await plugin.pickSiteForPull("command.pull_page.error_no_sites");
+
+  expect(site?.url).toBe(TEST_SITE.url);
+});
+
+test("pickSiteForPull：零站点时弹的是**调用方传进来的**那句，不是写死的", async () => {
+  // 这里刻意传一个**文案不同**的既有键（`mcp_self_check` 那句以句号结尾）。
+  // 传 `pull_page.error_no_sites` 的话，一个把键写死在 helper 里的实现会给出**同样的字符串**，
+  // 断言就变成零判别力 —— 本仓 `error-message.test.ts` 用同一种手法区分「具体原因 vs 泛化兜底」。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const before = capturedNotices().length;
+
+  const site = await plugin.pickSiteForPull("command.mcp_self_check.error_no_sites");
+
+  expect(site).toBeUndefined();
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.mcp_self_check.error_no_sites")]);
+});
+
+test("pull-page 命令零站点时提示「先配站点」，且不停在弹窗上", async () => {
+  // 拉取类命令手上没有本地文件，走不了 `resolveSite`（那个要 `file.path`），所以这条守卫
+  // 是它们**唯一**的提前出口。少掉它，用户拿到的是一条永远不 resolve 的弹窗 —— Obsidian 里
+  // 表现为「点了没反应」。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const before = capturedNotices().length;
+
+  await plugin.pullPageCommand();
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.pull_page.error_no_sites")]);
+});
+
+test("manage-pages 命令**尚未实现**：单站点时弹一条占位提示（Task 12 换成真弹窗）", async () => {
+  // 这是一处**刻意的中间态**：`PageManagerModal` 属于 Task 12 的回收站弹窗家族。
+  // 这条用例把中间态本身钉住，好让 Task 12 「忘了接上」时有一条会红的测试，
+  // 而不是让占位一直悄悄留着。
+  //
+  // 单站点是刻意的：多站点会停在站点选择弹窗上（永不 resolve），断言等不到。
+  const { plugin } = makePlugin();
+  const before = capturedNotices().length;
+
+  await plugin.managePagesCommand();
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.manage_pages.name")]);
 });

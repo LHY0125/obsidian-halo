@@ -22,6 +22,17 @@
       "name": "Pull posts from Halo",
       "error_no_sites": "Please configure sites first"
     },
+    "push_page": {
+      "name": "Halo: Push as page"
+    },
+    "pull_page": {
+      "name": "Halo: Pull page",
+      "error_no_sites": "Please configure sites first"
+    },
+    "manage_pages": {
+      "name": "Halo: Manage pages",
+      "error_no_sites": "Please configure sites first"
+    },
     "upload_images": {
       "name": "Upload images to Halo",
       "error_no_sites": "Please configure sites first",
@@ -87,6 +98,10 @@
     "title": "Pull posts from Halo",
     "button_pull": "Pull",
     "notice_truncated": "This site has more posts than fit on one page ({{size}}), so the list below is incomplete — some posts are not shown."
+  },
+  "page_selection_modal": {
+    "title": "Pull pages from Halo",
+    "button_pull": "Pull"
   },
   "site_editing_modal": {
     "title": "Halo site",
@@ -181,6 +196,7 @@
     "error_site_not_match": "Site URL does not match",
     "error_publish_failed": "Publishing failed, please retry",
     "notice_publish_success": "Published successfully",
+    "notice_push_page_success": "Page pushed successfully",
     "error_not_published": "This document is not published to Halo yet",
     "error_post_not_found": "Post does not exist",
     "error_upload_images_failed_publish_aborted": "{{failed}} image(s) failed to upload. Publishing was aborted.",
@@ -193,7 +209,8 @@
     "error_unknown_rule_site": "The routing rule \"{{pattern}}\" points to a site ({{url}}) that is not in the site list. Fix the rule in Settings → Halo.",
     "notice_list_truncated": "The {{what}} list is incomplete — only the first {{size}} were loaded.",
     "what_categories": "category",
-    "what_tags": "tag"
+    "what_tags": "tag",
+    "what_pages": "page"
   },
   "common": {
     "error_connection_failed": "Connection failed",

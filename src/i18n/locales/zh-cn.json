@@ -22,6 +22,17 @@
       "name": "从 Halo 拉取文档",
       "error_no_sites": "请先配置站点"
     },
+    "push_page": {
+      "name": "Halo: 推为独立页面"
+    },
+    "pull_page": {
+      "name": "Halo: 拉取独立页面",
+      "error_no_sites": "请先配置站点"
+    },
+    "manage_pages": {
+      "name": "Halo: 管理独立页面",
+      "error_no_sites": "请先配置站点"
+    },
     "upload_images": {
       "name": "上传图片到 Halo",
       "error_no_sites": "请先配置站点",
@@ -87,6 +98,10 @@
     "title": "从 Halo 拉取文章",
     "button_pull": "拉取",
     "notice_truncated": "站点文章数超过一页上限（{{size}} 篇），下面的列表并不完整 —— 还有文章没有列出来。"
+  },
+  "page_selection_modal": {
+    "title": "从 Halo 拉取独立页面",
+    "button_pull": "拉取"
   },
   "site_editing_modal": {
     "title": "Halo 站点",
@@ -181,6 +196,7 @@
     "error_site_not_match": "站点地址不匹配",
     "error_publish_failed": "发布失败，请重试",
     "notice_publish_success": "发布成功",
+    "notice_push_page_success": "独立页面推送成功",
     "error_not_published": "此文档还未发布到 Halo",
     "error_post_not_found": "文章不存在",
     "error_upload_images_failed_publish_aborted": "有 {{failed}} 张图片上传失败，已取消发布",
@@ -193,7 +209,8 @@
     "error_unknown_rule_site": "路由规则「{{pattern}}」指向的站点（{{url}}）不在站点列表里。请到「设置 → Halo」修正这条规则。",
     "notice_list_truncated": "{{what}}列表不完整 —— 只加载了前 {{size}} 条。",
     "what_categories": "分类",
-    "what_tags": "标签"
+    "what_tags": "标签",
+    "what_pages": "独立页面"
   },
   "common": {
     "error_connection_failed": "连接失败",

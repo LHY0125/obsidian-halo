@@ -22,6 +22,17 @@
       "name": "從 Halo 拉取文件",
       "error_no_sites": "請先配置網站"
     },
+    "push_page": {
+      "name": "Halo: 推為獨立頁面"
+    },
+    "pull_page": {
+      "name": "Halo: 拉取獨立頁面",
+      "error_no_sites": "請先配置網站"
+    },
+    "manage_pages": {
+      "name": "Halo: 管理獨立頁面",
+      "error_no_sites": "請先配置網站"
+    },
     "upload_images": {
       "name": "上傳圖片到 Halo",
       "error_no_sites": "請先配置網站",
@@ -87,6 +98,10 @@
     "title": "從 Halo 拉取文章",
     "button_pull": "拉取",
     "notice_truncated": "站點文章數超過一頁上限（{{size}} 篇），下面的清單並不完整 —— 還有文章沒有列出來。"
+  },
+  "page_selection_modal": {
+    "title": "從 Halo 拉取獨立頁面",
+    "button_pull": "拉取"
   },
   "site_editing_modal": {
     "title": "Halo 網站",
@@ -181,6 +196,7 @@
     "error_site_not_match": "網站地址不匹配",
     "error_publish_failed": "發佈失敗,請重試",
     "notice_publish_success": "發佈成功",
+    "notice_push_page_success": "獨立頁面推送成功",
     "error_not_published": "此文件還未發佈到 Halo",
     "error_post_not_found": "文章不存在",
     "error_upload_images_failed_publish_aborted": "有 {{failed}} 張圖片上傳失敗，已取消發布",
@@ -193,7 +209,8 @@
     "error_unknown_rule_site": "路由規則「{{pattern}}」指向的站點（{{url}}）不在站點清單裡。請到「設定 → Halo」修正這條規則。",
     "notice_list_truncated": "{{what}}列表不完整 —— 只載入了前 {{size}} 條。",
     "what_categories": "分類",
-    "what_tags": "標籤"
+    "what_tags": "標籤",
+    "what_pages": "獨立頁面"
   },
   "common": {
     "error_connection_failed": "連接失敗",

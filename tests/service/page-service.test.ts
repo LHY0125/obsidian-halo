@@ -536,6 +536,28 @@ describe("PageService.getPages", () => {
     expect(calls).toHaveLength(20);
     expect(notices.length).toBeGreaterThan(seen);
   });
+
+  test("取数失败时自己弹提示并返回空数组（**不抛**）—— 与 fetchSelectablePosts 同契约", async () => {
+    // 这条契约必须钉住，因为它不是「顺手加的 try/catch」而是**调用方的前提**：
+    // 选择器里那句 `.then()` 后面**没有** catch（`fetchSelectablePosts` 的既有用法就是这样），
+    // 少了它，一次网络失败会变成**未捕获异常** —— Obsidian 只把它记进控制台，
+    // 用户看到的是一个空列表加零条提示，无从判断「站点上没有页面」与「请求失败了」。
+    const { app } = createMockApp("", createFile("a.md"), []);
+    const { client } = fakePageService({
+      halo_list_single_pages: () => {
+        throw new McpError("unauthorized", { status: 401 });
+      },
+    });
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    const pages = await new PageService(app, createSettings(), site, client).getPages();
+
+    expect(pages).toEqual([]);
+    // 提示必须是**具体原因**（`renderErrorMessage` 的处置指引），不是泛化兜底 ——
+    // 用户拿到的线索全在这一句里
+    expect(notices.slice(seen)).toContain(i18next.t("transport.error.unauthorized", { status: 401 }));
+  });
 });
 
 describe("PageService.pullPage", () => {
