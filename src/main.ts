@@ -1,5 +1,6 @@
 import i18next from "i18next";
 import { Notice, Plugin, type TFile, moment } from "obsidian";
+import { AttachmentManagerModal } from "./attachment-modal";
 import { confirmBatchPlan, showBatchSummary } from "./batch-confirm-modal";
 import { type BatchAction, collectBatchCandidates, planBatch, runBatch } from "./batch-publish";
 import { initializeI18n } from "./i18n";
@@ -170,6 +171,16 @@ export default class HaloPlugin extends Plugin {
       name: i18next.t("command.search_content.name"),
       callback: async () => {
         await this.searchContentCommand();
+      },
+    });
+
+    // 附件管理和查重一样作用于**远端**（站点上已有的那些附件），
+    // 所以它排在「以当前笔记为对象」的那一批之外。
+    this.addCommand({
+      id: "manage-attachments",
+      name: i18next.t("command.manage_attachments.name"),
+      callback: async () => {
+        await this.manageAttachmentsCommand();
       },
     });
 
@@ -526,6 +537,27 @@ export default class HaloPlugin extends Plugin {
     const results = await searchContent(client, query);
 
     new SearchResultsModal(this, site, query, results).open();
+  }
+
+  /**
+   * `manage-attachments` 的入口：列出站点上的全部附件，逐行给出「复制链接」与「删除」。
+   *
+   * 与拉取/查重类命令共用 `pickSiteForPull`：它同样作用于**远端**、手上没有本地文件，
+   * 走不了 `resolveSiteFor`（那个要 `file.path`）。
+   *
+   * 这里**不预先取数**（不像查重那样先 `searchContent()` 再把结果交给弹窗）：
+   * 附件实测有几百条（2026-10-05：264 条 / 88 页，每页 3 条时），取数要翻完所有页 ——
+   * 那期间弹窗一直不出现，用户会以为命令没反应。所以先把弹窗开起来、由它自己显示取数结果，
+   * 取数失败也在弹窗里以 Notice 呈现（见 `AttachmentManagerModal.render()`）。
+   */
+  private async manageAttachmentsCommand(): Promise<void> {
+    const site = await this.pickSiteForPull("command.manage_attachments.error_no_sites");
+
+    if (!site) {
+      return;
+    }
+
+    new AttachmentManagerModal(this, site).open();
   }
 
   /**

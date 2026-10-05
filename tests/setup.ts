@@ -134,6 +134,16 @@ rs.mock("obsidian", () => {
       return this;
     }
 
+    /**
+     * 同理，真实 `ButtonComponent` 的 `setWarning()` 在这一版桩里也缺。
+     *
+     * 附件弹窗的「删除」按钮用它把自己标成危险操作（Obsidian 渲染成红色）——
+     * 那是**附件删除不可逆**这条性质在 UI 上唯一的表达，不能为了省掉这一行而拿掉。
+     */
+    setWarning(): this {
+      return this;
+    }
+
     onClick(): this {
       return this;
     }

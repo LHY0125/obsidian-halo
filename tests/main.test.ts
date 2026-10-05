@@ -46,6 +46,7 @@ type Internals = {
   pushPageCommand(): Promise<void>;
   pullPageCommand(): Promise<void>;
   managePagesCommand(): Promise<void>;
+  manageAttachmentsCommand(): Promise<void>;
   searchContentCommand(): Promise<void>;
   pickSiteForPull(noSitesKey: string): Promise<{ url: string } | undefined>;
 };
@@ -340,5 +341,48 @@ test("search-content 命令：站点定了、关键词还没输入时，一个�
     expect(requestUrlMock().mock.calls).toHaveLength(0);
   } finally {
     pick.mockRestore();
+  }
+});
+
+/**
+ * 附件管理命令（`manage-attachments`）的编排层。
+ *
+ * 与查重命令同款：这条命令在脚手架里**只有「零站点」那一支能走完** —— 再往后就是
+ * `AttachmentManagerModal`，而 `tests/setup.ts` 的 `Modal.open()` 不调 `onOpen()`，
+ * 弹窗里的取数与逐行渲染一行都跑不到。所以「渲染成什么样」的判据全部落在
+ * `buildAttachmentRows()` 上，由 `tests/attachment-modal.test.ts` 覆盖。
+ */
+test("manage-attachments 命令零站点时提示「先配站点」，且不停在弹窗上", async () => {
+  // 与 `pull-page` / `search-content` 那两条成对：附件管理同样作用于**远端**，
+  // 手上没有本地文件，走不了 `resolveSite`，所以这道守卫是它唯一的提前出口。
+  // 少掉它，用户拿到的是一条永远不 resolve 的弹窗 —— 在 Obsidian 里表现为「点了没反应」。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const before = capturedNotices().length;
+
+  await plugin.manageAttachmentsCommand();
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.manage_attachments.error_no_sites")]);
+});
+
+test("manage-attachments 命令：单站点时直接进附件弹窗，不弹任何提示", async () => {
+  // 「进的是**附件**弹窗而不是别的」这件事必须单独钉住：站点选择弹窗在测试脚手架里
+  // 会让流程永久挂起（`onClose` 不 resolve），所以「能返回」只证明没走那条分支，
+  // 证明不了它开的是哪一个弹窗。单站点时 `pickSiteForPull` 直取该站点、不弹选择框，
+  // 于是这一步唯一会 `open()` 的就是 `AttachmentManagerModal`。
+  const { plugin } = makePlugin();
+  const pick = rs.spyOn(plugin, "pickSiteForPull");
+  // `AttachmentManagerModal extends Modal` 且没有覆写 `open()`，所以它走的正是原型上这一个。
+  const open = rs.spyOn(obsidianRuntime.Modal.prototype, "open");
+  const before = capturedNotices().length;
+
+  try {
+    await plugin.manageAttachmentsCommand();
+
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(capturedNotices().slice(before)).toEqual([]);
+  } finally {
+    pick.mockRestore();
+    open.mockRestore();
   }
 });

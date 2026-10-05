@@ -37,6 +37,10 @@
       "name": "Halo: 查重（搜尋線上內容）",
       "error_no_sites": "請先配置網站"
     },
+    "manage_attachments": {
+      "name": "Halo: 管理附件",
+      "error_no_sites": "請先配置網站"
+    },
     "upload_images": {
       "name": "上傳圖片到 Halo",
       "error_no_sites": "請先配置網站",
@@ -117,6 +121,19 @@
     "prompt_title": "搜尋線上內容",
     "prompt_label": "關鍵詞",
     "button_search": "搜尋"
+  },
+  "attachment_modal": {
+    "title": "Halo 附件",
+    "empty": "站點上還沒有附件。",
+    "unknown_type": "未知類型",
+    "notice_truncated": "站點上的附件數量超過了一頁能載入的量，下面的列表並不完整。",
+    "button_copy_link": "複製連結",
+    "notice_link_copied": "連結已複製",
+    "button_delete": "刪除",
+    "notice_deleted": "已刪除「{{name}}」",
+    "confirm_title": "刪除附件",
+    "confirm_body": "要刪除「{{name}}」（{{size}}）嗎？",
+    "confirm_irreversible": "此操作不可撤銷 —— 附件沒有回收站。引用了它的筆記會顯示為圖片損壞。"
   },
   "site_editing_modal": {
     "title": "Halo 網站",

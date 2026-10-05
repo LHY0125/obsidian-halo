@@ -37,6 +37,10 @@
       "name": "Halo: Search site content",
       "error_no_sites": "Please configure sites first"
     },
+    "manage_attachments": {
+      "name": "Halo: Manage attachments",
+      "error_no_sites": "Please configure sites first"
+    },
     "upload_images": {
       "name": "Upload images to Halo",
       "error_no_sites": "Please configure sites first",
@@ -117,6 +121,19 @@
     "prompt_title": "Search site content",
     "prompt_label": "Keyword",
     "button_search": "Search"
+  },
+  "attachment_modal": {
+    "title": "Halo attachments",
+    "empty": "This site has no attachments yet.",
+    "unknown_type": "Unknown type",
+    "notice_truncated": "This site has more attachments than could be loaded, so the list below is incomplete.",
+    "button_copy_link": "Copy link",
+    "notice_link_copied": "Link copied",
+    "button_delete": "Delete",
+    "notice_deleted": "\"{{name}}\" deleted",
+    "confirm_title": "Delete attachment",
+    "confirm_body": "Delete \"{{name}}\" ({{size}})?",
+    "confirm_irreversible": "This cannot be undone — attachments have no recycle bin. Notes that link to it will show a broken image."
   },
   "site_editing_modal": {
     "title": "Halo site",

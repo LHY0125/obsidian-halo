@@ -37,6 +37,10 @@
       "name": "Halo: 查重（搜索线上内容）",
       "error_no_sites": "请先配置站点"
     },
+    "manage_attachments": {
+      "name": "Halo: 管理附件",
+      "error_no_sites": "请先配置站点"
+    },
     "upload_images": {
       "name": "上传图片到 Halo",
       "error_no_sites": "请先配置站点",
@@ -117,6 +121,19 @@
     "prompt_title": "搜索线上内容",
     "prompt_label": "关键词",
     "button_search": "搜索"
+  },
+  "attachment_modal": {
+    "title": "Halo 附件",
+    "empty": "站点上还没有附件。",
+    "unknown_type": "未知类型",
+    "notice_truncated": "站点上的附件数量超过了一页能载入的量，下面的列表并不完整。",
+    "button_copy_link": "复制链接",
+    "notice_link_copied": "链接已复制",
+    "button_delete": "删除",
+    "notice_deleted": "已删除「{{name}}」",
+    "confirm_title": "删除附件",
+    "confirm_body": "要删除「{{name}}」（{{size}}）吗？",
+    "confirm_irreversible": "此操作不可撤销 —— 附件没有回收站。引用了它的笔记会显示为图片损坏。"
   },
   "site_editing_modal": {
     "title": "Halo 站点",
