@@ -121,11 +121,17 @@ describe("三语 locale 的键集完全相同", () => {
   /**
    * 剥掉 JSON 模块的互操作外壳，取到 locale 的**真实顶层对象**。
    *
-   * 实测（`import * as x from "./x.json"` 在 rstest 下）：命名空间是
-   * `{ ...顶层键, default: <整个 JSON> }` —— `Object.keys(en)` 有 210 项（209 个真实顶层键
-   * + 一个 `default`）。不剥掉它，摊平后每条路径都会被数两遍，**实测得到 418 = 2 × 209**，
-   * 于是失败信息里的计数与真实文件对不上 —— 一个「看起来在工作」的假数字。
+   * 实测（`import * as x from "./x.json"` 在 rstest 下）：命名空间形如
+   * `{ ...顶层键, default: <整个 JSON> }` —— 每个顶层键各是一条具名导出，外加一个 `default`。
+   * 不剥掉 `default`，摊平后每条键路径都会被数两遍（一次经具名导出、一次经 `default` 里的
+   * 整份 JSON），于是失败信息里的计数是真实值的**两倍** —— 一个「看起来在工作」的假数字。
    * 另一种打包器给的形状是只有 `default` 一项（`{ default: <整个 JSON> }`），一并处理。
+   *
+   * ⚠️ **这里刻意不写任何具体数字。** 此前写的是「`Object.keys(en)` 有 210 项（209 个真实
+   * 顶层键 + 一个 `default`）……实测得到 418 = 2 × 209」—— 那两处都错：前者把**叶子键数**
+   * 当成了顶层键数（顶层键只有二十来个，实测 `Object.keys(en).length` 是 21 = 20 + 1），
+   * 后者的 418 其实是叶子键数的两倍。而数字本来就不是这条注释要传达的东西 ——
+   * 「有一个 `default` 要剥」才是；写进来的数字只会随着下一次加键再错一遍。
    */
   function localeObject(moduleNamespace: unknown): Record<string, unknown> {
     const ns = (moduleNamespace ?? {}) as Record<string, unknown>;

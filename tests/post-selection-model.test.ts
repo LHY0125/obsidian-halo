@@ -2,6 +2,9 @@ import { beforeAll, describe, expect, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
 import { initializeI18n } from "../src/i18n";
+// `MAX_PAGES_DEFAULT` 从**定义处**取（`pagination.ts`），不从 `post-selection-model.ts` 转一道 ——
+// 后者只重导出了 `LIST_PAGE_SIZE`（那是为了不断既有 import），并没有这一个。
+import { MAX_PAGES_DEFAULT } from "../src/pagination";
 import { LIST_PAGE_SIZE, fetchSelectablePosts, toSelectablePosts } from "../src/post-selection-model";
 import type { McpPostItem } from "../src/service/post-mapping";
 import { McpError } from "../src/transport/errors";
@@ -127,11 +130,14 @@ describe("fetchSelectablePosts", () => {
 
     const posts = await fetchSelectablePosts(client);
 
-    // 20 是 `fetchAllPages` 的默认 maxPages：兜底存在，循环才保证终止
+    // 默认上限是 `MAX_PAGES_DEFAULT`。这里**刻意写字面量 20** 当独立的绊线：若改用常量，
+    // 有人把默认值改掉时这条断言会跟着一起变，就再也拦不住「上限被悄悄改掉」——
+    // 而下面那条 `{{size}}` 断言必须用常量，因为它复现的是**生产里同一个表达式**
+    //（那里也是 `LIST_PAGE_SIZE × MAX_PAGES_DEFAULT`），写成字面量才是抄了一份会分叉的副本。
     expect(calls).toHaveLength(20);
     expect(posts).toHaveLength(20);
     expect(notices.slice(seen)).toEqual([
-      i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE * 20 }),
+      i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT }),
     ]);
   });
 

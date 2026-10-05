@@ -4,7 +4,13 @@ import { Notice, type TFile } from "obsidian";
 import { randomUUID } from "src/utils/id";
 import { CONTENT_TOOLSETS } from "../content-kind";
 import { renderErrorMessage } from "../i18n/error-message";
-import { type FetchAllPagesResult, LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../pagination";
+import {
+  type FetchAllPagesResult,
+  LIST_PAGE_SIZE,
+  MAX_PAGES_DEFAULT,
+  type PagedResult,
+  fetchAllPages,
+} from "../pagination";
 import { isSameSiteUrl } from "../settings";
 import { McpError } from "../transport/errors";
 import { HaloServiceBase, type PublishResult } from "./index";
@@ -19,6 +25,18 @@ import {
   toSinglePage,
 } from "./page-mapping";
 import { toContent } from "./post-mapping";
+
+/**
+ * 读一个页面失败、又拿不到具体原因（**非 `McpError`**，例如网络层直接抛）时的兜底文案键。
+ *
+ * **与文章的 `service.error_post_not_found` 刻意分开**：命令名是「拉取独立页面」，
+ * 而这两句话会把用户引向两个完全不同的自查方向 —— 网络抖动时显示「文章不存在」，
+ * 用户会去站点后台的**文章列表**逐条核对（认为那篇被删了），而实际只需重试。
+ *
+ * 各自持有一个常量、而不是共用一个 `readFailureMessage(error, key)`：两条路径的兜底文案
+ * 本来就是两种内容类型各自的话，共用一个入参只会让「这个 key 属于谁」变成读调用点才知道的事。
+ */
+const PAGE_NOT_FOUND_KEY = "service.error_page_not_found";
 
 /**
  * 独立页面的编排：推送 / 拉取 / 发布状态 / 回收 / 恢复。
@@ -71,10 +89,26 @@ class PageService extends HaloServiceBase {
    * 而用户会以为它不存在。
    *
    * ⚠️ **本函数的契约是「不抛」**：失败时自己弹提示并返回**空数组**，与
-   * `post-selection-model.ts` 的 `fetchSelectablePosts` 逐字同款。两个取数函数的契约必须一致，
-   * 否则每个调用方都得先看一眼「这个函数抛不抛」。而调用方（拉取选择器）的 `.then()` 后面
-   * **没有** catch —— 抛出去就是一条未捕获异常：Obsidian 只把它记进控制台，用户看到的是
-   * 一个空列表加零条提示，分不清「站点上没有页面」与「请求失败了」。
+   * `post-selection-model.ts` 的 `fetchSelectablePosts` 逐字同款。而调用方（拉取选择器）
+   * 的 `.then()` 后面**没有** catch —— 抛出去就是一条未捕获异常：Obsidian 只把它记进控制台，
+   * 用户看到的是一个空列表加零条提示，分不清「站点上没有页面」与「请求失败了」。
+   *
+   * ⚠️ **但「六个取数函数契约一致」这句话早已不成立，别照着它写新代码。** 写这条注释时
+   * 只有两个取数函数，现在有六个、分成两派：
+   *
+   * - **不抛**（自己弹提示 + 返回空）：`fetchSelectablePosts` / 本函数 / `searchContent`。
+   *   它们服务于**选择器或列表渲染** —— 调用方拿不到结果时只能渲染一个空列表，
+   *   没有别的事可做，所以「弹提示 + 给空数组」是完整的处置。
+   * - **抛**（各自由自己的弹窗兜 try/catch）：`fetchAttachments` / `fetchRecycled` /
+   *   `fetchActivePages`。它们服务于**弹窗** —— 弹窗除了列表还有别的状态要维护
+   *   （`truncated` 提示、重取），异常交给弹窗那一个 catch 处理比在取数层各自弹一遍更整齐，
+   *   而弹窗**确实**裹了 catch（`attachment-modal.ts` / `recycle-modal.ts`）。
+   *
+   * 两派并存是**刻意**的，不合并：合并成「都抛」要给上面前三个各配一个 catch，
+   * 合并成「都不抛」会让下三个的失败在弹窗里退化成空列表，`truncated` 提示的语义也跟着变。
+   * 代价是**每个调用方必须先看一眼这个函数抛不抛** —— 照着上面那句话写
+   * `await fetchAttachments(client)` 而不裹 try/catch，异常会变成未捕获 rejection：
+   * Obsidian 只记进控制台、界面毫无反应（用户点了「管理附件」，什么都没发生）。
    */
   public async getPages(): Promise<McpSinglePageItem[]> {
     let result: FetchAllPagesResult<McpSinglePageItem>;
@@ -94,12 +128,14 @@ class PageService extends HaloServiceBase {
     }
 
     if (result.truncated) {
-      // 触顶（`fetchAllPages` 的 maxPages，默认 20）时**必须提示**，不能静默截断。
-      // `size` 与分类 / 标签两处同源，都是「页大小 × maxPages」。
+      // 触顶（`fetchAllPages` 的 maxPages，默认 `MAX_PAGES_DEFAULT`）时**必须提示**，
+      // 不能静默截断。`size` 与分类 / 标签两处同源，都是「页大小 × maxPages」——
+      // 两个因子都取自 `pagination.ts` 的定义处，写死任何一个都会让这句**渲染给用户看的**
+      // 提示与实际取到的条数对不上。
       new Notice(
         i18next.t("service.notice_list_truncated", {
           what: i18next.t("service.what_pages"),
-          size: LIST_PAGE_SIZE * 20,
+          size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT,
         }),
       );
     }
@@ -272,6 +308,19 @@ class PageService extends HaloServiceBase {
     }
   }
 
+  /**
+   * 读取失败的提示文案。
+   *
+   * 与 `HaloService.readFailureMessage()` **同构，但兜底键不同** —— 两条路各有一份是
+   * **刻意**的：它们是两种内容类型各自的文案（文章说「文章不存在」、页面说「页面不存在」），
+   * 而共用一个方法就得把 key 当入参传进来，那还不如各自持有一个常量（见 `PAGE_NOT_FOUND_KEY`）。
+   * 命中 `McpError` 时两边完全一样：用它的 key 还原出**具体**原因（密钥过期 / 端点配错 /
+   * 网络不通各说各的），兜底键只在**非 `McpError`**（网络层直接抛）时才生效。
+   */
+  private readFailureMessage(error: unknown): string {
+    return renderErrorMessage(error, PAGE_NOT_FOUND_KEY);
+  }
+
   /** 拉一个页面到本地，建一篇新笔记。 */
   public async pullPage(name: string): Promise<void> {
     let result: { page: SinglePage; content: Content };
@@ -279,8 +328,9 @@ class PageService extends HaloServiceBase {
     try {
       result = await this.getPage(name);
     } catch (error) {
-      // 与「拉取文章」共用同一份错误还原（`renderErrorMessage`），失败文案只有一处定义
-      new Notice(renderErrorMessage(error, "service.error_post_not_found"));
+      // 与「拉取文章」共用同一份错误还原（`renderErrorMessage`），只有兜底键不同 —— 这里是
+      // **页面**那一份（`service.error_page_not_found`，理由见那个常量）。
+      new Notice(this.readFailureMessage(error));
       return;
     }
 

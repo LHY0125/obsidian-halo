@@ -579,16 +579,27 @@ describe("PageService.pullPage", () => {
     expect((result.halo as Record<string, unknown>).publish).toBe(true);
   });
 
-  test("读失败时弹提示且**一篇笔记都不建**", async () => {
+  test("读失败时弹提示且**一篇笔记都不建**，文案是**页面**那一份", async () => {
     const { app, vault } = createMockApp("", createFile("a.md"), []);
     const { client } = fakePageService({
       halo_get_single_page: () => {
+        // **非 `McpError`** —— 兜底键只在这种错误上生效（`describeError` 命中 McpError 时
+        // 用的是它自己的 `transport.error.*` key）。所以这条用例钉的正是那个兜底键。
         throw new Error("network down");
       },
     });
+    const before = capturedNotices().length;
 
     await new PageService(app, createSettings(), site, client).pullPage("page-1");
 
     expect(vault.create).not.toHaveBeenCalled();
+
+    // ⚠️ **文案必须是页面那一份。** 这条命令叫「拉取独立页面」，而这里此前写死了文章的
+    // `service.error_post_not_found`：网络抖动时用户看到「文章不存在」，会去站点后台的
+    // **文章列表**逐条核对那篇是不是被删了 —— 判断完全走偏，而实际只需重试。
+    // 只断言「弹了提示」挡不住这件事（两条文案都是非空字符串），必须断言**是哪一句**。
+    const notices = capturedNotices().slice(before);
+    expect(notices).toEqual([i18next.t("service.error_page_not_found")]);
+    expect(notices).not.toContain(i18next.t("service.error_post_not_found"));
   });
 });

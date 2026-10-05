@@ -55,8 +55,9 @@ describe("buildSearchRows", () => {
   const SITE = "https://blog.example.com";
 
   test("摘要截断到 200 字符", () => {
-    // 实测：站点返回的 excerpt 都在 200 字符以上（最长的一条 320），
-    // 逐条铺满会把「一共几条」挤出屏幕。
+    // 实测口径记在 `src/search-modal.ts` 的 `EXCERPT_MAX_LENGTH` 文档里（站点返回的 excerpt
+    // 无一短于该长度）。**这里刻意不复述最长/最短那两个数字** —— 抄第二份就是这么错的：
+    // 源码那边改成了新值之后，这份注释还留着旧值。逐条铺满会把「一共几条」挤出屏幕。
     const long = "甲".repeat(250);
     const [row] = buildSearchRows(SITE, [result({ excerpt: long })]);
 

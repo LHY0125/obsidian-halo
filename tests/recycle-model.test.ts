@@ -34,7 +34,11 @@ describe("toRecycledItems", () => {
     expect(toRecycledItems([recycledPost({ title: undefined })], "post")[0].title).toBe("019f...");
   });
 
-  test("kind 决定 type 字段，弹窗据此显示「文章 / 页面」", () => {
+  test("kind 决定 type 字段（⚠️ 该字段目前无生产消费者，只在这里被断言）", () => {
+    // `RecycledItem.type` 是「这一行是什么」在数据里的唯一落点，但 `recycle-modal.ts` 的两个
+    // 弹窗**都不读它**（各自只知道自己的 kind，行里只有标题与 permalink）—— 详 `recycle-model.ts`
+    // 的字段注释。所以这条断言钉的是**映射本身**，不是任何一处 UI；用例名如实这么写，
+    // 免得下一个读的人以为删掉 `type` 会改到弹窗。
     expect(toRecycledItems([recycledPost()], "post")[0].type).toBe("POST");
     expect(toRecycledItems([recycledPost()], "page")[0].type).toBe("SINGLE_PAGE");
   });

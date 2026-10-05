@@ -188,10 +188,14 @@ describe("RecycleBinModal.render", () => {
     }
   });
 
-  test("列表触顶时提示「不完整」", async () => {
-    // `fetchAllPages()` 在**空页**上停下并把该页的 `hasNext` 报成 `truncated`（终止保证 ②，
-    // 见 `pagination.ts`）—— 所以「第一页有内容 + 第二页空 + 两页都说还有下一页」就是触顶
-    // 在测试里最省的造法。静默截断是本阶段反复处理的那类问题。
+  test("列表不完整时提示「不完整」—— 本用例用**空页**造 truncated", async () => {
+    // `truncated` 有两个来源：① 某一页返回空 `items`（终止保证 ②，见 `pagination.ts`）；
+    // ② 翻满 `maxPages` 而 `hasNext` 一直为真。本用例走的是**前者** ——
+    // 「第一页有内容 + 第二页空 + 两页都说还有下一页」就是造 `truncated` 最省的写法。
+    //
+    // ⚠️ 正因如此，本用例对 **`maxPages` 那条分支零判别力**：把 `MAX_PAGES_DEFAULT` 改大、
+    // 或把上限整个删掉，这里照样绿（钉 `maxPages` 的是 `tests/pagination.test.ts`）。
+    // 别把它当成「上限还在」的证据。静默截断是本阶段反复处理的那类问题。
     const modal = new RecycleBinModal(makePlugin(), TEST_SITE, "post");
     const created = attachRecordingEl(modal);
     let calls = 0;
@@ -285,10 +289,14 @@ describe("PageManagerModal.render", () => {
     }
   });
 
-  test("列表触顶时同样提示「不完整」", async () => {
-    // 与回收站弹窗同一个判据：`PageService.getPages()`（拉取选择器那条路）会在触顶时提示，
-    // 这里是页面列表的另一个出口 —— 少掉它，用户看到的是一个「少了几个页面」的列表
+  test("列表不完整时同样提示「不完整」—— 同样用**空页**造 truncated", async () => {
+    // 与回收站弹窗同一个判据：`PageService.getPages()`（拉取选择器那条路）会在列表不完整时
+    // 提示，这里是页面列表的另一个出口 —— 少掉它，用户看到的是一个「少了几个页面」的列表
     // 而没有任何线索。
+    //
+    // 造法与那条一样（空页，见 `pagination.ts` 的终止保证 ②），所以同样**验不到 `maxPages`
+    // 那条分支**。这里多一层：本弹窗的取数走 `fetchActivePages()`，与 `PageService.getPages()`
+    // 是**两份实现**（一份抛、一份不抛），所以这条用例钉的是弹窗自己那一份。
     const modal = new PageManagerModal(makePlugin(), TEST_SITE);
     const created = attachRecordingEl(modal);
     let calls = 0;

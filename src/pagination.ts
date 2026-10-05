@@ -13,6 +13,19 @@
 export const LIST_PAGE_SIZE = 100;
 
 /**
+ * 默认最多翻几页。**成对的两个数字：`maxPages` 与「总上限条数 = `LIST_PAGE_SIZE × 它`」。**
+ *
+ * 导出而不是留在下面那个 `?? 20` 里，是因为这个数字会**渲染给用户看** ——
+ * 四个调用点在触顶提示里写「只加载了前 2000 条」，那个 2000 是 `LIST_PAGE_SIZE × maxPages`。
+ * 不导出的话，改默认值只会改到取数、改不到提示：有人把默认改成 50，四条提示仍写 2000
+ * 而实际取了 5000 条 —— 用户据此判断「我的第 2500 篇是不是没被列出来」会得到**相反**的结论。
+ * 更糟的是不会有任何测试变红：测试里的期望值也是同一个表达式现算的，两边一起错。
+ *
+ * 所以真值只有这一处：`fetchAllPages()` 用它、四个调用点用它、测试也用它。
+ */
+export const MAX_PAGES_DEFAULT = 20;
+
+/**
  * MCP 列表工具的统一返回外壳。
  *
  * 逐字取自实测：`halo_list_posts` / `halo_list_single_pages` / `halo_list_attachments` /
@@ -32,7 +45,8 @@ export interface FetchAllPagesOptions {
   /** 每页取多少。上限 100（schema 的 maximum），传大了会被服务端拒绝 */
   pageSize: number;
   /**
-   * 最多翻几页。**默认 20**（= 2000 条）。
+   * 最多翻几页。**默认 `MAX_PAGES_DEFAULT`（20，= 2000 条）** —— 那个常量同时是
+   * 四个调用点的触顶提示里那个数字的来源，理由见它的文档。
    *
    * 有上限不是为了省请求，是为了**保证终止**：站点侧若给出一个自相矛盾的
    * `hasNext`（永远为真），没有上限的循环会一直发请求直到 Obsidian 卡死。
@@ -64,7 +78,7 @@ export async function fetchAllPages<T>(
   fetchPage: (page: number, size: number) => Promise<PagedResult<T>>,
   options: FetchAllPagesOptions,
 ): Promise<FetchAllPagesResult<T>> {
-  const maxPages = options.maxPages ?? 20;
+  const maxPages = options.maxPages ?? MAX_PAGES_DEFAULT;
   const items: T[] = [];
 
   for (let page = 1; page <= maxPages; page++) {

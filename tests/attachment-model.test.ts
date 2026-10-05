@@ -42,9 +42,13 @@ describe("toAttachmentItems", () => {
     expect(toAttachmentItems([attachment({ version: undefined })])[0].version).toBe(0);
   });
 
-  test("isImage 按 mediaType 判断，而不是按扩展名", () => {
+  test("isImage 按 mediaType 判断，而不是按扩展名（⚠️ 该字段目前无生产消费者）", () => {
     // 按扩展名判会漏掉 `.webp` 之外的图片类型，也会把 `.svg` 之外的当图片。
     // mediaType 是服务端探测出来的，比文件名可信。
+    //
+    // `AttachmentItem.isImage` 在 `attachment-modal.ts` 里**没有任何消费者**（列表不筛类型、
+    // 也不显示类型图标），所以这三条断言是它唯一的覆盖 —— 详 `attachment-model.ts` 的字段注释。
+    // 用例名里点明这一点，是为了不让「改它就能改弹窗」这个错觉留在这份文件里。
     expect(toAttachmentItems([attachment({ mediaType: "image/png" })])[0].isImage).toBe(true);
     expect(toAttachmentItems([attachment({ mediaType: "application/pdf" })])[0].isImage).toBe(false);
     expect(toAttachmentItems([attachment({ mediaType: undefined })])[0].isImage).toBe(false);

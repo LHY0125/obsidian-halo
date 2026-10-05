@@ -140,7 +140,12 @@ export class PageManagerModal extends Modal {
   constructor(plugin: HaloPlugin, site: HaloSite) {
     super(plugin.app);
     this.client = new McpClient({ endpoint: mcpEndpointOf(site), token: site.mcpToken });
-    this.service = new PageService(plugin.app, plugin.settings, site);
+    // ⚠️ 把上面这个 client **注入**给 `PageService`，而不是让它自己再造一个：同一个站点、
+    // 同一个弹窗里开两条连接没有理由 —— 两边的 endpoint/token 推导本来完全相同
+    //（`normalizeSite` + `mcpEndpointOf`），多出来的那条只会是又一个「端点推导改了、
+    // 这里悄悄掉队」的地方。`HaloServiceBase` 的第四个参数本来就是为注入留的
+    //（服务层测试就是这么传假 client 的），所以这不需要动任何构造签名。
+    this.service = new PageService(plugin.app, plugin.settings, site, this.client);
   }
 
   onOpen(): void {

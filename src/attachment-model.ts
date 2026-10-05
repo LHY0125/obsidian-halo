@@ -30,6 +30,19 @@ export interface AttachmentItem {
   permalink: string;
   /** 删除接口的 `expectedVersion` 是**必填**的，所以它必须一路带到底 */
   version: number;
+  /**
+   * 这一项是不是图片。按 `mediaType` 判（服务端探测的，比扩展名可信）。
+   *
+   * ⚠️ **目前没有任何消费者** —— `attachment-modal.ts` 的列表不按类型过滤、也不显示类型图标，
+   * 只用 `mediaType || "未知类型"` 那段文本兜底。
+   *
+   * 保留而非删掉，是因为「这个附件是不是图片」是**列表之外**的能力（按类型筛、只列出图片、
+   * 给图片行加缩略图）唯一需要的那条判据，判据本身（`mediaType.startsWith("image/")`）
+   * 已经写在映射里、也已被测到。删掉就要在下一次真要用它时重新想一遍「按 mediaType
+   * 还是按扩展名」—— 而这个取舍的结论（mediaType 可信）正是这条注释记着的东西。
+   *
+   * 说明白「没有消费者」比让读者以为弹窗在用它重要：后者会让人不敢删、也不敢改。
+   */
   isImage: boolean;
 }
 

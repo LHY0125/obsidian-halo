@@ -3,7 +3,10 @@ import { type McpSearchItem, stripHighlight, toSearchResults } from "../src/sear
 
 describe("stripHighlight", () => {
   test("去掉服务端加的高亮标签", () => {
-    // 实测：站点返回的 title 里真的带 <B> —— 三条结果全带。
+    // 实测口径记在 `src/search-preview.ts` 的 `stripHighlight()` 文档里（2026-10-05 对站点跑
+    // `halo_search_content`，7 条结果里 title 与 excerpt 都各有多条带高亮）——
+    // **这里刻意不复述那份数字**：抄第二份必然在某次修订后与源码分叉，
+    // 而分叉的表现是这份注释自信地写着一个已经不成立的值（此前就是这么错的）。
     // 不清理的话，弹窗里会显示成「我用 <B>Halo</B> 写了一个插件」。
     expect(stripHighlight("因为喜欢开源，我用 <B>Halo</B> 写了一个插件")).toBe("因为喜欢开源，我用 Halo 写了一个插件");
   });

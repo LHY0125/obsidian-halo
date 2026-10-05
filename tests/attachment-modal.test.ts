@@ -220,10 +220,14 @@ describe("AttachmentManagerModal.render", () => {
     }
   });
 
-  test("列表触顶时提示「不完整」", async () => {
-    // `fetchAllPages()` 在**空页**上停下并把该页的 `hasNext` 报成 `truncated`
-    //（终止保证 ②，见 `pagination.ts`）—— 所以第一页有内容 + 第二页空 + 两页都声明
-    // 还有下一页，就是「触顶」在测试里最省的造法。静默截断正是本阶段反复处理的那类问题。
+  test("列表不完整时提示「不完整」—— 本用例用**空页**造 truncated", async () => {
+    // `truncated` 有两个来源：① 某一页返回空 `items`（终止保证 ②，见 `pagination.ts`）；
+    // ② 翻满 `maxPages` 而 `hasNext` 一直为真。本用例走的是**前者** ——
+    // 第一页给内容、第二页给空、两页都声明还有下一页，这是造 `truncated` 最省的写法。
+    //
+    // ⚠️ 正因如此，本用例对 **`maxPages` 那条分支零判别力**：把 `MAX_PAGES_DEFAULT` 改大、
+    // 或把上限整个删掉，这里照样绿（钉 `maxPages` 的是 `tests/pagination.test.ts`）。
+    // 别把它当成「上限还在」的证据。静默截断正是本阶段反复处理的那类问题。
     const { modal, created } = makeModal();
     let calls = 0;
     const call = rs.spyOn(McpClient.prototype, "callToolJson").mockImplementation(async () => {

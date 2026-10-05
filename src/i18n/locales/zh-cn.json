@@ -254,6 +254,7 @@
     "notice_push_page_success": "独立页面推送成功",
     "error_not_published": "此文档还未发布到 Halo",
     "error_post_not_found": "文章不存在",
+    "error_page_not_found": "页面不存在",
     "error_upload_images_failed_publish_aborted": "有 {{failed}} 张图片上传失败，已取消发布",
     "notice_no_images_to_upload": "没有需要上传的本地图片",
     "notice_upload_images_success": "已处理 {{count}} 张图片",

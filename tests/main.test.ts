@@ -428,7 +428,8 @@ test("search-content 命令：站点定了、关键词还没输入时，一个�
  * 与查重命令同款：这条命令在脚手架里**只有「零站点」那一支能走完** —— 再往后就是
  * `AttachmentManagerModal`，而 `tests/setup.ts` 的 `Modal.open()` 不调 `onOpen()`，
  * 弹窗里的取数与逐行渲染一行都跑不到。所以「渲染成什么样」的判据全部落在
- * `buildAttachmentRows()` 上，由 `tests/attachment-modal.test.ts` 覆盖。
+ * `attachmentUrl()` 上（`attachment-modal.ts` 那个导出的纯函数：站点地址 + permalink → 绝对地址），
+ * 由 `tests/attachment-modal.test.ts` 覆盖。
  */
 test("manage-attachments 命令零站点时提示「先配站点」，且不停在弹窗上", async () => {
   // 与 `pull-page` / `search-content` 那两条成对：附件管理同样作用于**远端**，

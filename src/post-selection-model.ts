@@ -2,7 +2,13 @@ import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 import { renderErrorMessage } from "./i18n/error-message";
 import type HaloPlugin from "./main";
-import { type FetchAllPagesResult, LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "./pagination";
+import {
+  type FetchAllPagesResult,
+  LIST_PAGE_SIZE,
+  MAX_PAGES_DEFAULT,
+  type PagedResult,
+  fetchAllPages,
+} from "./pagination";
 import type { McpPostItem } from "./service/post-mapping";
 import { type HaloSite, mcpEndpointOf } from "./settings";
 import { McpClient } from "./transport/mcp-client";
@@ -72,8 +78,9 @@ export async function fetchSelectablePosts(client: McpClient): Promise<Selectabl
 
   if (result.truncated) {
     // 只有触顶才提示 —— 那时列表确实不完整。
-    // 20 是 `fetchAllPages` 的 maxPages 默认值，乘出来就是这次取数的总上限条数。
-    new Notice(i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE * 20 }));
+    // 条数 = `LIST_PAGE_SIZE × MAX_PAGES_DEFAULT`，两个因子都取自 `pagination.ts` 的定义处：
+    // 在这里写死 `× 20` 的话，改默认值会改到取数、改不到这句**渲染给用户看**的提示。
+    new Notice(i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT }));
   }
 
   return toSelectablePosts(result.items);

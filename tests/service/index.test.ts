@@ -3,7 +3,7 @@ import i18next from "i18next";
 import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { initializeI18n } from "../../src/i18n";
-import { LIST_PAGE_SIZE } from "../../src/pagination";
+import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT } from "../../src/pagination";
 import HaloService, { type PublishPlan, type PublishResult } from "../../src/service";
 import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
@@ -1807,14 +1807,17 @@ describe("分类与标签走 MCP", () => {
     // 触顶时必须提示 —— 静默截断正是本阶段反复处理的那一类问题。
     // `{{size}}` 不传会被 i18next 原样渲染成空串，所以这里连着 `size` 一起断言：
     // 分类与标签两个调用点都要传（漏传一个，用户看到的条数就是空的）。
+    // 期望值用 `LIST_PAGE_SIZE * MAX_PAGES_DEFAULT`，与生产里**同一个表达式**
+    //（`getCategories()` / `getTags()` 就是那么写的）—— 这个数字是**渲染给用户看的**，
+    // 抄成字面量的话，改默认上限会改到取数、改不到提示，而两边一起错时没有任何测试会红。
     expect(notices.slice(seen)).toEqual([
       i18next.t("service.notice_list_truncated", {
         what: i18next.t("service.what_categories"),
-        size: LIST_PAGE_SIZE * 20,
+        size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT,
       }),
       i18next.t("service.notice_list_truncated", {
         what: i18next.t("service.what_tags"),
-        size: LIST_PAGE_SIZE * 20,
+        size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT,
       }),
     ]);
   });

@@ -49,7 +49,21 @@ export interface RecycledItem {
   name: string;
   title: string;
   permalink: string;
-  /** 展示用的类型名。取值与 `SearchResult.type` 同一套，由 `kind` 推出 */
+  /**
+   * 内容的类型名。取值与 `SearchResult.type` 同一套，由 `kind` 推出。
+   *
+   * ⚠️ **目前没有任何消费者** —— `recycle-modal.ts` 的两个弹窗都不读这个字段
+   *（它们各自只知道自己的 `kind`，标题文案走 `recycle_modal.title_${kind}` /
+   * `page_manager_modal.title`，行里只有标题与 permalink）。
+   *
+   * 保留而非删掉，是因为**它是「这一行是什么」这件事在数据里的唯一落点**：两个弹窗按内容类型
+   * 分开（见 `recycle-modal.ts` 文件头与 `README.md`），而分开的理由正是「列表里没有哪一列能
+   * 告诉你这一行是文章还是页面」。将来若要把两者合并成一张列表，那一列的数据就是它 ——
+   * 到那时再回头补，就得同时改取数、映射与两个弹窗的渲染；现在留着只占一行。
+   *
+   * 说明白「没有消费者」比说「弹窗据此显示」重要：后者会让下一个读代码的人以为
+   * 删掉它 UI 就会变，从而不敢动这个字段，或者反过来以为改它就能改 UI。
+   */
   type: "POST" | "SINGLE_PAGE";
 }
 

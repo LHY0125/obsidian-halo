@@ -5,7 +5,7 @@ import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
 import { type HaloPostFields, applyPostToFrontmatter, parseHaloPostFields } from "../frontmatter-map";
 import { renderErrorMessage, withErrorDetail } from "../i18n/error-message";
-import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../pagination";
+import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT, type PagedResult, fetchAllPages } from "../pagination";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
 import { McpError } from "../transport/errors";
 import { McpClient } from "../transport/mcp-client";
@@ -760,10 +760,7 @@ class HaloService extends HaloServiceBase {
   public async getCategories(): Promise<McpCategoryItem[]> {
     const { items, truncated } = await fetchAllPages<McpCategoryItem>(
       async (page, size) =>
-        await this.client.callToolJson<{ items?: McpCategoryItem[] } & PagedResult<McpCategoryItem>>(
-          "halo_list_categories",
-          { page, size },
-        ),
+        await this.client.callToolJson<PagedResult<McpCategoryItem>>("halo_list_categories", { page, size }),
       { pageSize: LIST_PAGE_SIZE },
     );
 
@@ -771,7 +768,7 @@ class HaloService extends HaloServiceBase {
       new Notice(
         i18next.t("service.notice_list_truncated", {
           what: i18next.t("service.what_categories"),
-          size: LIST_PAGE_SIZE * 20,
+          size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT,
         }),
       );
     }
@@ -782,11 +779,7 @@ class HaloService extends HaloServiceBase {
   /** 列出站点标签。翻页与提示的处置同 `getCategories`。 */
   public async getTags(): Promise<McpTagItem[]> {
     const { items, truncated } = await fetchAllPages<McpTagItem>(
-      async (page, size) =>
-        await this.client.callToolJson<{ items?: McpTagItem[] } & PagedResult<McpTagItem>>("halo_list_tags", {
-          page,
-          size,
-        }),
+      async (page, size) => await this.client.callToolJson<PagedResult<McpTagItem>>("halo_list_tags", { page, size }),
       { pageSize: LIST_PAGE_SIZE },
     );
 
@@ -794,7 +787,7 @@ class HaloService extends HaloServiceBase {
       new Notice(
         i18next.t("service.notice_list_truncated", {
           what: i18next.t("service.what_tags"),
-          size: LIST_PAGE_SIZE * 20,
+          size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT,
         }),
       );
     }

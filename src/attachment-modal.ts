@@ -3,7 +3,7 @@ import { type App, Modal, Notice, Setting } from "obsidian";
 import { type AttachmentItem, deleteAttachment, fetchAttachments, formatBytes } from "./attachment-model";
 import { renderErrorMessage } from "./i18n/error-message";
 import type HaloPlugin from "./main";
-import { type HaloSite, mcpEndpointOf } from "./settings";
+import { type HaloSite, mcpEndpointOf, normalizeSiteUrl } from "./settings";
 import { McpClient } from "./transport/mcp-client";
 
 /**
@@ -36,9 +36,18 @@ import { McpClient } from "./transport/mcp-client";
  * 与 `search-modal.ts` 的 `permalinkUrl()` 是同一套处置、同一段理由。**刻意没有合流**：
  * 那是 Task 8 的文件，把它的实现搬进一次「新增附件命令」的 diff 里就没法单独审阅了 ——
  * 与 `main.ts` 里 `pull-post` 刻意不改调 `pickSiteForPull` 是同一条取舍。合流留给专门的重构。
+ * （这里与 `permalinkUrl()` 不同的是**归一化那一步已经合流**：两边都走
+ * `settings.ts` 的 `normalizeSiteUrl()`，理由见下。）
+ *
+ * ⚠️ **站点归一化必须走 `normalizeSiteUrl()`，不能图省事抄一份 `trim().replace(/\/+$/, "")`。**
+ * 那个函数在本仓库是**被明文引用为契约**的（`glob.ts` 的注释：「走的是 `normalizeSiteUrl()`，
+ * 它只做 trim + 去尾斜杠，大小写敏感」），并且是 `isSameSiteUrl` / `mcpEndpointOf` /
+ * `normalizeSite` / `site-routing` 的共同基础。抄一份等于给它开一个**不受保护的副本**：
+ * 将来有人扩展它的语义（比如开始忽略大小写、或把 http 归一到 https），全仓一起变，
+ * 只有「复制链接」这条路上拼出来的地址不变 —— 而那个地址是要粘进笔记的，错了看不出来。
  */
 export function attachmentUrl(siteUrl: string, permalink: string): string {
-  const base = siteUrl.trim().replace(/\/+$/, "");
+  const base = normalizeSiteUrl(siteUrl);
   const path = permalink.replace(/^\/+/, "");
 
   return path === "" ? "" : `${base}/${path}`;
