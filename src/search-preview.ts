@@ -37,7 +37,8 @@ export interface SearchResult {
  *
  * **这不是可选项。** 实测站点返回的 `title` 里真的带它：
  * `"因为喜欢开源，我用 <B>Halo</B> 写了一个插件并发布到了应用市场"`。
- * `excerpt` 同样带 —— 2026-10-05 搜「Halo」的 7 条结果里有 4 条的 title 与 excerpt 都带，
+ * `excerpt` 同样带 —— 2026-10-05 对站点跑 `halo_search_content({ query: "Halo", limit: 50 })`
+ * 返回 7 条，其中 **2 条的 title 带高亮、4 条的 excerpt 带**（两个都带的是 2 条）。
  * 所以两个字段都得清（弹窗用 `setName` 显示标题、`setDesc` 显示摘要，都是按 textContent 渲染）。
  * 不清理的话，用户看到的就是字面的 `<B>` 与 `</B>`。
  *
