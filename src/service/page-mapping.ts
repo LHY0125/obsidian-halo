@@ -197,6 +197,15 @@ export interface PageToFrontmatterOptions {
  * 借文章那份来写会往每一篇页面笔记里塞进 **5 个 `undefined`**（`cover` 与 halo 里的四项）。
  * 「一个函数写两份契约」正是本阶段要消灭的分叉：改文章的契约会静默改掉页面的行为。
  *
+ * **`excerpt` 一概不碰**，这一条与文章路径**故意不同**。文章路径回写 `excerpt` 是必须的 ——
+ * 文章真的会发送它（`halo_create_post` 的入参里有），回写必须反映服务端归一化之后的值。
+ * 而页面**根本不发** `excerpt`（`halo_create_single_page` / `halo_update_single_page` 都没有这个
+ * 入参），且 `toSinglePage()` 与 `createEmptyPage()` 给页面的 `autoGenerate` **恒为 `true`** ——
+ * 照文章那条判据写，就是每次推送都把 `frontmatter.excerpt` 赋成 `undefined`：
+ * 序列化时它要么被丢弃（`js-yaml` 丢 `undefined`）要么变成 `null`，**两个方向都是在丢用户本地
+ * 写下的摘要**，而这个值哪儿也去不了、收益是零。所以这里**整个键都不出现** —— 不碰，就不会丢。
+ * （这是「既不该写空串、也不该写 `undefined`」之外的第三种选择。）
+ *
  * 取值一律来自 `page.spec`（服务端回读之后的产物），**不来自 `matterData` 或本地字面量** ——
  * 从本地字面量回写会把**陈旧值**写进前言，下次推送据此静默改掉远端状态（1-A 的 I1）。
  */
@@ -207,11 +216,6 @@ export function applyPageToFrontmatter(
 ): void {
   frontmatter.title = page.spec.title;
   frontmatter.slug = page.spec.slug;
-  // 与文章路径同一条判据（`autoGenerate` 为真说明摘要由服务端生成，本地不钉一个值）。
-  // 页面这条今天**恒为「不钉」**：`toSinglePage()` 永远给 `autoGenerate: true`
-  //（MCP 的页面项没有 `autoGenerateExcerpt` 字段）。保留它而不是写死，是因为
-  // 页面根本没有 excerpt 入参 —— 写成空串会抹掉用户本地写的摘要，而那个摘要发不出去。
-  frontmatter.excerpt = page.spec.excerpt.autoGenerate ? undefined : page.spec.excerpt.raw;
 
   frontmatter.halo = {
     site: options.siteUrl,

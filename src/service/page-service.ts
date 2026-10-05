@@ -132,7 +132,7 @@ class PageService extends HaloServiceBase {
     let intendedPublish: boolean | undefined;
 
     try {
-      const basis = remoteName ? (await this.getPage(remoteName)).page : createEmptyPage();
+      const basis = remoteName ? await this.readRemotePage(remoteName) : createEmptyPage();
       const raw = this.bodyOf(markdown, file);
       const page = applyPageFrontmatter(basis, {
         activeFile: file,
@@ -141,17 +141,29 @@ class PageService extends HaloServiceBase {
         useActiveFileDefaults: !remoteName,
       });
 
+      // `page.metadata.name` 是本次操作对象 name 的**唯一来源** —— 下面的 `update`、
+      // `setPagePublish` 与回写三处都读它。
+      //
+      // 更新分支必须在这里显式锚回**前言里那个**：`toSinglePage()` 在服务端不回 `name` 时填的是
+      // 空串，而 `halo_update_single_page` 与 `halo_set_single_page_publish_state` 的 `required`
+      // **都含 `name`** —— 空串会被服务端直接拒绝，用户只看到一句「推送失败」而无从自查。
+      // 与 `HaloService.pullPost` 那条「写 halo.name 要用**入参** name」同源。
+      if (remoteName) {
+        page.metadata.name = remoteName;
+      }
+
       await this.withPublishRetry(async (attempt) => {
         if (remoteName) {
           // 首次尝试沿用刚读到的那份（预览之前只读过一次远端）；**重试才重读** ——
           // 重试的动机正是上一次写入失败了，远端此刻可能已被别的客户端改过，
           // 拿旧对象原样重放会把这些改动盖掉。与 `HaloService.executePublish` 同一条理由。
+          //
+          // 注意这里**不再**包一层 `readRemotePage`：本次调用已经在 `withPublishRetry` 的闭包
+          // 里了，再包一层会嵌套成 4 × 4 次尝试加累加退避。
           const target = attempt === 0 ? page : (await this.getPage(remoteName)).page;
 
-          // 更新对象的 name 一律锚回**前言里那个**：`toSinglePage()` 在服务端不回 `name` 时填的是
-          // 空串，而本工具的 `required` 含 `name` —— 空串会被服务端直接拒绝，用户只看到一句
-          // 「推送失败」而无从自查。与 `pullPost` 那条「写 halo.name 要用**入参** name」同源。
-          target.metadata.name = remoteName;
+          // 重读拿到的是**另一个**对象，name 也要锚到同一个来源上（理由见上面那段）
+          target.metadata.name = page.metadata.name;
 
           await this.client.callToolVoid(this.tools.update, toPageUpdateArgs(target, raw));
         } else {
@@ -180,6 +192,8 @@ class PageService extends HaloServiceBase {
 
         if (requestedPublish !== undefined) {
           intendedPublish = requestedPublish;
+          // 与上面那次 `update` 用**同一个** name 来源（`page.metadata.name`）——
+          // 本工具的 `required` 同样含 `name`，各取各的就会在「服务端不回 name」时漏掉一处
           await this.setPagePublish(page.metadata.name, requestedPublish);
         }
       });
@@ -211,6 +225,20 @@ class PageService extends HaloServiceBase {
       this.report(reason);
       return { ok: false, reason };
     }
+  }
+
+  /**
+   * 读远端页面，**带发布级重试**。
+   *
+   * 与 `HaloService.readRemotePost` 同构、同一理由：`pushPage` 的这次基准读与执行阶段重试时的
+   * 重读是同一件事，都要求「一次瞬时抖动不该毁掉一次推送」。不给它同样的覆盖，一次网络抖动就会从
+   * 「重试后成功」变成「直接报推送失败」—— 那是新路径引入的行为退化，而不是设计。
+   *
+   * ⚠️ **只在 `pushPage` 的基准读那一处用它**。闭包里那次重读**不要**换成它 ——
+   * 那次已经在 `withPublishRetry` 里了，再包一层会嵌套成 4 × 4 次尝试加累加退避。
+   */
+  private async readRemotePage(name: string): Promise<SinglePage> {
+    return this.withPublishRetry(async () => (await this.getPage(name)).page);
   }
 
   /**

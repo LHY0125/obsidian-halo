@@ -1,10 +1,11 @@
-import { beforeAll, describe, expect, test } from "@rstest/core";
+import { beforeAll, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
 import { initializeI18n } from "../../src/i18n";
 import { LIST_PAGE_SIZE } from "../../src/pagination";
 import type { McpGetSinglePageResult, McpSinglePageItem } from "../../src/service/page-mapping";
 import PageService from "../../src/service/page-service";
+import { McpError } from "../../src/transport/errors";
 import { createFakeClient } from "../helpers/mcp-mock";
 import { createFile, createMockApp, createSettings, TEST_SITE as site } from "../helpers/obsidian-mocks";
 
@@ -75,15 +76,22 @@ function fakePageService(handlers: Record<string, (args: Record<string, unknown>
   });
 }
 
-/** 捕获回写进笔记的那份 frontmatter（假 app 的 processFrontMatter 默认丢掉了回调产物） */
+/**
+ * 捕获回写进笔记的那份 frontmatter（假 app 的 `processFrontMatter` 默认丢掉了回调产物）。
+ *
+ * `seed` 模拟**笔记里原本就有的**前言：真实的 `processFrontMatter` 是把现有前言交给回调去改的，
+ * 所以「实现有没有动某个键」只有在**先把它放进去**时才测得出来 —— 空对象起步的话，
+ * 「没写」与「赋成 `undefined`」看起来一模一样，而那正是 F1 要钉住的那条区别。
+ */
 function captureFrontmatter(
   fileManager: ReturnType<typeof createMockApp>["fileManager"],
+  seed: Record<string, unknown> = {},
 ): () => Record<string, unknown> {
   let written: Record<string, unknown> = {};
 
   fileManager.processFrontMatter.mockImplementation(
     (_file: unknown, callback: (frontmatter: Record<string, unknown>) => void) => {
-      written = {};
+      written = { ...seed };
       callback(written);
     },
   );
@@ -137,22 +145,107 @@ describe("PageService.pushPage", () => {
     expect(calls.find((call) => call.name === "halo_update_single_page")?.method).toBe("callToolVoid");
   });
 
+  test("更新分支里两个必需 name 的调用用**同一个**来源（服务端不回 name 时也不会送空串）", async () => {
+    // `toSinglePage()` 在服务端不回 `name` 时把 `metadata.name` 填成**空串**，而
+    // `halo_update_single_page` 与 `halo_set_single_page_publish_state` 的 `required`
+    // **都含 `name`** —— 空串会被服务端直接拒绝，用户只看到一句「推送失败」而无从自查。
+    // 这条用例让服务端**全程不回 name**，两处调用就必须都锚回前言里那个。
+    const file = createFile("pages/about.md");
+    const { app, metadataCache } = createMockApp("正文", file, []);
+    metadataCache.getFileCache.mockImplementation(remoteFrontmatter({ publish: true }));
+    const { client, calls } = fakePageService({
+      halo_get_single_page: () => getPageResult(pageItem({ name: undefined })),
+      halo_update_single_page: () => ({}),
+      halo_set_single_page_publish_state: () => ({}),
+    });
+
+    await new PageService(app, createSettings(), site, client).pushPage(file);
+
+    expect(calls.find((call) => call.name === "halo_update_single_page")?.args.name).toBe("page-1");
+    expect(calls.find((call) => call.name === "halo_set_single_page_publish_state")?.args).toEqual({
+      name: "page-1",
+      publish: true,
+    });
+  });
+
   test("truncated 为真时中止并如实告知，绝不把截断正文当完整页面", async () => {
     const file = createFile("pages/about.md");
     const { app, metadataCache } = createMockApp("正文", file, []);
     metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
+    let reads = 0;
     const { client, calls } = fakePageService({
-      halo_get_single_page: () => ({ ...getPageResult(pageItem(), "截断的"), truncated: true }),
+      halo_get_single_page: () => {
+        reads += 1;
+        return { ...getPageResult(pageItem(), "截断的"), truncated: true };
+      },
     });
 
     const notices = capturedNotices();
     const seen = notices.length;
-    const result = await new PageService(app, createSettings(), site, client).pushPage(file);
+
+    // 基准读现在带发布级重试（`readRemotePage`），所以这条会跑满三次退避 500+1000+1500ms。
+    // 快进掉 —— 与本仓 `tests/service/index.test.ts` 里那几条重试用例同一处置。
+    rs.useFakeTimers();
+
+    let result: Awaited<ReturnType<PageService["pushPage"]>>;
+
+    try {
+      const pending = new PageService(app, createSettings(), site, client).pushPage(file);
+      await rs.advanceTimersByTimeAsync(5_000);
+      result = await pending;
+    } finally {
+      rs.useRealTimers();
+    }
 
     expect(result.ok).toBe(false);
-    // 一个写工具都不能调：截断的正文一旦写出去，用户的服务端内容就被静默覆盖了
+    // 首次 + 3 次重试 = 4 次读 —— 这就是 PUBLISH_RETRY_COUNT = 3 的确切含义
+    expect(reads).toBe(4);
+    // 但一个写工具都不能调：截断的正文一旦写出去，用户的服务端内容就被静默覆盖了
     expect(calls.filter((call) => call.method === "callToolVoid")).toHaveLength(0);
     expect(notices.slice(seen).some((text) => text.startsWith(i18next.t("service.error_publish_failed")))).toBe(true);
+  });
+
+  test("更新分支的基准读带发布级重试：一次瞬时抖动不该毁掉整次推送", async () => {
+    // 与文章路径（`HaloService.readRemotePost`）对齐的那条性质。没有它的话，一次网络抖动会从
+    // 「重试后成功」变成「直接报推送失败」—— 正是 Global Constraint 1 说的那类分叉：
+    // 「文章会重试、页面不会」，而本地完全看不出来。
+    const file = createFile("pages/about.md");
+    const { app, metadataCache } = createMockApp("正文", file, []);
+    metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
+    let reads = 0;
+    const { client, calls } = fakePageService({
+      halo_get_single_page: () => {
+        reads += 1;
+
+        // 只有第一次读抖动，之后全程成功
+        if (reads === 1) {
+          throw new McpError("unknown", { tool: "halo_get_single_page" }, "The page is locked");
+        }
+
+        return getPageResult();
+      },
+      halo_update_single_page: () => ({}),
+    });
+
+    // 一次退避 500ms
+    rs.useFakeTimers();
+
+    let result: Awaited<ReturnType<PageService["pushPage"]>>;
+
+    try {
+      const pending = new PageService(app, createSettings(), site, client).pushPage(file);
+      await rs.advanceTimersByTimeAsync(5_000);
+      result = await pending;
+    } finally {
+      rs.useRealTimers();
+    }
+
+    expect(result.ok).toBe(true);
+    // 基准读 2 次（首次抖动 + 退避后重试成功），加上写成功之后那次回读 = 3 次。
+    // 没有重试覆盖时首次抖动就直接报「推送失败」了，所以 `ok` 与这个次数一起构成判别器。
+    expect(reads).toBe(3);
+    expect(calls.filter((call) => call.name === "halo_get_single_page")).toHaveLength(3);
+    expect(calls.some((call) => call.name === "halo_update_single_page")).toBe(true);
   });
 
   test("frontmatter 的 halo.site 与目标站点不一致时中止，且**一个工具都不调**", async () => {
@@ -246,11 +339,14 @@ describe("PageService 的发布状态三档", () => {
 });
 
 describe("PageService 的回写", () => {
-  test("只写 title / slug / 三键 halo —— 不写 cover / categories / tags 与 6 个元数据字段", async () => {
+  test("写出去的键集恰好是 title / slug / halo 三个 —— cover / categories / tags / excerpt 一个都不新增", async () => {
     // 这条用例是「页面用自己的回写实现」这一裁定的**判别器**：改成复用
     // `applyPostToFrontmatter()` 会立刻红 —— 它会无条件写 `cover` 与一个 9 键的 halo 块，
     // 而 `SinglePage.spec` 上没有 `cover` / `pinned` / `priority` / `publishTime` / `template`，
     // 于是每推一次页面就往笔记里写进 5 个 `undefined`。
+    //
+    // ⚠️ 断言的是**键集**而不是 `not.toHaveProperty(...)`：赋成 `undefined` 会让键**存在**
+    // （值为 undefined），`not.toHaveProperty` 恰好会红，但读起来不如键集直白。
     const file = createFile("pages/about.md");
     const { app, fileManager, metadataCache } = createMockApp("正文", file, []);
     metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
@@ -263,16 +359,13 @@ describe("PageService 的回写", () => {
     await new PageService(app, createSettings(), site, client).pushPage(file);
 
     const result = written();
+    expect(Object.keys(result).sort()).toEqual(["halo", "slug", "title"]);
     expect(result.title).toBe("关于");
     expect(result.slug).toBe("about");
-    // `excerpt` 与文章路径用同一条判据（autoGenerate 为真就不钉一个本地值）。页面这条今天恒为
-    // 「不钉」：`toSinglePage()` 永远给 `autoGenerate: true`（MCP 的页面项没有 autoGenerateExcerpt）。
-    // 写成空串会抹掉用户本地写的摘要，而那个摘要**发不出去**（`halo_update_single_page` 没有 excerpt 入参）。
-    expect(result.excerpt).toBeUndefined();
-
     expect(result).not.toHaveProperty("cover");
     expect(result).not.toHaveProperty("categories");
     expect(result).not.toHaveProperty("tags");
+    expect(result).not.toHaveProperty("excerpt");
 
     const halo = result.halo as Record<string, unknown>;
     expect(Object.keys(halo).sort()).toEqual(["name", "publish", "site"]);
@@ -280,6 +373,39 @@ describe("PageService 的回写", () => {
     // `publish` 取的是**服务端归一化之后的** `spec.publish`（映射自 publishRequested），
     // 而不是本地构造时那个陈旧的 false。
     expect(halo.publish).toBe(true);
+  });
+
+  test("笔记里原本写着的 excerpt / cover / categories / tags **一个都不动**", async () => {
+    // 「不碰」这个契约只有在**先把它放进去**时才测得出来（空对象起步的话，「没写」与
+    // 「赋成 `undefined`」看起来一模一样）。页面**根本不发** `excerpt`
+    //（`halo_create_single_page` / `halo_update_single_page` 都没有这个入参），
+    // 而 `toSinglePage()` 给页面的 `autoGenerate` 恒为 `true` —— 照文章那条判据回写，
+    // 就是每次推送都把 `frontmatter.excerpt` 赋成 `undefined`，用户本地写的摘要被静默丢掉
+    //（序列化时被丢弃或变成 `null`，两个方向都是丢），而收益是零。
+    const file = createFile("pages/about.md");
+    const { app, fileManager, metadataCache } = createMockApp("正文", file, []);
+    metadataCache.getFileCache.mockImplementation(remoteFrontmatter());
+    const { client } = fakePageService({
+      halo_get_single_page: () => getPageResult(),
+      halo_update_single_page: () => ({}),
+    });
+    const existing = {
+      excerpt: "用户写的摘要",
+      cover: "旧封面.png",
+      categories: ["旧分类"],
+      tags: ["旧标签"],
+    };
+    const written = captureFrontmatter(fileManager, existing);
+
+    await new PageService(app, createSettings(), site, client).pushPage(file);
+
+    const result = written();
+    expect(result.excerpt).toBe("用户写的摘要");
+    expect(result.cover).toBe("旧封面.png");
+    expect(result.categories).toEqual(["旧分类"]);
+    expect(result.tags).toEqual(["旧标签"]);
+    // 键集 = 原本那 4 个 + 本次写的 3 个，一个不多一个不少
+    expect(Object.keys(result).sort()).toEqual(["categories", "cover", "excerpt", "halo", "slug", "tags", "title"]);
   });
 
   test("halo.name 用本地那个，不回读到的 —— 服务端不回 name 时不至于把笔记写成空", async () => {
