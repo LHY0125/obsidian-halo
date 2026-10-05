@@ -130,6 +130,22 @@ export function fetchRecycled(
 }
 
 /**
+ * 取**不在回收站**的页面（`PageManagerModal` 用）。
+ *
+ * 与 `fetchRecycled` 共用同一个私有 `fetchByKind` —— **刻意不写第二份取数**：
+ * `recycled` 传错的表现是两个弹窗的内容**正好对调**（「管理页面」列出回收站里的、
+ * 「回收站」列出全部），而两个弹窗看起来都「正常工作」。
+ *
+ * 返回形状与 `fetchRecycled` **保持一致**（把 `truncated` 一并交给调用方）而不是只给
+ * `items`：一旦只给数组，「触顶了」这件事在跨过模块边界时就没了 —— 两个公开取数函数
+ * 形状不同还会让每个调用方都得先看一眼「这个要不要提示」。触顶提示由调用方出，
+ * 本层既不吞掉也不自己弹通知（三处取数同一处置）。
+ */
+export function fetchActivePages(client: McpClient): Promise<{ items: RecycledItem[]; truncated: boolean }> {
+  return fetchByKind(client, "page", false);
+}
+
+/**
  * 把一条内容从回收站恢复。
  *
  * 工具名由 `item.kind` 决定 —— 文章与页面是**两个不同的工具**（`halo_restore_post` /

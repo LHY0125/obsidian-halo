@@ -33,6 +33,14 @@
       "name": "Halo: 管理獨立頁面",
       "error_no_sites": "請先配置網站"
     },
+    "recycle_post": {
+      "name": "Halo: 回收站（文章）",
+      "error_no_sites": "請先配置網站"
+    },
+    "recycle_page": {
+      "name": "Halo: 回收站（頁面）",
+      "error_no_sites": "請先配置網站"
+    },
     "search_content": {
       "name": "Halo: 查重（搜尋線上內容）",
       "error_no_sites": "請先配置網站"
@@ -134,6 +142,21 @@
     "confirm_title": "刪除附件",
     "confirm_body": "要刪除「{{name}}」（{{size}}）嗎？",
     "confirm_irreversible": "此操作不可撤銷 —— 附件沒有回收站。引用了它的筆記會顯示為圖片損壞。"
+  },
+  "recycle_modal": {
+    "title_post": "回收站 · 文章",
+    "title_page": "回收站 · 頁面",
+    "empty": "回收站是空的。",
+    "notice_truncated": "回收站的內容超過了一頁能載入的量，下面的列表並不完整。",
+    "button_restore": "還原",
+    "notice_restored": "已還原「{{title}}」"
+  },
+  "page_manager_modal": {
+    "title": "管理獨立頁面",
+    "empty": "網站上還沒有獨立頁面。",
+    "notice_truncated": "網站上的獨立頁面超過了一頁能載入的量，下面的列表並不完整。",
+    "button_recycle": "移入回收站",
+    "notice_recycled": "已把「{{title}}」移入回收站"
   },
   "site_editing_modal": {
     "title": "Halo 網站",

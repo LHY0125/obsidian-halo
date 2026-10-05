@@ -3,6 +3,7 @@ import { LIST_PAGE_SIZE } from "../src/pagination";
 import {
   type McpRecycledPostItem,
   type RecycleKind,
+  fetchActivePages,
   fetchRecycled,
   restoreRecycled,
   toRecycledItems,
@@ -149,6 +150,47 @@ describe("fetchRecycled", () => {
     const result = await fetchRecycled(client, "post");
 
     expect(result.items.map((item) => item.name)).toEqual(["kept"]);
+  });
+});
+
+/**
+ * `fetchActivePages` —— 管理页面弹窗那一档。
+ *
+ * 它与 `fetchRecycled` 共用同一个私有 `fetchByKind`，**只差 `recycled` 这一档**。
+ * 这组用例钉的正是那一档：写错的表现是两个弹窗的内容**正好对调**
+ *（「管理页面」列出回收站里的、「回收站」列出全部），而两个弹窗看起来都「正常工作」。
+ */
+describe("fetchActivePages", () => {
+  test("显式传 recycled:false —— 与 fetchRecycled 正好相反的那一档", async () => {
+    const { client, calls } = createFakeClient(pagedResponder("page", [recycledPost({ recycled: false })]));
+
+    await fetchActivePages(client);
+
+    // 逐字断言整个参数对象。管理页面弹窗要的是「站点上还活着的页面」，
+    // 而 `recycled` 的 schema 默认值就是 `false` —— 所以这一档**传错反而不会报错**，
+    // 只会让「管理页面」列出回收站里的东西。与 `fetchRecycled` 那条对称着看。
+    expect(calls[0].args).toEqual({ page: 1, size: LIST_PAGE_SIZE, recycled: false });
+  });
+
+  test("走的是**页面**的列表工具 —— 管理页面弹窗不看文章", async () => {
+    const { client, calls } = createFakeClient(pagedResponder("page", [recycledPost()]));
+
+    await fetchActivePages(client);
+
+    expect(calls.map((call) => call.name)).toEqual(["halo_list_single_pages"]);
+  });
+
+  test("翻页取全，且**每一页**都带 recycled:false", async () => {
+    // 只给第一页加的话，「第 2 页突然返回回收站内容」会是一个极难反查的脏数据来源
+    //（与 `fetchRecycled` 那条同源）—— 列表会变成一半活着一半已回收，而没有任何提示。
+    const all = Array.from({ length: 250 }, (_, index) => recycledPost({ name: `page-${index}` }));
+    const { client, calls } = createFakeClient(pagedResponder("page", all));
+
+    const result = await fetchActivePages(client);
+
+    expect(result.items).toHaveLength(250);
+    expect(calls.map((call) => call.args.page)).toEqual([1, 2, 3]);
+    expect(calls.every((call) => call.args.recycled === false)).toBe(true);
   });
 });
 

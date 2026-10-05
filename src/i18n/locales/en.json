@@ -33,6 +33,14 @@
       "name": "Halo: Manage pages",
       "error_no_sites": "Please configure sites first"
     },
+    "recycle_post": {
+      "name": "Halo: Recycle bin (posts)",
+      "error_no_sites": "Please configure sites first"
+    },
+    "recycle_page": {
+      "name": "Halo: Recycle bin (pages)",
+      "error_no_sites": "Please configure sites first"
+    },
     "search_content": {
       "name": "Halo: Search site content",
       "error_no_sites": "Please configure sites first"
@@ -134,6 +142,21 @@
     "confirm_title": "Delete attachment",
     "confirm_body": "Delete \"{{name}}\" ({{size}})?",
     "confirm_irreversible": "This cannot be undone — attachments have no recycle bin. Notes that link to it will show a broken image."
+  },
+  "recycle_modal": {
+    "title_post": "Recycle bin · Posts",
+    "title_page": "Recycle bin · Pages",
+    "empty": "The recycle bin is empty.",
+    "notice_truncated": "The recycle bin holds more than could be loaded, so the list below is incomplete.",
+    "button_restore": "Restore",
+    "notice_restored": "\"{{title}}\" restored"
+  },
+  "page_manager_modal": {
+    "title": "Manage pages",
+    "empty": "This site has no pages.",
+    "notice_truncated": "This site has more pages than could be loaded, so the list below is incomplete.",
+    "button_recycle": "Move to recycle bin",
+    "notice_recycled": "\"{{title}}\" moved to recycle bin"
   },
   "site_editing_modal": {
     "title": "Halo site",

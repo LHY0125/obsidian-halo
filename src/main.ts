@@ -10,6 +10,8 @@ import { openPageSelectionModal } from "./page-selection-model";
 import { openPostSelectionModal } from "./post-selection-model";
 import { type PublishPreviewInput, buildPublishPreview } from "./publish-preview";
 import { confirmPublishPreview } from "./publish-preview-modal";
+import { PageManagerModal, RecycleBinModal } from "./recycle-modal";
+import type { RecycleKind } from "./recycle-model";
 import { SearchResultsModal, promptForQuery } from "./search-modal";
 import { searchContent } from "./search-preview";
 import HaloService from "./service";
@@ -160,6 +162,27 @@ export default class HaloPlugin extends Plugin {
       name: i18next.t("command.manage_pages.name"),
       callback: async () => {
         await this.managePagesCommand();
+      },
+    });
+
+    // 回收站两条命令：与「管理页面」同属**远端内容管理**那一组（都不碰本地笔记），
+    // 但对象不同 —— 那一条看的是活着的页面，这两条看的是**已经被回收的**内容。
+    // 拆成两条命令只按 `kind` 分档（与三个批量命令同一取舍）：合并的话，
+    // 用户点开「回收站」还得先在一堆文章里找那个页面，而这是两个不同的心理动作
+    //（「我的文章误删了」 vs 「我的页面误删了」）。
+    this.addCommand({
+      id: "recycle-post",
+      name: i18next.t("command.recycle_post.name"),
+      callback: async () => {
+        await this.recycleContentCommand("post");
+      },
+    });
+
+    this.addCommand({
+      id: "recycle-page",
+      name: i18next.t("command.recycle_page.name"),
+      callback: async () => {
+        await this.recycleContentCommand("page");
       },
     });
 
@@ -475,11 +498,11 @@ export default class HaloPlugin extends Plugin {
   }
 
   /**
-   * `manage-pages` 的入口：列出站点上的全部页面，逐行给出「打开」与「回收 / 恢复」。
+   * `manage-pages` 的入口：列出站点上**不在回收站**的独立页面，逐行给出「回收」。
    *
-   * ⚠️ **本任务只接线，弹窗尚未实现** —— `PageManagerModal` 属于 Task 12 的回收站弹窗家族，
-   * 建在 `recycle-model.ts` 那套取数之上。这一段是**刻意的中间态**，
-   * Task 12 会把它换成 `new PageManagerModal(this, site).open()`。
+   * 取数、翻页与「回收」走哪个入口都封在 `PageManagerModal` 里（它持有 `PageService`）——
+   * 这里只负责「挑站点、开弹窗」。想找回被回收的页面请用 `recycle-page` 那条命令，
+   * 那是**另一个**弹窗：把两者合成一个会让「回收站」这个入口同时有回收与恢复。
    */
   private async managePagesCommand(): Promise<void> {
     const site = await this.pickSiteForPull("command.manage_pages.error_no_sites");
@@ -488,14 +511,25 @@ export default class HaloPlugin extends Plugin {
       return;
     }
 
-    // 占位用的是**已存在**的键（命令自己的名字），不为占位新造一个键 ——
-    // Task 12 会把这一整段删掉，新造的键还要跟着删一轮。
-    //
-    // 代价如实记在这里：这条提示**没有说出「尚未实现」**。现有文案里没有一句是这个意思，
-    // 而编一句假话（「连接失败」之类）会把用户引去排查一个完全正常的系统 ——
-    // 在「少说」与「说错」之间选少说。Task 12 替换后这一点随之消失（它也会改掉
-    // `tests/main.test.ts` 里钉住这段占位的那条用例）。
-    new Notice(i18next.t("command.manage_pages.name"));
+    new PageManagerModal(this, site).open();
+  }
+
+  /**
+   * 回收站的入口。两条命令只在 `kind` 上分档 —— 与三个批量命令同一取舍。
+   *
+   * 走 `pickSiteForPull` 而不是 `resolveSiteFor`：回收站命令手上没有本地文件
+   *（那是「某个笔记要发到哪」的问题），所以只能让用户选 / 取默认站点。
+   */
+  private async recycleContentCommand(kind: RecycleKind): Promise<void> {
+    const site = await this.pickSiteForPull(
+      kind === "post" ? "command.recycle_post.error_no_sites" : "command.recycle_page.error_no_sites",
+    );
+
+    if (!site) {
+      return;
+    }
+
+    new RecycleBinModal(this, site, kind).open();
   }
 
   /**

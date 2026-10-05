@@ -48,8 +48,21 @@ type Internals = {
   managePagesCommand(): Promise<void>;
   manageAttachmentsCommand(): Promise<void>;
   searchContentCommand(): Promise<void>;
+  recycleContentCommand(kind: "post" | "page"): Promise<void>;
   pickSiteForPull(noSitesKey: string): Promise<{ url: string } | undefined>;
 };
+
+/**
+ * `tests/setup.ts` 里那个 `Modal.open()` 是**空实现**（不调 `onOpen()`），所以「弹窗真的被
+ * 打开了」这件事只能靠打桩才看得出来。这也是本文件里唯一能观察到的弹窗证据 ——
+ * 弹窗内部渲染了什么，由 `tests/recycle-modal.test.ts` 直接调 `render()` 去覆盖。
+ *
+ * 之所以要观察它：`manage-pages` 在 Task 6 里是一句**占位** `Notice`，本任务把它换成真弹窗。
+ * 两者在测试里都不抛错，不打桩的话「换了没换」完全不可见。
+ */
+function modalOpenSpy() {
+  return rs.spyOn(obsidianRuntime.Modal.prototype, "open");
+}
 
 /**
  * 造一个插件实例。
@@ -290,18 +303,83 @@ test("pull-page 命令零站点时提示「先配站点」，且不停在弹窗�
   expect(capturedNotices().slice(before)).toEqual([i18next.t("command.pull_page.error_no_sites")]);
 });
 
-test("manage-pages 命令**尚未实现**：单站点时弹一条占位提示（Task 12 换成真弹窗）", async () => {
-  // 这是一处**刻意的中间态**：`PageManagerModal` 属于 Task 12 的回收站弹窗家族。
-  // 这条用例把中间态本身钉住，好让 Task 12 「忘了接上」时有一条会红的测试，
-  // 而不是让占位一直悄悄留着。
-  //
-  // 单站点是刻意的：多站点会停在站点选择弹窗上（永不 resolve），断言等不到。
-  const { plugin } = makePlugin();
+test("manage-pages 命令零站点时提示「先配站点」", async () => {
+  // Task 6 那条占位用例（「尚未实现：弹一条占位提示」）在本任务被**替换**掉了 ——
+  // 它钉住的是一个刻意的中间态，而中间态到这里结束了。替它留下这一条：占位可以删，
+  // 「零站点」这道**守卫**不能跟着删（删掉之后用户拿到的是一个开不出来的弹窗，
+  // Obsidian 里表现为「点了没反应」）。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
   const before = capturedNotices().length;
 
   await plugin.managePagesCommand();
 
-  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.manage_pages.name")]);
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.manage_pages.error_no_sites")]);
+});
+
+test("manage-pages 命令有站点时打开管理弹窗，且不再弹占位提示", async () => {
+  // 这条是 Task 6 那条占位用例的**直接替身**：它当初存在的理由是「Task 12 忘了接上时
+  // 要有一条会红的测试」，所以这里断言的是**接上了**（`Modal.open` 被调用一次），
+  // 并且**占位那句已经不在**（通知数组增量为空）。
+  //
+  // 不这么写的话就没有任何一条用例能区分「真弹窗」与「占位 Notice」——
+  // 而为让旧用例继续通过去保留占位，恰恰是它在防的事。
+  //
+  // 单站点是刻意的：多站点会先停在站点选择弹窗上（在脚手架里永不 resolve），断言等不到。
+  const { plugin } = makePlugin();
+  const open = modalOpenSpy();
+  const before = capturedNotices().length;
+
+  try {
+    await plugin.managePagesCommand();
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(capturedNotices().slice(before)).toEqual([]);
+  } finally {
+    open.mockRestore();
+  }
+});
+
+/**
+ * 回收站两条命令的编排层。
+ *
+ * 两条命令**只在 `kind` 上分档**（与三个批量命令同一取舍），所以这里要的是一条
+ * 「kind 真的分档了」的证据 —— 写死其中一句、或把 `kind` 丢在路上的实现，
+ * 只有成对的两条断言能拆穿。
+ */
+test("recycle-post 命令零站点时提示「先配站点」", async () => {
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const before = capturedNotices().length;
+
+  await plugin.recycleContentCommand("post");
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.recycle_post.error_no_sites")]);
+});
+
+test("recycle-page 命令零站点时提示的是**它自己**那句", async () => {
+  // 与上一条成对：两句文案不同，所以「kind → 文案键」的映射写错时这里会红。
+  // 合成一句（或把 kind 丢掉）时，上一条照样绿 —— 这正是要防的那种「看起来对」。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const before = capturedNotices().length;
+
+  await plugin.recycleContentCommand("page");
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.recycle_page.error_no_sites")]);
+});
+
+test("recycle-content 命令有站点时打开回收站弹窗，不弹任何提示", async () => {
+  // 零站点那两条守卫之外的另一半：有站点时必须**走到弹窗**，而不是静默返回。
+  const { plugin } = makePlugin();
+  const open = modalOpenSpy();
+  const before = capturedNotices().length;
+
+  try {
+    await plugin.recycleContentCommand("page");
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(capturedNotices().slice(before)).toEqual([]);
+  } finally {
+    open.mockRestore();
+  }
 });
 
 /**
