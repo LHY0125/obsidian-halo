@@ -317,6 +317,7 @@
     "summary_title_draft": "Batch push as drafts finished",
     "summary_title_publish": "Batch publish finished",
     "summary_title_unpublish": "Batch unpublish finished",
-    "summary_line": "{{success}} succeeded, {{failed}} failed, and {{skipped}} were skipped before the run."
+    "summary_line": "{{success}} succeeded, {{failed}} failed, and {{skipped}} were skipped before the run.",
+    "summary_skipped_title": "{{count}} note(s) skipped before the run"
   }
 }

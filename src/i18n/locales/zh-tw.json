@@ -317,6 +317,7 @@
     "summary_title_draft": "批次推送草稿完成",
     "summary_title_publish": "批次發佈完成",
     "summary_title_unpublish": "批次撤回完成",
-    "summary_line": "成功 {{success}} 篇，失敗 {{failed}} 篇，另有 {{skipped}} 篇在執行前就被跳過。"
+    "summary_line": "成功 {{success}} 篇，失敗 {{failed}} 篇，另有 {{skipped}} 篇在執行前就被跳過。",
+    "summary_skipped_title": "執行前跳過的 {{count}} 篇"
   }
 }

@@ -18,6 +18,11 @@ import { resolveSite } from "./site-routing";
  * 这里相反：`BatchRunSummary` 是**终态产物**，`path` + `reason` 就是要直接喂给汇总弹窗的最终
  * 形态，中间再插一层 `{key, params}` 只会让 `PublishResult.reason`（已经是字符串）与错误描述符
  * 两种形态混在一起，调用方每次都得判一下手里是哪种。代价是这一层的测试需要初始化 i18next。
+ *
+ * ⚠️ **`BatchRunSummary.skipped` 是上面这条约定的唯一例外**，别按"这里不该有描述符"去改它：
+ * 跳过原因必须在**汇总弹窗打开的那一刻**才用 `i18next` 渲染，而 `runBatch` 到那时早就返回了。
+ * 提前渲染成字符串等于把界面语言钉死在执行那一刻，还会与确认弹窗里同一份数据的渲染路径
+ * 分叉成两套文案。该字段的注释里有完整理由。
  */
 
 /** 三个批量命令。`unpublish` 与另两个走的是完全不同的 MCP 工具，故显式分档 */
@@ -352,10 +357,27 @@ export interface BatchRunSummary {
   successCount: number;
   failureCount: number;
   /**
-   * **执行前**就被排除的篇数（没站点、没 `halo.name`、正文读不出来等）。汇总里要能说清它们去哪了。
+   * **执行前**就被排除的那些笔记，逐条带原因。汇总弹窗按它渲染「执行前跳过」那一段。
    *
-   * 与 `failureCount` 是两码事，绝不能合并：`failureCount` 是「跑了但炸了」，
-   * 这个是「压根没让它跑」。混成一个数字，用户会以为有几篇被尝试过、需要去站点上确认状态。
+   * 与 `results` 是两码事，绝不能合并：`results` 是「跑了但炸了」，这里是「压根没让它跑」。
+   * 用户对这两者的处置**完全不同**（前者去站点上确认状态，后者去改配置或补发布），
+   * 所以汇总里是**两个分开的段落**，不是一个列表。
+   *
+   * ⚠️ **这是本模块里唯一一处「带 `{key, params}` 描述符而不是渲染好的文案」的字段** ——
+   * 与文件头「`BatchRunSummary` 是终态产物，不该再插一层描述符」那条约定**故意不同**。
+   * 理由是渲染时机：跳过原因要在**汇总弹窗打开时**用 `i18next` 渲染，而 `runBatch` 到那时
+   * 已经返回了。存渲染好的字符串就等于把语言钉死在执行那一刻，且与确认弹窗里同一份数据
+   * 的渲染路径分叉成两套文案。`BatchItemResult.reason` 那边不存在这个问题 ——
+   * 它的文案由服务层（`PublishResult.reason` / `renderErrorMessage`）产出，本来就是终态。
+   */
+  skipped: BatchSkip[];
+  /**
+   * `skipped.length`，汇总行那句「另有 N 篇在执行前就被跳过」用的数字。
+   *
+   * 与上面那份清单**同源**（都由 `plan.skipped` 决定），留着是因为它已经是既有字段、
+   * 且汇总行说的是「整次运行的账」而与清单是两种读法。生产里两者恒等；
+   * **清单那一段的标题数的是它自己列了几条**，不读这个字段 —— 标题与它下面那张清单
+   * 必须对得上，否则会写「已跳过 5 篇」而只列 2 条。
    */
   skippedCount: number;
 }
@@ -397,6 +419,11 @@ export async function runBatch(
       results: [],
       successCount: 0,
       failureCount: 0,
+      // 这条提前返回**同样**要带 `skipped`：漏掉它的话这条路径下 `skipped` 是 `undefined`，
+      // 而汇总弹窗要读 `summary.skipped.length` —— `undefined.length` 直接抛，
+      // 表现是「用户一个都没勾 → 点执行 → 汇总弹窗打不开」。类型系统看不见这件事
+      //（接口上它是必填字段），判别它的只有测试。
+      skipped: plan.skipped,
       skippedCount: plan.skipped.length,
     };
   }
@@ -464,6 +491,9 @@ export async function runBatch(
     results,
     successCount: results.filter((item) => item.ok).length,
     failureCount: results.filter((item) => !item.ok).length,
+    // 原样带下去、不复制：`runBatch` 只读它，弹窗也只读它。要复制的是**会往里 push 的那一层**
+    //（`planBatch` 就是这么做的），这一层没有那个问题。
+    skipped: plan.skipped,
     skippedCount: plan.skipped.length,
   };
 }

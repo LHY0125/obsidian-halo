@@ -864,4 +864,46 @@ describe("runBatch", () => {
     });
     expect(ran).toEqual([siteA.url]);
   });
+
+  it("skipped 逐条带进 summary，不只是那个数字", async () => {
+    // 判别器：把末尾那个 `return` 里的 `skipped: …` 删掉就会红。
+    //
+    // 为什么「有数字」不够：`skippedCount` 只在汇总行里印一句「另有 N 篇被跳过」，
+    // 而用户跑完批量之后**手上只有这份汇总**（确认弹窗那时已经关掉了）——
+    // 他最需要知道的恰恰是「是哪几篇没进去、为什么」。逐条原因在此之前只存在于确认弹窗里。
+    const skip: BatchSkip = {
+      path: "z.md",
+      key: "batch.skip_unknown_site",
+      params: { url: "https://gone.example.com" },
+    };
+    const plan: BatchPlan = { ...planOf(["a.md"]), skipped: [skip] };
+
+    const summary = await runBatch(plan, allOf(plan), () => serviceWith({}));
+
+    // 连 `params` 一起比：汇总渲染原因用的是 `i18next.t(skip.key, skip.params)`，
+    // 只带 key 不带 params 会让「笔记里写的 halo.site（{{url}}）不在站点列表里」缺掉那个网址。
+    expect(summary.skipped).toEqual([skip]);
+    // 对照物：数字与清单**同源**。少了它，「summary.skipped 有内容」也可能是另一处代码凑出来的，
+    // 而汇总行仍印着 0 —— 同一个弹窗里两句话互相打架。
+    expect(summary.skippedCount).toBe(summary.skipped.length);
+    // 再一层对照：这些条目**没有**混进 `results`（跳过 = 压根没让它跑，失败 = 跑了但炸了）
+    expect(summary.results.map((item) => item.path)).toEqual(["a.md"]);
+  });
+
+  it("空勾选的提前返回同样带 skipped（漏了它汇总弹窗会直接抛）", async () => {
+    // 判别器：只在**末尾**那个 `return` 里补 `skipped` 就会红 —— 这条提前返回路径下
+    // `skipped` 是 `undefined`。后果不是「少一行字」：汇总弹窗要读 `summary.skipped.length`，
+    // `undefined.length` **直接抛**，表现是「用户一个都没勾 → 点执行 → 汇总弹窗打不开」。
+    // 确认弹窗在零勾选时禁掉了执行按钮，但那是 UI 里的闸门，程序化调用绕得过去。
+    const skip: BatchSkip = { path: "z.md", key: "batch.skip_not_published" };
+    const plan: BatchPlan = { ...planOf(["a.md"]), skipped: [skip] };
+
+    const summary = await runBatch(plan, new Set(), () => serviceWith({}));
+
+    expect(summary.skipped).toEqual([skip]);
+    // 对照物：这条路径确实什么都没跑，所以上面那份 skipped 不可能是从 results 凑出来的。
+    // 同一份 plan 只勾一篇时结果里就有东西 —— 证明 plan 本身是可执行的，不是"空计划"。
+    expect(summary.results).toEqual([]);
+    expect((await runBatch(plan, new Set(["a.md"]), () => serviceWith({}))).results).toHaveLength(1);
+  });
 });

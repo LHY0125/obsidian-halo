@@ -252,7 +252,7 @@ export function showBatchSummary(plugin: HaloPlugin, summary: BatchRunSummary): 
  * `export` 只为测试，与上面的 `BatchConfirmModal` 同一处置（也同一理由）：
  * `tests/setup.ts` 的 `Modal.open()` 不调 `onOpen()`，所以 `showBatchSummary()` 在测试里
  * 什么也渲染不到。测试直接构造本类、塞一个能记录文字的 `contentEl` 桩、再调 `onOpen()`，
- * 从而钉住「三档数字都出现在文案里、失败项逐条列出」这条用户可见的保证。
+ * 从而钉住「三档数字都出现在文案里、失败项与执行前跳过分**两段**逐条列出」这条用户可见的保证。
  * 生产代码只用 `showBatchSummary()`，不直接引用本类。
  */
 export class BatchSummaryModal extends Modal {
@@ -284,6 +284,38 @@ export class BatchSummaryModal extends Modal {
     // 或 `renderErrorMessage` 的产物），真出现空的时候宁可显示成「路径 —— 」也不要写 undefined。
     for (const result of this.summary.results.filter((item) => !item.ok)) {
       contentEl.createEl("div", { text: `${result.path} —— ${result.reason ?? ""}` });
+    }
+
+    // 执行前跳过的**另起一段**，绝不与上面的失败明细合成一张清单。
+    //
+    // 理由与「三档数字分开报」同源，只是更具体：失败是「跑了但炸了」→ 用户要去站点上确认那篇
+    // 现在的状态；跳过是「压根没让它跑」→ 用户要去改配置或补发布。混在一起时他只能靠原因文字
+    // 自己猜「这一篇到底有没有被尝试过」，而猜错的代价是把一篇**从没动过**的文章当成半成品
+    // 去站点上找。
+    //
+    // 这一段在确认弹窗里**已经**存在（那份清单是用户在按下「执行」之前看的）；这里重列一遍
+    // 不是重复，而是补上时机：跑完之后确认弹窗已经关了，而用户此刻手上只有这份汇总 ——
+    // 「是哪几篇没进去、为什么」恰恰是他唯一要做的事。
+    //
+    // `?? []` 不是多余的：`BatchRunSummary.skipped` 在类型上是必填的，但本类是导出的
+    //（测试与将来的调用方都会手工构造 summary）。真让 `undefined.length` 抛出去，
+    // 表现是「弹窗打不开」—— 兜底一个空数组就能挡住，代价是零。
+    const skipped = this.summary.skipped ?? [];
+
+    if (skipped.length > 0) {
+      // 标题里的数字取**这张清单自己的长度**，不取 `summary.skippedCount`：标题与它下面
+      // 那张清单必须对得上。生产里两者恒等（都来自 `plan.skipped`），但手工构造的 summary
+      // 一分叉，弹窗就会写「已跳过 5 篇」而只列 2 条 —— 一句用户看得见的假话。
+      contentEl.createEl("h3", {
+        text: i18next.t("batch.summary_skipped_title", { count: skipped.length }),
+      });
+
+      // 与确认弹窗**同一套键**（`batch.skip_*`）：两处渲染的是同一份 `BatchSkip`，
+      // 另造一套文案只会让同一个原因在两个弹窗里说法不一致。`BatchSkip` 只带 key/params，
+      // 渲染留在 UI 侧 —— 这也是它不随结果一起被渲染成字符串的原因（见 `BatchRunSummary` 的注释）。
+      for (const skip of skipped) {
+        contentEl.createEl("div", { text: `${skip.path} —— ${i18next.t(skip.key, skip.params)}` });
+      }
     }
 
     new Setting(contentEl).addButton((button) =>

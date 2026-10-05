@@ -326,6 +326,7 @@ function summaryOf(
   action: BatchRunSummary["action"],
   results: BatchRunSummary["results"],
   skippedCount = 0,
+  skipped: BatchRunSummary["skipped"] = [],
 ): BatchRunSummary {
   return {
     action,
@@ -333,6 +334,7 @@ function summaryOf(
     successCount: results.filter((item) => item.ok).length,
     failureCount: results.filter((item) => !item.ok).length,
     skippedCount,
+    skipped,
   };
 }
 
@@ -455,6 +457,87 @@ describe("BatchSummaryModal 的汇总渲染", () => {
     expect(unpublish).toContain(i18next.t("batch.summary_title_unpublish"));
     // 反面：写死一个标题的实现能过上一条、过不了这一条
     expect(draft).not.toContain(i18next.t("batch.summary_title_unpublish"));
+  });
+
+  it("执行前跳过的逐条列出（路径 + 原因），用的是与确认弹窗同一套键", () => {
+    // 判别器：把跳过那一段整块删掉就会红。
+    //
+    // 理由与「三档数字分开报」同源：用户跑完批量之后**手上只有这份汇总**（确认弹窗已经关了），
+    // 而「是哪几篇没进去、为什么」正是他此刻唯一要做的事。在此之前，逐条跳过原因**只存在于
+    // 确认弹窗里** —— 那是一份他在需要的时候已经看不到的文件。
+    const url = "https://gone.example.com";
+    const texts = renderSummary(
+      summaryOf("publish", [{ path: "b.md", ok: false, reason: "站点拒绝" }], 1, [
+        { path: "z.md", key: "batch.skip_unknown_site", params: { url } },
+      ]),
+    );
+
+    expect(texts).toContain(i18next.t("batch.summary_skipped_title", { count: 1 }));
+    // 逐字比**插值后**的完整文案，而不是只比 key：`params` 被丢掉时
+    //（写成 `i18next.t(skip.key)`）这句会红 —— 而用户看到的是「笔记里写的 halo.site（{{url}}）
+    // 不在站点列表里」，一个没被替换的占位符，比不显示更让人无从下手。
+    expect(texts).toContain(`z.md —— ${i18next.t("batch.skip_unknown_site", { url })}`);
+  });
+
+  it("跳过与失败是**两段**，不合成一个列表", () => {
+    // 判别器：把跳过项直接 push 进上面那个失败循环（`filter((item) => !item.ok)` 之外再加一段
+    // 「或 skipped」）就会红 —— 那时分段标题不再存在，两类条目混在一张清单里。
+    //
+    // 为什么必须分开：两者的处置**完全不同**。失败是「跑了但炸了」→ 去站点上确认那篇现在的状态；
+    // 跳过是「压根没让它跑」→ 去改配置或补发布。混在一起时用户只能靠原因文字自己猜
+    // 「这一篇到底有没有被尝试过」，而猜错的代价是把一篇从没动过的文章当成半成品去站点上找。
+    const texts = renderSummary(
+      summaryOf("publish", [{ path: "b.md", ok: false, reason: "站点拒绝" }], 1, [
+        { path: "z.md", key: "batch.skip_not_published" },
+      ]),
+    );
+
+    const title = i18next.t("batch.summary_skipped_title", { count: 1 });
+
+    // 两段各自在场
+    expect(texts).toContain("b.md —— 站点拒绝");
+    expect(texts).toContain(`z.md —— ${i18next.t("batch.skip_not_published")}`);
+    // 分段标题在**失败明细之后**：一个把两类条目合成单张清单的实现根本不会有这个标题
+    expect(texts.indexOf("b.md —— 站点拒绝")).toBeLessThan(texts.indexOf(title));
+    // 反面：跳过那一条不在失败段里 —— 它在标题之后
+    expect(texts.indexOf(title)).toBeLessThan(texts.indexOf(`z.md —— ${i18next.t("batch.skip_not_published")}`));
+  });
+
+  it("跳过段的标题数的是**它下面列了几条**，不是汇总行那个数字", () => {
+    // 判别器：把标题的 `count` 写成 `this.summary.skippedCount` 就会红。
+    //
+    // 生产里两者恒等（都来自 `plan.skipped`），所以这条只在手工构造的汇总对象上才分叉 ——
+    // 但那正是它的价值：标题与它下面那张清单必须对得上，否则弹窗会写「已跳过 5 篇」而只列 2 条，
+    // 是一句用户**看得见**的假话，还会让他以为另外 3 条被折起来了。
+    const texts = renderSummary(
+      summaryOf("publish", [{ path: "a.md", ok: true }], 5, [{ path: "z.md", key: "batch.skip_not_published" }]),
+    );
+
+    expect(texts).toContain(i18next.t("batch.summary_skipped_title", { count: 1 }));
+    expect(texts).not.toContain(i18next.t("batch.summary_skipped_title", { count: 5 }));
+    // 在场对照物：汇总行**照旧**用 `skippedCount`（那句说的是整次运行的账，与这张清单不同源）
+    expect(texts).toContain(i18next.t("batch.summary_line", { success: 1, failed: 0, skipped: 5 }));
+  });
+
+  it("summary 上没有 skipped 字段时既不抛也不列出（手工构造的汇总对象）", () => {
+    // `skipped` 在类型上是必填的，但汇总弹窗是**导出的类**，测试与将来的调用方都会手工构造它。
+    // 真去读 `undefined.length` 的表现是「弹窗打不开」—— 一个空数组兜底就能挡住，代价是零。
+    // （`runBatch` 的两条 return 路径都有这个字段，所以这条挡的是**弹窗外**的调用方。）
+    const summary = {
+      action: "publish",
+      results: [{ path: "a.md", ok: true }],
+      successCount: 1,
+      failureCount: 0,
+      skippedCount: 1,
+    } as unknown as BatchRunSummary;
+
+    const texts = renderSummary(summary);
+
+    // 在场对照物：弹窗确实渲染了（三档数字那一行在）。
+    // 没有它，下面那条「没有明细行」在「什么都没渲染」时也永久为真。
+    expect(texts).toContain(i18next.t("batch.summary_line", { success: 1, failed: 0, skipped: 1 }));
+    expect(texts.some((text) => text.includes(" —— "))).toBe(false);
+    expect(texts.some((text) => text.includes("undefined"))).toBe(false);
   });
 });
 
