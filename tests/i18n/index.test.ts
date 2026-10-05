@@ -1,6 +1,9 @@
 import { beforeAll, describe, expect, it } from "@rstest/core";
 import i18next from "i18next";
 import { initializeI18n } from "../../src/i18n";
+import * as en from "../../src/i18n/locales/en.json";
+import * as zhCN from "../../src/i18n/locales/zh-cn.json";
+import * as zhTW from "../../src/i18n/locales/zh-tw.json";
 
 /**
  * 全局 i18n 配置的围栏：**插值一律不做 HTML 转义**。
@@ -83,5 +86,104 @@ describe("全局 i18n 配置：插值不做 HTML 转义", () => {
 
     expect(out).toContain("<博客/>");
     expect(out).not.toContain("&lt;");
+  });
+});
+
+/**
+ * 三语 locale 的键集必须完全相同 —— 这是 i18n 的**结构性约束**，不是风格偏好。
+ *
+ * 为什么要有这条围栏：新增文案时只往 `en.json` 加键、忘了另两份，表现是**切到那个语言时
+ * 界面显示原始键名**（`i18next.t()` 找不到键就把键名原样返回），而**全套测试会全绿** ——
+ * 没有任何一行代码会因为「某个键只存在于一份文件里」而报错。
+ * 本计划此前每个任务都跑一遍手工脚本数键数，那不是防线，是**记得去数**。
+ *
+ * 直接 import 三个 locale 文件，而不是用 `src/i18n/index.ts` 的 `resources`：
+ * `resources` 是**派生视图**（由 `index.ts` 把文件绑到 i18next 的语言名上）。那里一旦绑错
+ * （例如复制粘贴成 `en: { translation: zhCN }`），基于 `resources` 的比较会把一份文件与
+ * 它自己比，**键集必然相等、测试变绿**，而生产环境已经坏了。本围栏要守的约束是
+ * 「三个**文件**的键集相同」，所以直接量文件本身；失败信息也因此能给出要改的文件路径。
+ * 已知边界：这条测不到「某个文件没被注册进 `resources`」—— 那是另一个缺陷。它的反方向
+ * 由本文件上面那组用例覆盖：那里走真实入口 `initializeI18n()`，证明 `en` 的键真的能解析。
+ */
+describe("三语 locale 的键集完全相同", () => {
+  /** 把嵌套的 locale JSON 摊平成点号路径（如 `command.publish.name`）。 */
+  function flattenKeys(value: unknown, prefix = ""): string[] {
+    if (value === null || typeof value !== "object") {
+      return prefix ? [prefix] : [];
+    }
+    const out: string[] = [];
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      out.push(...flattenKeys(child, prefix ? `${prefix}.${key}` : key));
+    }
+    return out;
+  }
+
+  /**
+   * 剥掉 JSON 模块的互操作外壳，取到 locale 的**真实顶层对象**。
+   *
+   * 实测（`import * as x from "./x.json"` 在 rstest 下）：命名空间是
+   * `{ ...顶层键, default: <整个 JSON> }` —— `Object.keys(en)` 有 210 项（209 个真实顶层键
+   * + 一个 `default`）。不剥掉它，摊平后每条路径都会被数两遍，**实测得到 418 = 2 × 209**，
+   * 于是失败信息里的计数与真实文件对不上 —— 一个「看起来在工作」的假数字。
+   * 另一种打包器给的形状是只有 `default` 一项（`{ default: <整个 JSON> }`），一并处理。
+   */
+  function localeObject(moduleNamespace: unknown): Record<string, unknown> {
+    const ns = (moduleNamespace ?? {}) as Record<string, unknown>;
+    // 形状 A：`{ ...顶层键, default: <整个 JSON> }` —— 除 `default` 之外的顶层键就是真实内容。
+    // 用 filter 而不是 `delete ns.default`：`delete` 触 lint/performance/noDelete，而 biome 给的
+    // 「unsafe fix」（改成 `= undefined`）是**错的** —— 键还在，`Object.keys` 照样数得到它。
+    const withoutInterop = Object.fromEntries(Object.entries(ns).filter(([key]) => key !== "default"));
+    if (Object.keys(withoutInterop).length > 0) {
+      return withoutInterop;
+    }
+    // 形状 B：整份 JSON 都挂在 `default` 上
+    const wrapped = ns.default;
+    return (wrapped && typeof wrapped === "object" ? wrapped : {}) as Record<string, unknown>;
+  }
+
+  const locales: [string, unknown][] = [
+    ["en", en],
+    ["zh-cn", zhCN],
+    ["zh-tw", zhTW],
+  ];
+  const keySets = new Map(locales.map(([name, mod]) => [name, flattenKeys(localeObject(mod))]));
+
+  it("三个文件的键集逐键相同，且不一致时逐条报出缺/多的是哪些键", () => {
+    const baseline = "en";
+    const baseKeys = keySets.get(baseline) as string[];
+
+    // ① 反空洞的伴随断言：读不到东西时，下面那条「三者互等」会以
+    //    「三个空集互相相等」的形式变绿 —— 那不是通过，是没读到。用一个必定存在的键当探针：
+    //    它一丢，说明读到的不是 locale 的顶层键（例如拿到的是互操作外壳而不是内容）。
+    expect(baseKeys, "读不到 en 的 locale 内容，键集断言会失去意义").toContain("command.publish.name");
+
+    // ② 主断言。把差异拼成一段**能直接指向原因**的文本，而不是一个「209 ≠ 208」的数字：
+    //    那个数字只说明不等，读的人还得自己去两份文件里找是哪个键。
+    //    每一条都带文件名 + 方向（缺/多）+ 键名。
+    const differences: string[] = [];
+    for (const [name, keys] of keySets) {
+      if (name === baseline) continue;
+      const file = `src/i18n/locales/${name}.json`;
+      const missing = baseKeys.filter((k) => !keys.includes(k)).sort();
+      const extra = keys.filter((k) => !baseKeys.includes(k)).sort();
+      if (missing.length > 0) {
+        differences.push(`${file} 比 ${baseline} 少 ${missing.length} 个键：${missing.join(", ")}`);
+      }
+      if (extra.length > 0) {
+        differences.push(`${file} 比 ${baseline} 多 ${extra.length} 个键：${extra.join(", ")}`);
+      }
+    }
+
+    const counts = [...keySets].map(([name, keys]) => `${name}=${keys.length}`).join(" / ");
+    const report =
+      differences.length === 0
+        ? ""
+        : [
+            `三语 locale 的键集不一致（${counts}）：`,
+            ...differences.map((line) => `  · ${line}`),
+            "修法：三份 src/i18n/locales/*.json 必须同步增删键，否则切到缺键的那个语言时界面会显示原始键名。",
+          ].join("\n");
+
+    expect(report).toBe("");
   });
 });
