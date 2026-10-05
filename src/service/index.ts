@@ -129,27 +129,106 @@ function createEmptyPost(): Post {
   } as Post;
 }
 
-class HaloService {
-  private readonly site: HaloSite;
-  private readonly app: App;
-  private readonly settings: HaloSetting;
+/**
+ * 文章与独立页面两条编排路径**逐字相同**的那几个成员。
+ *
+ * 收在这里的只有「搬过去不改一行语义」的东西：站点/客户端字段、发布事务重试、正文切分、
+ * 便签播报、发布失败文案。抽取的收益是实打实的 —— `withPublishRetry` 的 3 次 500ms 退避是
+ * 1-A 花了整轮才调对的，复制一份必然在某次改动后分叉，而分叉的表现是「文章会重试、页面不会」，
+ * 本地完全看不出来。
+ *
+ * ⚠️ **回写笔记（`applyPostToFrontmatter` 那一步）刻意不收在这里**：文章的前言契约是 9 键、
+ * 页面只有 3 键（`site` / `name` / `publish`）。合成一份之后，每推一次页面就会往笔记里写进
+ * 5 个 `undefined`（`cover` / `halo.pinned` / `halo.priority` / `halo.publishTime` / `halo.template`）。
+ * 两个子类各写各的回写，正是因为它们管的**不是同一件事**。
+ */
+export class HaloServiceBase {
+  protected readonly site: HaloSite;
+  protected readonly app: App;
+  protected readonly settings: HaloSetting;
   /**
    * MCP 客户端。**可注入**——测试传 `createFakeClient()` 造的对象，生产代码不传、用真实的。
    * 可注入是本计划全部服务层测试的前提：`McpClient` 内部走 `requestUrl`，
    * 而测试要断言的是「调了哪个工具、传了什么参数」，不是「发了什么 HTTP 请求」。
    */
-  private readonly client: McpClient;
+  protected readonly client: McpClient;
 
   constructor(app: App, settings: HaloSetting, site: HaloSite, client?: McpClient) {
     this.app = app;
     this.settings = settings;
     this.site = normalizeSite(site);
+    this.client = client ?? new McpClient({ endpoint: mcpEndpointOf(this.site), token: this.site.mcpToken });
+  }
 
+  /**
+   * 切出 frontmatter **之后**的正文。
+   *
+   * 抽出来是因为它有两处调用，且必须用**同一套**切法：规划阶段（读盘或调用方递进来的那份）
+   * 与执行阶段（上传图片之后的那份）。切法一旦分叉，实际发出去的正文就会与预览里报的字符数
+   * 对不上 —— 差的正是 frontmatter 那几十个字符，用户按预览估的长度就白估了。
+   */
+  protected bodyOf(markdown: string, file: TFile): string {
+    const position = this.app.metadataCache.getFileCache(file)?.frontmatterPosition;
+
+    return position ? markdown.slice(position.end.offset) : markdown;
+  }
+
+  /** 便签播报。`quiet` 为真时什么也不做 —— 返回值仍然带着原因，调用方自己去汇总 */
+  protected report(reason: string, quiet?: boolean): void {
+    if (!quiet) {
+      new Notice(reason);
+    }
+  }
+
+  /**
+   * 发布失败的提示文案（写已经发出去、服务端拒绝了）。
+   *
+   * 这里刻意**不**走 `renderErrorMessage`：这条路上 `McpError.detail` 就是最有价值的线索
+   * （工具级失败的全部说明都只在它里面），保留「发布失败」这个框架 + 服务端原文，
+   * 比换成 `transport.error.*` 的泛化处置指引更贴近用户此刻的处境。改动它会破坏既有断言。
+   * 所以只借 `withErrorDetail` 那一半（补 detail），key 由这里写死。
+   */
+  protected publishFailureMessage(error: unknown): string {
+    return withErrorDetail(i18next.t("service.error_publish_failed"), error);
+  }
+
+  /**
+   * 把一次发布事务包进重试。
+   *
+   * `operation` 拿得到**尝试序号**（首次为 0）。这不是为了方便计数，而是调用方真的需要它：
+   * 更新分支的首次尝试必须沿用规划阶段读到的那份远端状态，重试才重新拉取 ——
+   * 见 `executePublish`。把序号交给闭包，比在外面挂一个布尔量更难失去同步。
+   */
+  protected async withPublishRetry<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await operation(attempt);
+      } catch (error) {
+        if (attempt >= PUBLISH_RETRY_COUNT) {
+          throw error;
+        }
+
+        await this.sleep(PUBLISH_RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+}
+
+class HaloService extends HaloServiceBase {
+  constructor(app: App, settings: HaloSetting, site: HaloSite, client?: McpClient) {
+    super(app, settings, site, client);
+
+    // 图片上传的缓存容器。只有文章路径会用到（页面路径没有图片上传），故留在子类里初始化，
+    // 而不拖进基类 —— 基类的成员应当是两条路径都真的需要的东西。
     if (!this.settings.imageUploadCache) {
       this.settings.imageUploadCache = {};
     }
-
-    this.client = client ?? new McpClient({ endpoint: mcpEndpointOf(this.site), token: this.site.mcpToken });
   }
 
   /** 图片上传模块的运行上下文。三个调用点共用，避免各写一遍字段拼装 */
@@ -528,19 +607,6 @@ class HaloService {
   }
 
   /**
-   * 切出 frontmatter **之后**的正文。
-   *
-   * 抽出来是因为它有两处调用，且必须用**同一套**切法：规划阶段（读盘或调用方递进来的那份）
-   * 与执行阶段（上传图片之后的那份）。切法一旦分叉，实际发出去的正文就会与预览里报的字符数
-   * 对不上 —— 差的正是 frontmatter 那几十个字符，用户按预览估的长度就白估了。
-   */
-  private bodyOf(markdown: string, file: TFile): string {
-    const position = this.app.metadataCache.getFileCache(file)?.frontmatterPosition;
-
-    return position ? markdown.slice(position.end.offset) : markdown;
-  }
-
-  /**
    * 读远端文章，**带发布级重试**。
    *
    * 规划阶段的这次读与执行阶段重试时的重读是同一件事：都要求「一次瞬时抖动不该毁掉一次发布」。
@@ -550,13 +616,6 @@ class HaloService {
    */
   private async readRemotePost(name: string): Promise<Post> {
     return this.withPublishRetry(async () => (await this.getPost(name)).post);
-  }
-
-  /** 便签播报。`quiet` 为真时什么也不做 —— 返回值仍然带着原因，调用方自己去汇总 */
-  private report(reason: string, quiet?: boolean): void {
-    if (!quiet) {
-      new Notice(reason);
-    }
   }
 
   /**
@@ -648,18 +707,6 @@ class HaloService {
   }
 
   /**
-   * 发布失败的提示文案（写已经发出去、服务端拒绝了）。
-   *
-   * 这里刻意**不**走 `renderErrorMessage`：这条路上 `McpError.detail` 就是最有价值的线索
-   * （工具级失败的全部说明都只在它里面），保留「发布失败」这个框架 + 服务端原文，
-   * 比换成 `transport.error.*` 的泛化处置指引更贴近用户此刻的处境。改动它会破坏既有断言。
-   * 所以只借 `withErrorDetail` 那一半（补 detail），key 由这里写死。
-   */
-  private publishFailureMessage(error: unknown): string {
-    return withErrorDetail(i18next.t("service.error_publish_failed"), error);
-  }
-
-  /**
    * 读取失败的提示文案。
    *
    * 非 `McpError` 的意外错误才回落到「文章不存在」—— 那正是这句话本来就对应的情形；
@@ -699,33 +746,6 @@ class HaloService {
     }
 
     return outcome;
-  }
-
-  /**
-   * 把一次发布事务包进重试。
-   *
-   * `operation` 拿得到**尝试序号**（首次为 0）。这不是为了方便计数，而是调用方真的需要它：
-   * 更新分支的首次尝试必须沿用规划阶段读到的那份远端状态，重试才重新拉取 ——
-   * 见 `executePublish`。把序号交给闭包，比在外面挂一个布尔量更难失去同步。
-   */
-  private async withPublishRetry<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await operation(attempt);
-      } catch (error) {
-        if (attempt >= PUBLISH_RETRY_COUNT) {
-          throw error;
-        }
-
-        await this.sleep(PUBLISH_RETRY_DELAY_MS * (attempt + 1));
-      }
-    }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, ms);
-    });
   }
 
   /**

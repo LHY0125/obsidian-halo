@@ -1,4 +1,6 @@
 import type { SinglePage } from "@halo-dev/api-client";
+import type { TFile } from "obsidian";
+import { slugify } from "transliteration";
 import type { McpContentItemBase } from "./post-mapping";
 
 /**
@@ -100,5 +102,120 @@ export function toPageUpdateArgs(page: SinglePage, raw: string): Record<string, 
     // **不要**把它做成 frontmatter 可配的 —— 那会引入一个「读不回来」的字段，
     // 而 1-B 的教训正是「写出去读不回来的字段会静默漂移」。
     allowComment: true,
+  };
+}
+
+/**
+ * 独立页面认得的**前言**字段。
+ *
+ * `halo` 下只有这三个键。1-B 为文章开放的 6 个元数据字段（`visible` / `pinned` / `priority` /
+ * `publishTime` / `allowComment` / `template`）对页面**没有意义** —— 写了也不报错，只是被忽略。
+ * 这是刻意的：`halo_update_single_page` 的入参里**根本没有**它们，为它们造一层校验只会让用户
+ * 以为自己写下的值生效了，而站点上什么都没变。
+ *
+ * `excerpt` / `cover` / `categories` / `tags` 同样不在**读取**侧：页面一件都发不出去
+ * （`toPageUpdateArgs` 的 7 个键里没有它们）。收进来就是一份「写了也不会有结果」的配置。
+ */
+export interface HaloPageFrontmatter {
+  title?: string;
+  slug?: string;
+  halo?: {
+    site?: string;
+    name?: string;
+    publish?: boolean;
+  };
+}
+
+export interface ApplyPageFrontmatterOptions {
+  activeFile: TFile;
+  matterData?: HaloPageFrontmatter;
+  useActiveFileDefaults: boolean;
+}
+
+/**
+ * 把本地笔记的前言套到一个页面上（读方向 / 建 spec）。
+ *
+ * **只处理 `title` 与 `slug`**，而且刻意**不复用** `local-content.ts` 的
+ * `applyPostFrontmatter()`：两者管的不是同一件事 —— 文章那份要展开 6 个元数据字段、要挑分类
+ * 标签、要处理 `cover` 与 `excerpt`，页面一件都不需要。把文章那份改成泛型再传一个
+ * 「页面时请传 `undefined`」的参数，就是用**一个恒为 undefined 的开关**去表达
+ * 「这两种内容不一样」，而那个参数一旦哪天被传了真值，症状是发布时才出现的。
+ *
+ * 两条回落与文章路径一致：`useActiveFileDefaults` 为真（＝这次是**新建**）时，缺 `title` 用文件名、
+ * 缺 `slug` 用 title 的拼音；为假（＝这次更新一个已存在的页面）时，缺的字段**保留远端值** ——
+ * 本地没写不等于要把远端清空。
+ */
+export function applyPageFrontmatter(page: SinglePage, options: ApplyPageFrontmatterOptions): SinglePage {
+  const { activeFile, matterData, useActiveFileDefaults } = options;
+  const nextPage: SinglePage = {
+    ...page,
+    metadata: {
+      ...page.metadata,
+      annotations: {
+        ...page.metadata.annotations,
+      },
+    },
+    spec: {
+      ...page.spec,
+      excerpt: {
+        ...page.spec.excerpt,
+      },
+    },
+  };
+
+  if (matterData?.title) {
+    nextPage.spec.title = matterData.title;
+  } else if (useActiveFileDefaults) {
+    nextPage.spec.title = activeFile.basename;
+  }
+
+  if (matterData?.slug) {
+    nextPage.spec.slug = matterData.slug;
+  } else if (useActiveFileDefaults) {
+    nextPage.spec.slug = slugify(nextPage.spec.title, { trim: true });
+  }
+
+  return nextPage;
+}
+
+export interface PageToFrontmatterOptions {
+  /** 写入 `halo.site` 的站点 URL */
+  siteUrl: string;
+  /**
+   * 写入 `halo.name` 的值。**必须由调用方显式给**，理由与 `PostToFrontmatterOptions.name`
+   * 逐字相同：服务端可能不回 `name`（`toSinglePage()` 会把缺的填成空串），照搬回读结果会把
+   * `halo.name` 写成 `""` —— 下次推送读不到它，于是**再建一个重复页面**，而用户看到的是「推送成功」。
+   */
+  name: string;
+}
+
+/**
+ * 把一个（服务端归一化之后的）页面回写进前言（写方向）。
+ *
+ * **三键的 `halo` 块**，与 `applyPostToFrontmatter()` 的九键是**两个契约**而不是一个：
+ * `SinglePage.spec` 上没有 `cover` / `pinned` / `priority` / `publishTime` / `template`，
+ * 借文章那份来写会往每一篇页面笔记里塞进 **5 个 `undefined`**（`cover` 与 halo 里的四项）。
+ * 「一个函数写两份契约」正是本阶段要消灭的分叉：改文章的契约会静默改掉页面的行为。
+ *
+ * 取值一律来自 `page.spec`（服务端回读之后的产物），**不来自 `matterData` 或本地字面量** ——
+ * 从本地字面量回写会把**陈旧值**写进前言，下次推送据此静默改掉远端状态（1-A 的 I1）。
+ */
+export function applyPageToFrontmatter(
+  frontmatter: Record<string, unknown>,
+  page: SinglePage,
+  options: PageToFrontmatterOptions,
+): void {
+  frontmatter.title = page.spec.title;
+  frontmatter.slug = page.spec.slug;
+  // 与文章路径同一条判据（`autoGenerate` 为真说明摘要由服务端生成，本地不钉一个值）。
+  // 页面这条今天**恒为「不钉」**：`toSinglePage()` 永远给 `autoGenerate: true`
+  //（MCP 的页面项没有 `autoGenerateExcerpt` 字段）。保留它而不是写死，是因为
+  // 页面根本没有 excerpt 入参 —— 写成空串会抹掉用户本地写的摘要，而那个摘要发不出去。
+  frontmatter.excerpt = page.spec.excerpt.autoGenerate ? undefined : page.spec.excerpt.raw;
+
+  frontmatter.halo = {
+    site: options.siteUrl,
+    name: options.name,
+    publish: page.spec.publish,
   };
 }
