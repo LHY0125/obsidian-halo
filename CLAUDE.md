@@ -19,7 +19,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **接手前先读这三份**——计划里记录了三条实测出来的 MCP 协议硬约束（`Accept` 必须含 `text/event-stream`、必须先 `initialize`、无 session），弄错任何一条都只会得到「400 且响应体为空」，看不到原因。其余协议约束见下方「MCP 协议硬约束」一节。
 
-**站点侧前置条件**：Halo **≥ 2.26**，且已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)；在后台「工具 → MCP 服务」创建的访问密钥以 `hmcp_` 开头，并需为它勾选**文章 / 回收站（回收与恢复）/ 分类 / 标签 / 附件 / 全文检索**相关工具。（这份清单必须与 `src/mcp-self-check.ts` 的 `REQUIRED_TOOLS` 逐组对齐 —— **它才是自检断言的权威**；文档列少了，用户照做后自检会误报「缺少工具」。）
+**站点侧前置条件**：Halo **≥ 2.26**，且已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)；在后台「工具 → MCP 服务」创建的访问密钥以 `hmcp_` 开头，并需为它勾选下面**四组共 23 个**工具（分组与计数以 `src/mcp-self-check.ts` 的 `REQUIRED_TOOLS` 为准 —— **它才是自检断言的权威**；文档列少了，用户照做后自检会误报「缺少工具」）：
+
+| 组 | 个数 | 工具 |
+|---|---|---|
+| 文章 | 7 | 列表 / 读取 / 新建 / 修改 / 发布状态 / 回收 / 恢复 |
+| 独立页面 | 7 | 与文章**同构的一套**（没有分类标签 —— 页面本来就没这两个字段） |
+| 分类与标签 | 4 | 两类的列举与创建各一 |
+| 检索与附件 | 5 | 全文检索、附件列表 / 读取 / 删除、附件上传 |
+
+评论、主题设置、`upload_attachment_from_url` 以及插件贡献的工具（PluginMoments / image-stream）**刻意不在其中** —— 插件不调用它们，勾了也用不上。（2026-10-05 对真实站点拉过一次 `tools/list`，51 个工具里上述 23 个逐条命中；`pnpm test:contract` 是它的自动化版本。）
 
 ## 常用命令
 
@@ -53,6 +62,30 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 命令本身很薄，真正的编排在私有方法里，统一模式是：**解析目标站点 → 规划（零写入）→ 预览确认 →
 上传图片 → 执行**。
+
+**命令清单**（16 条；`id` 用于核对，`name` 是 `src/i18n/locales/` 里的取值，Obsidian 会把它们显示成 `<插件名>: <name>`）：
+
+| id | 作用 | 类型 |
+|---|---|---|
+| `publish` | 发布当前笔记到解析出的站点 | 单篇 |
+| `publish-with-defaults` | 发布到默认站点，**不经过路由规则** | 单篇 |
+| `upload-images` | 上传笔记里的本地图片并替换链接 | 单篇 |
+| `update-post` | 从 Halo 更新当前笔记内容 | 单篇 |
+| `pull-post` | 从 Halo 拉取文章（含选文列表） | 单篇 |
+| `push-page` | 把当前笔记**推成独立页面** | 独立页面 |
+| `pull-page` | 从站点拉一个独立页面到本地 | 独立页面 |
+| `manage-pages` | 管理站点上**不在回收站**的独立页面 | 独立页面 |
+| `recycle-post` | 回收站（文章）：列出并恢复 | 远端管理 |
+| `recycle-page` | 回收站（页面）：列出并恢复 | 远端管理 |
+| `search-content` | 查重：搜站点上的内容（**含草稿**） | 远端管理 |
+| `manage-attachments` | 管理附件：列出 / 复制链接 / 删除 | 远端管理 |
+| `mcp-self-check` | MCP 连通性自检（握手 + 断言 `REQUIRED_TOOLS`） | 自检 |
+| `batch-draft` / `batch-publish` / `batch-unpublish` | 三个批量命令，共用 `runBatchCommand(action)` | 批量 |
+
+后七条（`push-page` 起的独立页面与远端管理两组）是**「内容能力对齐」阶段新增**的。它们与前面那批的差别不只是功能：
+`push-page` 走 `PageService`（见下方「独立页面」一节），而 `pull-page` / `manage-pages` / 两条回收站 /
+`search-content` / `manage-attachments` **手上没有本地文件** —— 站点只能靠 `pickSiteForPull()`
+（默认站点 / 唯一站点 / 弹窗）拿，走不了 `resolveSiteFor(file)`（那个要 `file.path` 才能匹配路由规则）。
 
 - 站点解析优先级：frontmatter 的 `halo.site` → **路由规则表自上而下首个命中** → 设置里的默认站点 →
   单站点直取 → 弹窗让用户选
@@ -88,9 +121,17 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
   「将新建」跟着勾选实时重算，而不必每勾一次就打一次 MCP。
 - **执行阶段失败不中断**：这是对上游「任一图片失败即中止发布」的**刻意偏离**，只用于批量路径 ——
   118 篇里第 3 篇失败不该让后面 115 篇一篇都不发。单篇命令仍保留中止语义。
-- **末尾汇总的「跳过」只有数字、没有原因**：「成功 N 篇，失败 N 篇，另有 N 篇在执行前就被跳过」，
-  逐条列出的是**失败项**。「执行前跳过」的逐条原因**只在确认弹窗里**（`BatchSkip` 带 key/params，
-  由弹窗渲染）。把跳过原因也逐条重列到汇总是**终审留下的开放项，尚未实现** —— 文档不许写成已实现。
+- **末尾汇总把三档分开报，且执行前跳过的也逐条列出原因**（此前这里只有一个数字、没有原因）：
+  汇总行是「成功 N 篇，失败 N 篇，另有 N 篇在执行前就被跳过」，随后**分两段**列明细 ——
+  先**失败项**（`路径 —— 原因`），再**另起一段**（标题「执行前跳过的 N 篇」）并**逐条列出**执行前跳过的那几篇及原因。
+  两段**刻意不合成一张清单**：失败是「跑了但炸了」（用户要去站点上确认那篇现在的状态），而跳过是
+  「压根没让它跑」（用户要去改配置或补发布）—— 混在一起时用户只能靠原因文字猜「这一篇到底有没有
+  被尝试过」，猜错的代价是把一篇**从没动过**的文章当成半成品去站点上找。
+  确认弹窗里**本来就有**这份跳过清单（那是用户在按下「执行」之前看的），末尾这份不是重复，而是补上时机：
+  跑完之后确认弹窗已经关了，用户此刻手上只有汇总。两处渲染的是**同一份** `BatchSkip`（带 key/params，
+  由弹窗渲染），所以用的是**同一套** `batch.skip_*` 文案键，同一个原因在两处不会说法不一致。
+  汇总标题按 `action` 分档（`batch.summary_title_${action}`），**不用**一句通用的「批量操作完成」——
+  三个命令跑完都是同一句的话，用户点了「批量推草稿」看到「成功 118 篇」，弹窗没说是草稿还是已经发出去了。
 
 **批量推草稿与批量发布也会改写本地笔记**，不是只动远端，而且**不止图片链接这一项**：
 `executePublish()` 里的 `processFrontMatter()` **无条件**回写 `title` / `slug` / `cover` / `excerpt` /
@@ -132,10 +173,14 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 | 文件 | 唯一职责 |
 |---|---|
-| `service/index.ts` | 编排：规划（`planPublish`，零写入）/ 执行（`executePublish`）/ 更新 / 拉取 / 分类标签解析 / 重试 / 失败文案 |
+| `service/index.ts` | `HaloServiceBase`（文章与页面**共用**的那部分：站点/客户端字段、发布事务重试、正文切分、便签播报、发布失败文案）+ `HaloService`（编排：规划 `planPublish` 零写入 / 执行 `executePublish` / 更新 / 拉取 / 分类标签解析） |
 | `service/local-content.ts` | 本地内容：frontmatter 应用（`applyPostFrontmatter`）、正文里的本地图片引用解析 |
 | `service/image-upload.ts` | 图片上传：≤ 7 MiB 走 MCP base64，超出回退 REST multipart |
 | `service/post-mapping.ts` | 适配：MCP 的**扁平** post 表示 ↔ `{metadata, spec}` 嵌套结构 |
+| `service/page-mapping.ts` | 独立页面的映射：扁平表示 ↔ `SinglePage`（`toSinglePage`）、入参投影（`toPageCreateArgs` / `toPageUpdateArgs`）、**页面自己那一对前言函数**（`applyPageFrontmatter` / `applyPageToFrontmatter`） |
+| `service/page-service.ts` | 独立页面的编排（`PageService`，继承 `HaloServiceBase`）：推 / 拉 / 发布状态 / 回收 / 恢复 |
+| `content-kind.ts` | 两类内容的**工具名表**（`CONTENT_TOOLSETS`）与 `ContentKind`。**零项目内依赖的叶子**，拆出去是为破 import 环（`service/index.ts` 要按它分派工具名，而 `service/page-service.ts` 又要用 `service/index.ts` 的编排基类） |
+| `pagination.ts` | 通用翻页取数器（`fetchAllPages` / `LIST_PAGE_SIZE` / `PagedResult`）。**零项目内依赖的叶子**；所有列表取数共用同一个页大小与同一套终止保证 |
 | `frontmatter-map.ts` | frontmatter 契约的**唯一**一处：6 个元数据字段的校验（`parseHaloPostFields`）与回写（`applyPostToFrontmatter`） |
 | `site-routing.ts` | 站点解析的唯一入口（`resolveSite`）；重导出 `glob.ts` 的 `matchGlob` / `normalizeRulePattern` |
 | `glob.ts` | glob 模式匹配（路径 → 站点的路由规则用）。**零项目内依赖的叶子**，拆出去是为破 import 环 |
@@ -143,6 +188,13 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 | `publish-preview-modal.ts` | 发布预览弹窗；**取消返回 `false`** |
 | `batch-publish.ts` | 批量：候选收集（`collectBatchCandidates`，含跳过原因）、规划（`planBatch`）、按勾选算汇总（`summarizeSelection`）、执行（`runBatch`） |
 | `batch-confirm-modal.ts` | 批量确认弹窗（`BatchConfirmModal`）+ 末尾汇总弹窗（`BatchSummaryModal`） |
+| `page-selection-model.ts` | 拉取独立页面时选远程页面。⚠️ 与 `post-selection-model.ts` 同为 `-model` 后缀的 Modal。映射是纯函数 `toSelectablePages(items)`，**取数走 `PageService.getPages()`**（刻意不自己造 client —— 翻页与触顶提示都已经在服务层里，抄第二遍漏掉的表现是「选择器里少了一部分页面」） |
+| `search-preview.ts` | 查重的纯数据层：`McpSearchItem` → `SearchResult`、`<B>` 高亮剥离（`stripHighlight`）、取数（`searchContent`） |
+| `search-modal.ts` | 查重结果弹窗（`SearchResultsModal`）+ 关键词输入弹窗。行数据由纯函数 `buildSearchRows()` 算好，弹窗只做 `createEl` |
+| `attachment-model.ts` | 附件的纯数据层：翻页取全（`fetchAttachments`）、字段规范化、`formatBytes`、删除（带乐观锁 `expectedVersion`） |
+| `attachment-modal.ts` | 附件管理弹窗（`AttachmentManagerModal`）：列表 / 复制链接 / 删除（**二次确认且不可逆**） |
+| `recycle-model.ts` | 回收站的纯数据层：按 `kind` + `recycled` 取数（`fetchRecycled` / `fetchActivePages` 共用一份私有实现）、恢复 |
+| `recycle-modal.ts` | 回收站弹窗（`RecycleBinModal`，恢复）+ 独立页面管理弹窗（`PageManagerModal`，移入回收站）。**两个弹窗的动作刻意不重叠** |
 | `site-routing-modal.ts` | 编辑单条路由规则（模式 + 目标站点） |
 | `transport/mcp-client.ts` | MCP JSON-RPC 客户端（`McpClient`，唯一出口） |
 | `transport/errors.ts` | `McpError` 与 HTTP/工具级失败的归一化 |
@@ -161,8 +213,55 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
   发布状态那一步必须留在重试闭包**内**：移出去会同时丢掉重试覆盖与「建文章成功、发布状态失败」的自愈回填。
 - 分类/标签**不存在会自动创建**，slug 用 `transliteration` 转拼音（所以中文标题的 permalink 是拼音）。副作用：一次手误的标签名会在站点上永久留下垃圾标签。
 - 分类/标签的**显示名解析失败要跳过该字段的回写**，绝不落回 `metadata.name`：消费方按 displayName 精确匹配，写入 name 会在下次发布时造出垃圾分类/标签。注意 `getCategoryDisplayNames()` / `getTagDisplayNames()` 返回 `undefined`（无从解析）与 `[]`（确实没有）是两回事，签名已如实标注。
-- **两处 `size` 上限都还没实现翻页，但两者的提示行为不同 —— 别把它们混为一谈**：`HaloService.getCategories()` / `getTags()`（分类、标签）写死 `size: 100`（schema 上限）且**没有任何提示**，超过 100 会**静默**漏掉后面的；而 `post-selection-model.ts` 的 `fetchSelectablePosts()`（拉取弹窗的文章列表）虽然同样只取一页，却会在 `hasNext` 为真时弹 `post_selection_modal.notice_truncated`，**明确告诉用户列表不完整**。两处都**只取一页**：`fetchSelectablePosts()` 会读 `hasNext`，但**只用它提示列表不完整**，不据此取下一页；真正的**翻页**（按 `hasNext` / `totalPages` 再取一页）两处都还没实现。站点现有 74 篇文章，一页够用。
-- **选择器列表项的三个字段是可选契约**：`halo_list_posts` 的 item `required` 只有 `["published","publishRequested","recycled","categories","tags"]`，`name` / `title` / `slug` 都不在其中。所以 `toSelectablePosts()` 会剔除缺 `name` 的项（无法拉取）、把缺 `title` 的回落成 `name`（否则一行空白）。
+- **列表取数一律「翻页取全」，只在触顶时才提示**：`HaloService.getCategories()` / `getTags()`、`post-selection-model.ts` 的 `fetchSelectablePosts()`、`service/page-service.ts` 的 `getPages()`、`attachment-model.ts` 的 `fetchAttachments()`、`recycle-model.ts` 的 `fetchRecycled()` / `fetchActivePages()` 全部走 `pagination.ts` 的 `fetchAllPages()`，按 `hasNext` 逐页取到没有下一页为止。页大小统一是 `LIST_PAGE_SIZE`（100，schema 的 `maximum`），**默认最多 20 页**（= 2000 条）。此前的两种坏处置都已消灭：分类/标签写死 `size: 100` 且**静默**漏掉后面的；拉取列表读 `hasNext` 但**只用它提示不完整**、不翻页（会在列表**已经完整**时谎报不完整 —— `hasNext` 为真只是翻页过程中的正常中间状态）。
+  **唯一的提示条件是「触顶 `maxPages`」**，那时 `fetchAllPages()` 回 `truncated: true`，调用方据此弹 `service.notice_list_truncated` / `post_selection_modal.notice_truncated`（自检之外唯一的「列表不完整」出口）。`maxPages` 这个上限**不是为了省请求，是为了保证终止**：站点侧若给出一个永远为真的 `hasNext`，没有上限的循环会一直发请求直到 Obsidian 卡死。所以 `fetchAllPages()` 有**两条**终止保证，缺一不可 —— ① `hasNext` 为假（正常出口）；② 某一页返回空 `items`（即使 `hasNext` 还说有）。判据判「真的不完整」而不是「还有下一页」，是这一节的要点。
+- **列表项的公共字段抽在 `McpContentItemBase` 里，但两种内容的 `required` 契约不同 —— 别把它当成一份完整契约**：文章与页面共有的 `name` / `title` / `slug` / `excerpt` / `published` / `publishRequested` / `recycled` / `visible` / `permalink` 只声明一次（`service/post-mapping.ts` 的 `McpContentItemBase`，`McpPostItem` 与 `McpSinglePageItem` 各自 `extends` 它），不抽的话两份声明必然在某次服务端改动后分叉，表现是「文章读得到、页面读不到」。**差异在 `required` 上**：`halo_list_posts` 的 item `required` 是 `["published","publishRequested","recycled","categories","tags"]`，`halo_list_single_pages` 的是 `["published","publishRequested","recycled"]`（页面没有 categories/tags）—— 而 **`name` / `title` / `slug` 三者在两份里都不在其中**，所以它们随时可能缺席。两个选择器的规范化因此各写一份（`toSelectablePosts()` 与 `toSelectablePages()`，逐字同构但**刻意不复用**同一个函数：合一会让签名退化成结构类型，从而丢掉「两种内容字段集不同」这条信息）：**缺 `name` 的项直接剔除**（那是拉取命令的唯一入参，列一个按了就坏的按钮比不列更糟）、**缺 `title` 的回落成 `name`**（用 `||` 而非 `??` —— 空串同样是一行空白，显示场景要的是「非空」而不是「非 null」）、缺 `slug` 回落空串（它只是副标题）。
+  同一族契约在另外两处**更宽**：`halo_list_attachments` 的 item `required` 是**空数组 `[]`**（全部字段可选，所以 `toAttachmentItems()` 要逐项兜底）；`halo_search_content` 的 `required` 含 `type` 但 **`name` / `title` / `excerpt` / `permalink` 都不在里面**（`toSearchResults()` 同样剔除缺 `name` 的项）。
+
+### 独立页面 — `src/service/page-service.ts`
+
+独立页面（Halo 的 `SinglePage`）与文章是**同一件事的两个实例**，不是两套实现：
+
+- **编排共用 `HaloServiceBase`**（定义在 `src/service/index.ts`）：站点/客户端字段、
+  `withPublishRetry()` 的 3 次 500ms 退避、正文切分 `bodyOf()`、便签播报、发布失败文案。
+  `PageService` 只覆盖**实质差异**：① 工具名换一套（`CONTENT_TOOLSETS.page` 的 7 个）；
+  ② 入参只有 8 键（create）/ 7 键（update）；③ 前言只认三个 `halo` 键。重试策略共用是刻意的：
+  复制一份必然在某次改动后分叉，而分叉的表现是「文章会重试、页面不会」，本地完全看不出来。
+- **回写笔记用的是页面自己那一对函数**：`applyPageFrontmatter()`（本地前言 → 页面 `spec`）与
+  `applyPageToFrontmatter()`（服务端页面 → 本地前言），都在 `service/page-mapping.ts`。
+  **刻意不复用文章那一对**（`applyPostFrontmatter()` / `applyPostToFrontmatter()`）：
+  借文章那份来写会往每一篇页面笔记里塞进 **5 个 `undefined`**（`cover` / `halo.pinned` /
+  `halo.priority` / `halo.publishTime` / `halo.template`）。「一个函数写两份契约」正是这一轮改造要消灭的分叉。
+
+**两个前言契约的差别就是键数**：
+
+| | `halo` 块 | 内容 |
+|---|---|---|
+| 文章 | **9 键** | `site` / `name` / `publish` + 6 个元数据字段 `visible` / `pinned` / `priority` / `publishTime` / `allowComment` / `template` |
+| 独立页面 | **3 键** | 只有 `site` / `name` / `publish` |
+
+**独立页面没有的字段**：`categories` / `tags` / `pinned` / `priority` / `publishTime` / `template` /
+`cover` / `excerpt`。这不是「服务端没回」，是**页面这个资源本来就没有这些概念** —— 所以
+`toPageUpdateArgs()` 发出去的 7 个键里一个都没有它们，用户在页面笔记里写了这些字段也**不会有任何结果**
+（`HaloPageFrontmatter` 因此一个都不收：为「写了也不会有结果」的字段造一层校验，只会让他以为自己写下的值生效了）。
+`excerpt` 还要多说一句：**回写时整个键都不出现**（文章路径会写它），因为页面根本不发 `excerpt`，
+照文章那条判据写就是每次推送都把本地摘要赋成 `undefined` —— 两个方向都是在丢用户写下的内容。
+
+其余与文章路径的异同：
+
+- **页面没有规划 / 预览 / 图片上传**：它们通常是「关于」「友链」这类短文档，所以 `pushPage()` 是一条
+  **直写**路径，没有 `planPublish()` 那种「零写入规划」阶段。真需要传图的页面，用户可以先用
+  「`Halo: 上传图片`」那条命令。
+- **防跨站误推的判据与文章相同**：前言的 `halo.site` 与目标站点不一致时**一个工具都不调**，直接返回失败。
+- **发布状态同样是三档**：命令的显式覆盖 > 前言的 `halo.publish` > 设置里的 `publishByDefault`。
+  第三档在开关为**假**时**不发**那次调用（而不是发一次 `publish: false`）—— 后者会把一篇已发布的页面
+  悄悄退回草稿，而本地看不出任何异常，用户看到的是「推送成功」。
+- **`halo_get_single_page` 的 `truncated` 为真时同样必须抛错**，绝不能把截断正文当完整页面写进本地笔记。
+- `allowComment` 在入参里**写死 `true`**：`halo_create_single_page` 收它，但 `halo_get_single_page`
+  **不回它**，本地无从得知远端值。**不要**把它做成 frontmatter 可配的 —— 那会引入一个「写出去读不回来」
+  的字段，而 1-B 的教训正是「写出去读不回来的字段会静默漂移」。
+- **页面的回收 / 恢复是与文章并列的两套工具**（`halo_recycle_single_page` / `halo_restore_single_page`，
+  不是带布尔参数的同一个），所以 `recycle-post` / `recycle-page` 拆成两条命令，只在 `kind` 上分档。
 
 ### MCP 协议硬约束
 
@@ -179,14 +278,18 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 ### 设置与弹窗
 
-`src/settings.ts` 定义 `HaloSetting` / `HaloSite` 与设置面板；三个弹窗各司其职：
+`src/settings.ts` 定义 `HaloSetting` / `HaloSite` 与设置面板。站点相关的四个弹窗各司其职：
 
 | 文件 | 作用 |
 |---|---|
 | `src/sites-modal.ts` | 站点列表（增删、设为默认） |
 | `src/site-editing-modal.ts` | 编辑单个站点。内含「Validate」按钮，已改为跑 **MCP 自检**（`runSelfCheck` + `mcpToken`）——校验的正是用户真正要填的那把密钥 |
 | `src/site-selection-modal.ts` | 发布时选目标站点 |
-| `src/post-selection-model.ts` | 拉取时选远程文章，列表走 MCP 的 `halo_list_posts`。⚠️ **文件名是 `-model` 不是 `-modal`**，容易写错，但它是个 Modal。取数与映射已抽成 `fetchSelectablePosts(client)` / `toSelectablePosts(items)` 两个纯函数（可直接单测），UI 层刻意不做 client 注入 |
+| `src/post-selection-model.ts` | 拉取时选远程文章，列表走 MCP 的 `halo_list_posts`。⚠️ **文件名是 `-model` 不是 `-modal`**，容易写错，但它是个 Modal。取数（`fetchSelectablePosts(client)`，含翻页，失败与触顶由它自己弹 Notice）与映射（`toSelectablePosts(items)`，纯函数）已抽开，UI 层刻意不做 client 注入 |
+| `src/page-selection-model.ts` | 同上，但选的是**独立页面**（`toSelectablePages(items)`）。同样 `-model` 后缀、同样是 Modal；取数走 `PageService.getPages()` 而不是自己造 client |
+
+内容管理类的弹窗（查重 / 附件 / 回收站 / 独立页面管理）不在这里逐条列 —— 它们各自与自己的
+纯数据层配成一对，见上方「业务层」模块表。
 
 ### frontmatter 契约
 
@@ -208,8 +311,12 @@ halo:
 ```
 
 这 6 个字段**双向读写**：发布时由 `src/frontmatter-map.ts` 的 `parseHaloPostFields()` 校验、
-`src/service/local-content.ts` 的 `applyPostFrontmatter()` 稀疏展开进 `spec`；发布后由同一个文件的
-`applyPostToFrontmatter()` 从**服务端归一化之后的** `post.spec` 回写进笔记（发布 / 更新 / 拉取三处共用它）。
+`src/service/local-content.ts` 的 `applyPostFrontmatter()` 稀疏展开进 `spec`；发布后由
+`src/frontmatter-map.ts` 的 `applyPostToFrontmatter()` 从**服务端归一化之后的** `post.spec` 回写进笔记
+（发布 / 更新 / 拉取三处共用它）。注意**两个方向分居两个文件**（不是同一个文件）：展开进 `spec` 的那一半在
+`service/local-content.ts`（它同时管正文里的图片引用），回写的那一半与校验同在 `frontmatter-map.ts`
+（契约的唯一定义处）。页面对应的一对是 `applyPageFrontmatter()` / `applyPageToFrontmatter()`，
+**契约只有三键** —— 见上方「独立页面」一节。
 `publish: true` 的优先级是「命令的显式覆盖 > frontmatter 的 `publish` > 设置里的 `publishByDefault`」，
 其中 frontmatter 那一档读的是**规划阶段**记下的 `plan.publishFromFrontmatter`，不是执行时现读笔记。
 
@@ -301,5 +408,10 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 - **`src/utils/yaml.ts` 是死代码**：导出的 `readMatter()` 没有任何地方引用，`gray-matter` 与 `js-yaml` 这两个依赖只为它而存在。代码实际读 frontmatter 走 Obsidian 的 `metadataCache.getFileCache().frontmatter`。清理前先确认没有外部引用。
 - **`src/utils/markdown.ts` 同样是死代码**（随 MCP 切换作废，见「内容管线」）：无人 import，`markdown-it` 与 `markdown-it-anchor` 这两个 `dependencies` 只为它而存在。**本次改造没有动 `package.json`**，清理时记得把这两个依赖一起处理。
 - **`src/utils/id.ts` 的 `randomUUID()` 是手写实现**（不用 `crypto`），用于生成新文章的 resource name 与 multipart boundary。
+- **「内容能力对齐」阶段新增的那 7 条命令，其 `command.*.name` 里已经带了 `Halo: ` 前缀，而 `manifest.json` 的 `name` 也是 `Halo`** ——
+  Obsidian 会在命令面板里自己加一层 `<插件名>: `，所以这七条会显示成「Halo: Halo: 管理附件」。
+  加命令时**不要**在 locale 里写前缀（旧的那些就没有），这批是新增时写多了；修法是去掉 locale 里的
+  `Halo: `，**不是**改 `manifest.json` 的 `name`（那会一并改掉设置面板与其它所有命令的显示名）。
+  （纯显示问题，不影响任何行为。）
 - **`biome check src/` 报的 15 个 format 错误不是你的问题**：本仓库 `core.autocrlf=true` 且没有 `.gitattributes`，所以 Windows 检出后所有上游文件在工作区是 CRLF，而 `.editorconfig` 与 `biome.json` 都要求 LF。**这些报错纯属换行符冲突**——实测对 `src/` 全量跑 `biome check --write` 后 `git diff` 为空，因为 git 会把换行归一化掉。因此不必"修复"它们，也不会产生无关 diff。（新文件请按 `.editorconfig` 写成 LF。）
 - **License 以 `LICENSE` 文件为准：GPL-3.0**。`package.json` 里写的 `"license": "MIT"` 与仓库实际的 GPL-3.0 全文冲突，属于上游遗留错误——按 GPL-3.0 处理。
