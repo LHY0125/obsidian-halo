@@ -1,6 +1,30 @@
 import type { Content, Post } from "@halo-dev/api-client";
 
 /**
+ * 文章与独立页面**共有**的扁平字段。抽出来是因为两种类型的差异只在
+ * 「多/少哪几个字段」，而 `name` / `title` / `slug` / `published` / `publishRequested` /
+ * `recycled` / `visible` / `permalink` 这一批是逐字相同的。
+ *
+ * 不抽的话，`page-mapping.ts` 会把它们再抄一遍 —— 而两份声明必然在某次服务端改动后分叉，
+ * 表现是「文章读得到、页面读不到」。
+ *
+ * ⚠️ 两条 `required` 契约**不同**，别把这里当成一份完整契约：
+ * `halo_list_posts` 的 item required 是 `["published","publishRequested","recycled","categories","tags"]`，
+ * 而 `halo_list_single_pages` 的是 `["published","publishRequested","recycled"]`（没有 categories/tags）。
+ */
+export interface McpContentItemBase {
+  name?: string;
+  title?: string;
+  slug?: string;
+  excerpt?: string;
+  published?: boolean;
+  publishRequested?: boolean;
+  recycled?: boolean;
+  visible?: "PUBLIC" | "INTERNAL" | "PRIVATE";
+  permalink?: string;
+}
+
+/**
  * MCP 的文章表示是**扁平**的，与 REST 的 {metadata, spec} 嵌套不同。
  *
  * 字段取自 `halo_get_post` 的 outputSchema（实测 2026-10-04 对真实站点 `tools/list` 核对），
@@ -13,12 +37,12 @@ import type { Content, Post } from "@halo-dev/api-client";
  *
  * 这里刻意不追求覆盖全部字段：**只声明服务层真正消费的那些**，其余留在服务端。
  * 多声明的字段会变成一份需要跟着服务端走的契约，而服务层并不读它。
+ *
+ * 与页面共有的那一批（`name` / `title` / `slug` / `excerpt` / `published` / `publishRequested` /
+ * `recycled` / `visible` / `permalink`）见 `McpContentItemBase`，此处不再重复声明 ——
+ * 重复声明就是两份会各自漂移的契约。
  */
-export interface McpPostItem {
-  name?: string;
-  title?: string;
-  slug?: string;
-  excerpt?: string;
+export interface McpPostItem extends McpContentItemBase {
   excerptRaw?: string;
   autoGenerateExcerpt?: boolean;
   cover?: string;
@@ -27,23 +51,8 @@ export interface McpPostItem {
   priority?: number;
   publishTime?: string;
   allowComment?: boolean;
-  visible?: "PUBLIC" | "INTERNAL" | "PRIVATE";
   categories?: string[];
   tags?: string[];
-  /**
-   * 用户是否**要求**发布 —— 对应 REST 的 `spec.publish`。
-   *
-   * 服务端同时给出 `published`，但两者不是一回事：`published` 是「此刻是否真的在线」，
-   * 还要受 `publishTime`（定时发布）与回收站影响。取 `published` 会把一篇定时文章判成未发布。
-   */
-  publishRequested?: boolean;
-  /**
-   * 此刻是否真的在线（受 `publishTime` / 回收站影响）。
-   *
-   * 声明它**是为了说明这里刻意不用它**：`toPost` 的 `publish` 必须取 `publishRequested`。
-   * 它也确实会出现在返回体里，删掉声明只会让 fixture 与真实响应失真。
-   */
-  published?: boolean;
 }
 
 /** MCP 的分类表示同样是扁平的（实测 `halo_list_categories` 的 outputSchema） */
