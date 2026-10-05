@@ -5,6 +5,7 @@ import { randomUUID } from "src/utils/id";
 import { slugify } from "transliteration";
 import { type HaloPostFields, applyPostToFrontmatter, parseHaloPostFields } from "../frontmatter-map";
 import { renderErrorMessage, withErrorDetail } from "../i18n/error-message";
+import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../pagination";
 import { type HaloSetting, type HaloSite, isSameSiteUrl, mcpEndpointOf, normalizeSite } from "../settings";
 import { McpError } from "../transport/errors";
 import { McpClient } from "../transport/mcp-client";
@@ -730,23 +731,55 @@ class HaloService {
   /**
    * 列出站点分类（扁平表示，见 `post-mapping.ts`）。
    *
-   * `size: 100` 既是 schema 的上限（`maximum: 100`），也是**刻意写死的**：
-   * 站上现有 8 个分类，一页足够。但一旦分类数超过 100，这里会**静默漏掉后面的**——
-   * 返回体里的 `hasNext` / `totalPages` 那时必须用起来改成分页。
+   * **翻页取全**。此前写死 `size: 100`（schema 上限）且**没有任何提示** —— 站点上分类一旦
+   * 超过 100，后面的会被静默漏掉，而「静默」正是本阶段反复处理的那一类问题：
+   * 用户看不到某几个分类，会以为它们不存在，然后重新建一遍。
+   *
+   * 触顶（`fetchAllPages` 的 `maxPages`）时**必须提示**，不能静默截断。
    */
   public async getCategories(): Promise<McpCategoryItem[]> {
-    const result = await this.client.callToolJson<{ items?: McpCategoryItem[] }>("halo_list_categories", {
-      size: 100,
-    });
+    const { items, truncated } = await fetchAllPages<McpCategoryItem>(
+      async (page, size) =>
+        await this.client.callToolJson<{ items?: McpCategoryItem[] } & PagedResult<McpCategoryItem>>(
+          "halo_list_categories",
+          { page, size },
+        ),
+      { pageSize: LIST_PAGE_SIZE },
+    );
 
-    return result.items ?? [];
+    if (truncated) {
+      new Notice(
+        i18next.t("service.notice_list_truncated", {
+          what: i18next.t("service.what_categories"),
+          size: LIST_PAGE_SIZE * 20,
+        }),
+      );
+    }
+
+    return items;
   }
 
-  /** 列出站点标签。`size` 的取舍同 `getCategories`。 */
+  /** 列出站点标签。翻页与提示的处置同 `getCategories`。 */
   public async getTags(): Promise<McpTagItem[]> {
-    const result = await this.client.callToolJson<{ items?: McpTagItem[] }>("halo_list_tags", { size: 100 });
+    const { items, truncated } = await fetchAllPages<McpTagItem>(
+      async (page, size) =>
+        await this.client.callToolJson<{ items?: McpTagItem[] } & PagedResult<McpTagItem>>("halo_list_tags", {
+          page,
+          size,
+        }),
+      { pageSize: LIST_PAGE_SIZE },
+    );
 
-    return result.items ?? [];
+    if (truncated) {
+      new Notice(
+        i18next.t("service.notice_list_truncated", {
+          what: i18next.t("service.what_tags"),
+          size: LIST_PAGE_SIZE * 20,
+        }),
+      );
+    }
+
+    return items;
   }
 
   public async updatePost(): Promise<void> {

@@ -2,16 +2,17 @@ import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 import { renderErrorMessage } from "./i18n/error-message";
 import type HaloPlugin from "./main";
+import { type FetchAllPagesResult, LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "./pagination";
 import type { McpPostItem } from "./service/post-mapping";
 import { type HaloSite, mcpEndpointOf } from "./settings";
 import { McpClient } from "./transport/mcp-client";
 
 /**
- * 一页取多少篇。`size` 的 schema 上限就是 100（实测自 `halo_list_posts` 的 inputSchema）。
- *
- * 导出是给测试用的：截断提示的文案里带的正是这个数，测试若写死 100 就与实际值脱钩。
+ * `LIST_PAGE_SIZE` 已移到 `pagination.ts` —— 四个调用点（分类 / 标签 / 拉取列表 / 附件列表）
+ * 必须共用同一个值。这里按**原路径重导出**，既有的
+ * `import { LIST_PAGE_SIZE } from "./post-selection-model"` 不会断。
  */
-export const LIST_PAGE_SIZE = 100;
+export { LIST_PAGE_SIZE };
 
 /**
  * 选择器需要的最小字段集。
@@ -30,35 +31,17 @@ export interface SelectablePost {
 }
 
 /**
- * `halo_list_posts` 的返回体。
- *
- * 只声明**消费得上**的字段：响应里还有 `page` / `size` / `total` / `totalPages`
- * （schema 全部列为必需，实测确有），但本模块不读它们 —— 多声明就是一份要跟着服务端走的契约。
- * 将来真要翻页时，需要读的是 `totalPages`。
- */
-interface PostListResult {
-  items?: McpPostItem[];
-  /**
-   * 还有下一页时为 true。schema 把它列为必需，实测确实返回。
-   *
-   * 读它**只为一个目的**：列表不完整时告诉用户。注释救不了用户 —— 他会看到一份不完整的列表
-   * 而不知道它不完整，然后以为某篇文章不存在（与本阶段反复处理的「静默」是同一类问题）。
-   */
-  hasNext?: boolean;
-}
-
-/**
  * 拉取可选择的文章列表。
  *
- * 走 MCP 的 `halo_list_posts`（**读路径 → `callToolJson`**）。此前这里直连 REST
- * `uc.api.content.halo.run/v1alpha1/posts` 并用 **PAT** 鉴权，是整条链路上最后一个还在用 REST 的读取点；
- * 切掉之后 PAT 只在「> 7 MiB 图片回退上传」这一条路上还有用。
+ * 走 MCP 的 `halo_list_posts`（**读路径 → `callToolJson`**），并**翻页取全**。
+ * 此前这里直连 REST `uc.api.content.halo.run/v1alpha1/posts` 并用 **PAT** 鉴权，
+ * 是整条链路上最后一个还在用 REST 的读取点；切掉之后 PAT 只在「> 7 MiB 图片回退上传」这一条路上还有用。
  *
  * 不传 `published`：与迁移前的 REST 查询一致 —— 草稿与已发布都要列出来给用户选。
  * `recycled` 也不必显式传，schema 的默认值就是 `false`（等价于迁移前那句 `labelSelector=…deleted=false`）。
  *
  * ⚠️ **本函数有副作用：它自己弹 Notice**，两处，都是刻意的 ——
- * 1. 列表不完整（`hasNext`）时提示「还有文章没有列出来」；
+ * 1. **翻页触顶**（`fetchAllPages` 的 `maxPages`）时提示列表**确实**不完整；
  * 2. 加载失败时提示**具体原因**，并返回空数组（**不抛**）。
  *
  * 提示放在这里而不是 modal 里，是为了让这两条都能被测到：modal 的渲染没有测试脚手架，
@@ -66,17 +49,19 @@ interface PostListResult {
  * `HaloService.readPostOrNotify` 同款 —— 命令入口不该把异常放给 Obsidian，
  * 它只会记进控制台，用户什么都看不到。
  *
- * ⚠️ **仍不翻页**：`size` 上限 100，站点文章数超过它就会漏。区别在于这里**会提示**，
- * 而不是静默漏掉（`HaloService.getCategories()` 面临同一处境，但那处只有注释、没有提示）。
+ * ⚠️ **判据收窄了，这是本次改动的要点**：此前是「`hasNext` 为真就提示」，而翻页之后
+ * `hasNext` 为真只意味着「还有下一页」，是翻页过程里**正常的中间状态** ——
+ * 拿它当提示条件，会在列表**已经完整**时谎报不完整（提示必须是「列表真的不完整」的函数）。
+ * 现在唯一的触发条件是触顶。
  */
 export async function fetchSelectablePosts(client: McpClient): Promise<SelectablePost[]> {
-  let result: PostListResult;
+  let result: FetchAllPagesResult<McpPostItem>;
 
   try {
-    result = await client.callToolJson<PostListResult>("halo_list_posts", {
-      page: 1,
-      size: LIST_PAGE_SIZE,
-    });
+    result = await fetchAllPages<McpPostItem>(
+      async (page, size) => await client.callToolJson<PagedResult<McpPostItem>>("halo_list_posts", { page, size }),
+      { pageSize: LIST_PAGE_SIZE },
+    );
   } catch (error) {
     // 文案统一由 `renderErrorMessage` 出（与服务层共用一份实现）：命中 McpError 就是
     // **可操作的处置指引**（核对密钥 / 为该密钥勾工具授权 / 检查端点与插件），并附上服务端原文。
@@ -85,11 +70,13 @@ export async function fetchSelectablePosts(client: McpClient): Promise<Selectabl
     return [];
   }
 
-  if (result.hasNext) {
-    new Notice(i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE }));
+  if (result.truncated) {
+    // 只有触顶才提示 —— 那时列表确实不完整。
+    // 20 是 `fetchAllPages` 的 maxPages 默认值，乘出来就是这次取数的总上限条数。
+    new Notice(i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE * 20 }));
   }
 
-  return toSelectablePosts(result.items ?? []);
+  return toSelectablePosts(result.items);
 }
 
 /**

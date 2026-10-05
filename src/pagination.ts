@@ -3,6 +3,16 @@
  */
 
 /**
+ * 列表工具每页取多少。**100 是 schema 的 `maximum`**，不是随手取的整数 ——
+ * 传 101 会被服务端拒绝。（实测自 `halo_list_posts` / `halo_list_categories` 等工具的 inputSchema。）
+ *
+ * 定义在这里而不是各个调用点，是因为**四个调用点必须用同一个值**：
+ * 分散定义时，改一处漏三处，而症状只是「某些列表莫名其妙少了后面的条目」。
+ * `post-selection-model.ts` 仍然原路径重导出它，既有 import 不会断。
+ */
+export const LIST_PAGE_SIZE = 100;
+
+/**
  * MCP 列表工具的统一返回外壳。
  *
  * 逐字取自实测：`halo_list_posts` / `halo_list_single_pages` / `halo_list_attachments` /

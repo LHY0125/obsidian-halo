@@ -88,14 +88,51 @@ describe("fetchSelectablePosts", () => {
     expect(notices.slice(seen)).not.toContain(i18next.t("common.error_connection_failed"));
   });
 
-  test("hasNext 为 true：弹提示说明列表不完整（否则用户会以为某篇文章不存在）", async () => {
-    const { client } = createFakeClient(() => ({ items: [item()], hasNext: true }));
+  test("列表超过一页时翻页取全，**不再**提示列表不完整", async () => {
+    // 改动前：只取第一页 + 弹 `post_selection_modal.notice_truncated`。
+    // 现在：翻完所有页。那句提示随之删除 —— 留着它会在**列表已经完整**时谎报不完整。
+    const all = Array.from({ length: 150 }, (_, i) => ({ name: `post-${i}`, title: `文章 ${i}` }));
+    const { client, calls } = createFakeClient((name, args) => {
+      const page = Number(args.page ?? 1);
+      const size = Number(args.size ?? 20);
+      const start = (page - 1) * size;
+      return {
+        items: all.slice(start, start + size),
+        page,
+        size,
+        total: all.length,
+        totalPages: Math.ceil(all.length / size),
+        hasNext: page < Math.ceil(all.length / size),
+      };
+    });
     const notices = capturedNotices();
     const seen = notices.length;
 
-    await fetchSelectablePosts(client);
+    const posts = await fetchSelectablePosts(client);
 
-    expect(notices.slice(seen)).toEqual([i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE })]);
+    expect(posts).toHaveLength(150);
+    expect(calls).toHaveLength(2);
+    // 断言「这一次一条都没弹」，而不是「没弹某句特定文案」——
+    // 后者在文案或插值参数变化之后会静默退化成永真的假绿（`not.toContain` 尤其容易踩）。
+    expect(notices.slice(seen)).toEqual([]);
+  });
+
+  test("翻页触顶（maxPages）时才弹截断提示 —— 那是列表**真的**不完整的唯一情形", async () => {
+    // 服务端永远说 hasNext：`fetchAllPages` 靠自己的 maxPages 兜底停下并置 `truncated`。
+    // 判据由此从「hasNext 为真」改成「触顶」—— 翻页之后 `hasNext` 为真只是「还有下一页」，
+    // 那是翻页过程里正常的中间状态，不是给用户看的异常。
+    const { client, calls } = createFakeClient(() => ({ items: [item()], hasNext: true }));
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    const posts = await fetchSelectablePosts(client);
+
+    // 20 是 `fetchAllPages` 的默认 maxPages：兜底存在，循环才保证终止
+    expect(calls).toHaveLength(20);
+    expect(posts).toHaveLength(20);
+    expect(notices.slice(seen)).toEqual([
+      i18next.t("post_selection_modal.notice_truncated", { size: LIST_PAGE_SIZE * 20 }),
+    ]);
   });
 
   test("hasNext 为 false：**不弹** —— 提示必须是判据的函数，不能恒定弹", async () => {

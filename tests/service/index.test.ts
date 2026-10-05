@@ -3,6 +3,7 @@ import i18next from "i18next";
 import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
 import { initializeI18n } from "../../src/i18n";
+import { LIST_PAGE_SIZE } from "../../src/pagination";
 import HaloService, { type PublishPlan, type PublishResult } from "../../src/service";
 import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
@@ -1732,7 +1733,7 @@ describe("分类与标签走 MCP", () => {
     forbidRest();
   });
 
-  test("getCategories / getTags 读扁平的 name 与 displayName，并按 schema 上限取一页", async () => {
+  test("getCategories / getTags 读扁平的 name 与 displayName，每页按 schema 上限取", async () => {
     const note = createFile("post.md");
     const { app } = createMockApp("", note, []);
     const { client, calls } = fakeService({
@@ -1744,10 +1745,77 @@ describe("分类与标签走 MCP", () => {
     expect(await service.getCategories()).toEqual([{ displayName: "技术思考", name: "category-a" }]);
     expect(await service.getTags()).toEqual([{ displayName: "Rust", name: "tag-a" }]);
 
-    // 100 是 schema 的 maximum：钉住它，将来 schema 变了或有人改成翻页时能看见
+    // 100 是 schema 的 maximum（**每页**条数上限）：钉住它，将来 schema 变了能看见。
+    // 「只有一页时恰好只调一次」同样是判据 —— 翻页不该在单页数据上多打请求。
     expect(calls).toEqual([
-      { args: { size: 100 }, method: "callToolJson", name: "halo_list_categories" },
-      { args: { size: 100 }, method: "callToolJson", name: "halo_list_tags" },
+      { args: { page: 1, size: LIST_PAGE_SIZE }, method: "callToolJson", name: "halo_list_categories" },
+      { args: { page: 1, size: LIST_PAGE_SIZE }, method: "callToolJson", name: "halo_list_tags" },
+    ]);
+  });
+
+  test("分类超过一页时会翻页取全，而不是静默漏掉后面的", async () => {
+    // 站点真实规模是 8 个分类，但契约上 size 上限 100 —— 一旦超过就会漏。
+    // 这条用例用 250 个来钉住「翻页真的发生了」。
+    const all = Array.from({ length: 250 }, (_, i) => ({
+      name: `category-${i}`,
+      displayName: `分类 ${i}`,
+    }));
+
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    const { client, calls } = createFakeClient((name, args) => {
+      if (name !== "halo_list_categories") {
+        return {};
+      }
+      const page = Number(args.page ?? 1);
+      const size = Number(args.size ?? 20);
+      const start = (page - 1) * size;
+      return {
+        items: all.slice(start, start + size),
+        page,
+        size,
+        total: all.length,
+        totalPages: Math.ceil(all.length / size),
+        hasNext: page < Math.ceil(all.length / size),
+      };
+    });
+
+    const service = new HaloService(app, createSettings(), site, client);
+    const categories = await service.getCategories();
+
+    expect(categories).toHaveLength(250);
+    expect(categories[249].displayName).toBe("分类 249");
+    // 3 页 → 3 次调用
+    expect(calls.filter((call) => call.name === "halo_list_categories")).toHaveLength(3);
+  });
+
+  test("分类/标签翻到 maxPages 触顶时弹提示，两个调用点都带上限条数", async () => {
+    const note = createFile("post.md");
+    const { app } = createMockApp("", note, []);
+    // 服务端永远说 hasNext：`fetchAllPages` 翻满 maxPages 后停下并置 `truncated`
+    const { client } = createFakeClient((name) => ({
+      items: [{ name: `${name}-a`, displayName: "甲" }],
+      hasNext: true,
+    }));
+    const service = new HaloService(app, createSettings(), site, client);
+    const notices = capturedNotices();
+    const seen = notices.length;
+
+    await service.getCategories();
+    await service.getTags();
+
+    // 触顶时必须提示 —— 静默截断正是本阶段反复处理的那一类问题。
+    // `{{size}}` 不传会被 i18next 原样渲染成空串，所以这里连着 `size` 一起断言：
+    // 分类与标签两个调用点都要传（漏传一个，用户看到的条数就是空的）。
+    expect(notices.slice(seen)).toEqual([
+      i18next.t("service.notice_list_truncated", {
+        what: i18next.t("service.what_categories"),
+        size: LIST_PAGE_SIZE * 20,
+      }),
+      i18next.t("service.notice_list_truncated", {
+        what: i18next.t("service.what_tags"),
+        size: LIST_PAGE_SIZE * 20,
+      }),
     ]);
   });
 

@@ -190,7 +190,10 @@
     "error_term_not_applied": "「{{name}}」未能套用到文章上：站點沒有回傳它的資源名稱。文章將在缺少它的情況下發佈，請在 Halo 後台手動新增後重新發佈。",
     "error_image_too_large": "圖片「{{name}}」超過 {{limit}} MiB，且該站點沒有設定個人存取權杖（PAT），無法上傳：MCP 的 base64 上傳有這個硬上限，回退的 REST 上傳則需要 PAT。請壓縮這張圖片，或在站點設定裡補一個 PAT。",
     "notice_taxonomy_not_resolved": "分類/標籤的名稱沒能從站點取得，取不到的欄位保持筆記原樣（未寫入）。其餘內容已照常寫入；稍後重試本次操作即可補上。",
-    "error_unknown_rule_site": "路由規則「{{pattern}}」指向的站點（{{url}}）不在站點清單裡。請到「設定 → Halo」修正這條規則。"
+    "error_unknown_rule_site": "路由規則「{{pattern}}」指向的站點（{{url}}）不在站點清單裡。請到「設定 → Halo」修正這條規則。",
+    "notice_list_truncated": "{{what}}列表不完整 —— 只載入了前 {{size}} 條。",
+    "what_categories": "分類",
+    "what_tags": "標籤"
   },
   "common": {
     "error_connection_failed": "連接失敗",
