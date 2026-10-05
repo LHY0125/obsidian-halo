@@ -23,30 +23,30 @@
       "error_no_sites": "请先配置站点"
     },
     "push_page": {
-      "name": "Halo: 推为独立页面"
+      "name": "推为独立页面"
     },
     "pull_page": {
-      "name": "Halo: 拉取独立页面",
+      "name": "拉取独立页面",
       "error_no_sites": "请先配置站点"
     },
     "manage_pages": {
-      "name": "Halo: 管理独立页面",
+      "name": "管理独立页面",
       "error_no_sites": "请先配置站点"
     },
     "recycle_post": {
-      "name": "Halo: 回收站（文章）",
+      "name": "回收站（文章）",
       "error_no_sites": "请先配置站点"
     },
     "recycle_page": {
-      "name": "Halo: 回收站（页面）",
+      "name": "回收站（页面）",
       "error_no_sites": "请先配置站点"
     },
     "search_content": {
-      "name": "Halo: 查重（搜索线上内容）",
+      "name": "查重（搜索线上内容）",
       "error_no_sites": "请先配置站点"
     },
     "manage_attachments": {
-      "name": "Halo: 管理附件",
+      "name": "管理附件",
       "error_no_sites": "请先配置站点"
     },
     "upload_images": {
@@ -113,7 +113,7 @@
   "post_selection_modal": {
     "title": "从 Halo 拉取文章",
     "button_pull": "拉取",
-    "notice_truncated": "站点文章数超过一页上限（{{size}} 篇），下面的列表并不完整 —— 还有文章没有列出来。"
+    "notice_truncated": "站点文章数超过了单次最多能取回的 {{size}} 篇，下面的列表并不完整 —— 还有文章没有列出来。"
   },
   "page_selection_modal": {
     "title": "从 Halo 拉取独立页面",
@@ -134,7 +134,7 @@
     "title": "Halo 附件",
     "empty": "站点上还没有附件。",
     "unknown_type": "未知类型",
-    "notice_truncated": "站点上的附件数量超过了一页能载入的量，下面的列表并不完整。",
+    "notice_truncated": "站点上的附件数量超过了单次最多能取回的量，下面的列表并不完整。",
     "button_copy_link": "复制链接",
     "notice_link_copied": "链接已复制",
     "button_delete": "删除",
@@ -147,14 +147,14 @@
     "title_post": "回收站 · 文章",
     "title_page": "回收站 · 页面",
     "empty": "回收站是空的。",
-    "notice_truncated": "回收站的内容超过了一页能载入的量，下面的列表并不完整。",
+    "notice_truncated": "回收站的内容超过单次最多能取回的量，下面的列表并不完整。",
     "button_restore": "恢复",
     "notice_restored": "已恢复「{{title}}」"
   },
   "page_manager_modal": {
     "title": "管理独立页面",
     "empty": "站点上还没有独立页面。",
-    "notice_truncated": "站点上的独立页面超过了一页能载入的量，下面的列表并不完整。",
+    "notice_truncated": "站点上的独立页面超过单次最多能取回的量，下面的列表并不完整。",
     "button_recycle": "移入回收站",
     "notice_recycled": "已把「{{title}}」移入回收站"
   },

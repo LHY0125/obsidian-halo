@@ -23,30 +23,30 @@
       "error_no_sites": "Please configure sites first"
     },
     "push_page": {
-      "name": "Halo: Push as page"
+      "name": "Push as page"
     },
     "pull_page": {
-      "name": "Halo: Pull page",
+      "name": "Pull page",
       "error_no_sites": "Please configure sites first"
     },
     "manage_pages": {
-      "name": "Halo: Manage pages",
+      "name": "Manage pages",
       "error_no_sites": "Please configure sites first"
     },
     "recycle_post": {
-      "name": "Halo: Recycle bin (posts)",
+      "name": "Recycle bin (posts)",
       "error_no_sites": "Please configure sites first"
     },
     "recycle_page": {
-      "name": "Halo: Recycle bin (pages)",
+      "name": "Recycle bin (pages)",
       "error_no_sites": "Please configure sites first"
     },
     "search_content": {
-      "name": "Halo: Search site content",
+      "name": "Search site content",
       "error_no_sites": "Please configure sites first"
     },
     "manage_attachments": {
-      "name": "Halo: Manage attachments",
+      "name": "Manage attachments",
       "error_no_sites": "Please configure sites first"
     },
     "upload_images": {
@@ -113,7 +113,7 @@
   "post_selection_modal": {
     "title": "Pull posts from Halo",
     "button_pull": "Pull",
-    "notice_truncated": "This site has more posts than fit on one page ({{size}}), so the list below is incomplete — some posts are not shown."
+    "notice_truncated": "This site has more posts than the {{size}} that can be fetched in a single run, so the list below is incomplete — some posts are not shown."
   },
   "page_selection_modal": {
     "title": "Pull pages from Halo",
@@ -134,7 +134,7 @@
     "title": "Halo attachments",
     "empty": "This site has no attachments yet.",
     "unknown_type": "Unknown type",
-    "notice_truncated": "This site has more attachments than could be loaded, so the list below is incomplete.",
+    "notice_truncated": "This site has more attachments than can be fetched in a single run, so the list below is incomplete.",
     "button_copy_link": "Copy link",
     "notice_link_copied": "Link copied",
     "button_delete": "Delete",
@@ -147,14 +147,14 @@
     "title_post": "Recycle bin · Posts",
     "title_page": "Recycle bin · Pages",
     "empty": "The recycle bin is empty.",
-    "notice_truncated": "The recycle bin holds more than could be loaded, so the list below is incomplete.",
+    "notice_truncated": "The recycle bin holds more than can be fetched in a single run, so the list below is incomplete.",
     "button_restore": "Restore",
     "notice_restored": "\"{{title}}\" restored"
   },
   "page_manager_modal": {
     "title": "Manage pages",
     "empty": "This site has no pages.",
-    "notice_truncated": "This site has more pages than could be loaded, so the list below is incomplete.",
+    "notice_truncated": "This site has more pages than can be fetched in a single run, so the list below is incomplete.",
     "button_recycle": "Move to recycle bin",
     "notice_recycled": "\"{{title}}\" moved to recycle bin"
   },

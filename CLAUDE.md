@@ -408,10 +408,17 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 - **`src/utils/yaml.ts` 是死代码**：导出的 `readMatter()` 没有任何地方引用，`gray-matter` 与 `js-yaml` 这两个依赖只为它而存在。代码实际读 frontmatter 走 Obsidian 的 `metadataCache.getFileCache().frontmatter`。清理前先确认没有外部引用。
 - **`src/utils/markdown.ts` 同样是死代码**（随 MCP 切换作废，见「内容管线」）：无人 import，`markdown-it` 与 `markdown-it-anchor` 这两个 `dependencies` 只为它而存在。**本次改造没有动 `package.json`**，清理时记得把这两个依赖一起处理。
 - **`src/utils/id.ts` 的 `randomUUID()` 是手写实现**（不用 `crypto`），用于生成新文章的 resource name 与 multipart boundary。
-- **「内容能力对齐」阶段新增的那 7 条命令，其 `command.*.name` 里已经带了 `Halo: ` 前缀，而 `manifest.json` 的 `name` 也是 `Halo`** ——
-  Obsidian 会在命令面板里自己加一层 `<插件名>: `，所以这七条会显示成「Halo: Halo: 管理附件」。
-  加命令时**不要**在 locale 里写前缀（旧的那些就没有），这批是新增时写多了；修法是去掉 locale 里的
-  `Halo: `，**不是**改 `manifest.json` 的 `name`（那会一并改掉设置面板与其它所有命令的显示名）。
-  （纯显示问题，不影响任何行为。）
+- **`command.*.name` 里不要带 `<插件名>: ` 前缀**：Obsidian 会自己拼 `<插件名>: <命令名>`，而
+  `manifest.json` 的 `name` 是 `Halo` —— 在 locale 里再写一遍 `Halo: `，命令面板就会显示成
+  「Halo: Halo: 管理附件」。本阶段新增的 7 条命令曾这样写（计划里就是这么给的），**现已修**：
+  只去掉了**开头**那一个前缀，名字里其它位置的 `Halo` 一律不动
+  （例如 `publish_with_defaults` 的 `Publish to Halo (use default settings)`、以及
+  `publish` 的「发布到 Halo」）。自查一条命令：`grep -n ': "Halo: ' src/i18n/locales/*.json` 应为空。
+  ⚠️ 要改的是 locale，**不是** `manifest.json` 的 `name`（那会一并改掉设置面板与所有命令的显示名）。
+- **`command.*.name` 只有一个消费者：`main.ts` 的 `addCommand({ id, name })`**
+  （`grep -rn 'command\.[a-z_]*\.name' src/` 的命中全在 `main.ts`）。因此**不要**顺手拿命令名去当别的
+  用户文案 —— 命令名是**祈使句**（「管理独立页面」），而提示语需要的是陈述或处置指引；
+  早先 `manage-pages` 的未实现占位提示就是借 `command.manage_pages.name` 顶的，改成真弹窗
+  （`PageManagerModal`）时一并去掉了。降级 / 占位提示请另建 `*.error_*` / `*.notice_*` 键。
 - **`biome check src/` 报的 15 个 format 错误不是你的问题**：本仓库 `core.autocrlf=true` 且没有 `.gitattributes`，所以 Windows 检出后所有上游文件在工作区是 CRLF，而 `.editorconfig` 与 `biome.json` 都要求 LF。**这些报错纯属换行符冲突**——实测对 `src/` 全量跑 `biome check --write` 后 `git diff` 为空，因为 git 会把换行归一化掉。因此不必"修复"它们，也不会产生无关 diff。（新文件请按 `.editorconfig` 写成 LF。）
 - **License 以 `LICENSE` 文件为准：GPL-3.0**。`package.json` 里写的 `"license": "MIT"` 与仓库实际的 GPL-3.0 全文冲突，属于上游遗留错误——按 GPL-3.0 处理。
