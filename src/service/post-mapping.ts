@@ -17,7 +17,19 @@ export interface McpContentItemBase {
   title?: string;
   slug?: string;
   excerpt?: string;
+  /**
+   * 此刻是否真的在线（受 `publishTime` / 回收站影响）。
+   *
+   * 声明它**是为了说明这里刻意不用它**：两种类型的映射（`toPost` / `toSinglePage`）
+   * 都必须取 `publishRequested`。它也确实会出现在返回体里，删掉声明只会让 fixture 与真实响应失真。
+   */
   published?: boolean;
+  /**
+   * 用户是否**要求**发布 —— 对应 REST 的 `spec.publish`。
+   *
+   * 服务端同时给出 `published`，但两者不是一回事：`published` 是「此刻是否真的在线」，
+   * 还要受 `publishTime`（定时发布）与回收站影响。取 `published` 会把一篇定时文章判成未发布。
+   */
   publishRequested?: boolean;
   recycled?: boolean;
   visible?: "PUBLIC" | "INTERNAL" | "PRIVATE";
