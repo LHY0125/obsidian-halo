@@ -33,6 +33,10 @@
       "name": "Halo: Manage pages",
       "error_no_sites": "Please configure sites first"
     },
+    "search_content": {
+      "name": "Halo: Search site content",
+      "error_no_sites": "Please configure sites first"
+    },
     "upload_images": {
       "name": "Upload images to Halo",
       "error_no_sites": "Please configure sites first",
@@ -102,6 +106,17 @@
   "page_selection_modal": {
     "title": "Pull pages from Halo",
     "button_pull": "Pull"
+  },
+  "search_modal": {
+    "title": "Search results: {{query}}",
+    "empty": "Nothing on this site matched.",
+    "type_POST": "Post",
+    "type_SINGLE_PAGE": "Page",
+    "badge_draft": "Draft",
+    "button_open": "Open",
+    "prompt_title": "Search site content",
+    "prompt_label": "Keyword",
+    "button_search": "Search"
   },
   "site_editing_modal": {
     "title": "Halo site",

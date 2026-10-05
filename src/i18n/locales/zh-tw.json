@@ -33,6 +33,10 @@
       "name": "Halo: 管理獨立頁面",
       "error_no_sites": "請先配置網站"
     },
+    "search_content": {
+      "name": "Halo: 查重（搜尋線上內容）",
+      "error_no_sites": "請先配置網站"
+    },
     "upload_images": {
       "name": "上傳圖片到 Halo",
       "error_no_sites": "請先配置網站",
@@ -102,6 +106,17 @@
   "page_selection_modal": {
     "title": "從 Halo 拉取獨立頁面",
     "button_pull": "拉取"
+  },
+  "search_modal": {
+    "title": "查重結果：{{query}}",
+    "empty": "站點上沒有符合的內容。",
+    "type_POST": "文章",
+    "type_SINGLE_PAGE": "獨立頁面",
+    "badge_draft": "草稿",
+    "button_open": "打開",
+    "prompt_title": "搜尋線上內容",
+    "prompt_label": "關鍵詞",
+    "button_search": "搜尋"
   },
   "site_editing_modal": {
     "title": "Halo 網站",

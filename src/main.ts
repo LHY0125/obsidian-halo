@@ -9,6 +9,8 @@ import { openPageSelectionModal } from "./page-selection-model";
 import { openPostSelectionModal } from "./post-selection-model";
 import { type PublishPreviewInput, buildPublishPreview } from "./publish-preview";
 import { confirmPublishPreview } from "./publish-preview-modal";
+import { SearchResultsModal, promptForQuery } from "./search-modal";
+import { searchContent } from "./search-preview";
 import HaloService from "./service";
 import PageService from "./service/page-service";
 import {
@@ -23,6 +25,7 @@ import {
 import { SettingsMigrationModal } from "./settings-migration-modal";
 import { type SiteResolution, resolveSite } from "./site-routing";
 import { openSiteSelectionModal } from "./site-selection-modal";
+import { McpClient } from "./transport/mcp-client";
 
 export default class HaloPlugin extends Plugin {
   settings: HaloSetting;
@@ -156,6 +159,17 @@ export default class HaloPlugin extends Plugin {
       name: i18next.t("command.manage_pages.name"),
       callback: async () => {
         await this.managePagesCommand();
+      },
+    });
+
+    // 查重：只读，不写本地也不写远端。放在三条页面命令之后是因为它和它们同属
+    // 「作用于远端内容」那一组（都要先挑站点、都不碰本地笔记），
+    // 与前面那些「以当前笔记为对象」的命令分开看。
+    this.addCommand({
+      id: "search-content",
+      name: i18next.t("command.search_content.name"),
+      callback: async () => {
+        await this.searchContentCommand();
       },
     });
 
@@ -471,6 +485,47 @@ export default class HaloPlugin extends Plugin {
     // 在「少说」与「说错」之间选少说。Task 12 替换后这一点随之消失（它也会改掉
     // `tests/main.test.ts` 里钉住这段占位的那条用例）。
     new Notice(i18next.t("command.manage_pages.name"));
+  }
+
+  /**
+   * `search-content` 的入口：问一句关键词，把站点上的命中列出来。
+   *
+   * 默认值取当前笔记的 basename：查重最常见的用法是「我刚写了一篇，站点上是不是已经有了」，
+   * 而那时用户正开着那篇笔记。预填省掉一次手打，用户仍可改成任意关键词。
+   *
+   * **先定站点、再问关键词**（与计划的草案顺序相反）。两个理由：
+   *
+   * 1. 不该让用户先打一段字、再被告知「还没配站点」—— 那是他此刻无法补救的事，
+   *    而站点没配好这件事在**打开输入框之前**就已经确定了。
+   * 2. 这条顺序让「零站点」那道守卫**在测试脚手架里可达**。反过来的写法会卡在
+   *    `await promptForQuery(...)` 上永不返回（`tests/setup.ts` 的 `Modal.open()` 不调 `onOpen()`，
+   *    输入弹窗的 Promise 既不 resolve 也不 reject），实测表现为 5000ms 超时 ——
+   *    那样这道守卫一行都测不到，只能靠代码审查。
+   *
+   * 顺带与 `pull-page` / `manage-pages` 一致：它们也都是先定站点再进各自的弹窗。
+   */
+  private async searchContentCommand(): Promise<void> {
+    const site = await this.pickSiteForPull("command.search_content.error_no_sites");
+
+    if (!site) {
+      return;
+    }
+
+    const { activeEditor } = this.app.workspace;
+    const defaultQuery = activeEditor?.file?.basename ?? "";
+
+    const query = await promptForQuery(this.app, defaultQuery);
+
+    if (!query) {
+      return;
+    }
+
+    // 查重与拉取一样作用于**远端**：手上没有本地文件，走不了 `resolveSite`（那个要 `file.path`），
+    // 所以站点靠 `pickSiteForPull` 拿 —— 与 `pull-page` / `manage-pages` 同一个入口。
+    const client = new McpClient({ endpoint: mcpEndpointOf(site), token: site.mcpToken });
+    const results = await searchContent(client, query);
+
+    new SearchResultsModal(this, site, query, results).open();
   }
 
   /**

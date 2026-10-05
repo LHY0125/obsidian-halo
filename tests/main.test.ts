@@ -5,7 +5,7 @@ import type { PluginManifest } from "obsidian";
 import { initializeI18n } from "../src/i18n";
 import HaloPlugin from "../src/main";
 import HaloService from "../src/service";
-import { TEST_SITE, createFile, createMockApp, createSettings } from "./helpers/obsidian-mocks";
+import { TEST_SITE, createFile, createMockApp, createSettings, requestUrlMock } from "./helpers/obsidian-mocks";
 
 /**
  * 初始化 i18n（生产同一条入口）：批量命令的两道空转守卫弹的是**两句不同的话**，
@@ -46,6 +46,7 @@ type Internals = {
   pushPageCommand(): Promise<void>;
   pullPageCommand(): Promise<void>;
   managePagesCommand(): Promise<void>;
+  searchContentCommand(): Promise<void>;
   pickSiteForPull(noSitesKey: string): Promise<{ url: string } | undefined>;
 };
 
@@ -300,4 +301,44 @@ test("manage-pages 命令**尚未实现**：单站点时弹一条占位提示（
   await plugin.managePagesCommand();
 
   expect(capturedNotices().slice(before)).toEqual([i18next.t("command.manage_pages.name")]);
+});
+
+/**
+ * 查重命令（`search-content`）的编排层。
+ *
+ * ⚠️ 这条命令在脚手架里**只有「零站点」那一支能走完**：再往后就是问关键词的输入弹窗，
+ * 而 `tests/setup.ts` 的 `Modal.open()` 不调 `onOpen()` —— 那个 Promise 既不 resolve
+ * 也不 reject，`await` 会永久挂起（表现为超时，不是断言失败）。所以「用户取消输入后静默返回」
+ * 那一支在这里**测不到**；它的判据（空串 → `undefined`）落在 `normalizeQuery()` 上，
+ * 由 `tests/search-modal.test.ts` 覆盖。
+ */
+test("search-content 命令零站点时提示「先配站点」，且不停在输入弹窗上", async () => {
+  // 这条同时钉住了**顺序**：站点判定必须早于问关键词。反过来的实现会先打开输入弹窗，
+  // 于是永远走不到这句提示 —— 表现为 5000ms 超时（实测过），而用户那边则是
+  // 「先打一段字、再被告知还没配站点」，两件坏事都从同一个顺序来。
+  const { plugin } = makePlugin(createSettings({ sites: [] }));
+  const before = capturedNotices().length;
+
+  await plugin.searchContentCommand();
+
+  expect(capturedNotices().slice(before)).toEqual([i18next.t("command.search_content.error_no_sites")]);
+});
+
+test("search-content 命令：站点定了、关键词还没输入时，一个请求都不发", async () => {
+  // 先证明流程**真的走到了**站点那一步 —— 否则「没发请求」也可能只是它在更早的地方就返回了
+  //（比如零站点），那样这条用例永远为真，比一个记录在案的缺口更糟。
+  const { plugin } = makePlugin();
+  const pick = rs.spyOn(plugin, "pickSiteForPull");
+  requestUrlMock().mockReset();
+
+  try {
+    // **刻意不 await**：它停在输入弹窗上（见上面那段说明）。放一个宏任务把站点那步跑完。
+    void plugin.searchContentCommand();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(requestUrlMock().mock.calls).toHaveLength(0);
+  } finally {
+    pick.mockRestore();
+  }
 });

@@ -123,6 +123,17 @@ rs.mock("obsidian", () => {
       return this;
     }
 
+    /**
+     * 真实 `ButtonComponent` 有 `setTooltip`，桩里原本缺这一条。
+     *
+     * 必须补上而不是绕开：查重弹窗里有两个**只显示图标、没有文字**的按钮
+     *（类型图标、草稿标记），tooltip 是唯一能表达「这个图标是什么意思」的地方 ——
+     * 为了省掉这一行而把按钮改成带文字的，等于为了测试脚手架削弱真实 UI。
+     */
+    setTooltip(): this {
+      return this;
+    }
+
     onClick(): this {
       return this;
     }
