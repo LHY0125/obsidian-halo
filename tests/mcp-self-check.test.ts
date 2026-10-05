@@ -97,6 +97,13 @@ describe("runSelfCheck", () => {
     expect(REQUIRED_TOOLS).not.toContain("halo_list_comments");
     expect(REQUIRED_TOOLS).not.toContain("halo_update_theme_setting_group");
   });
+
+  it("REQUIRED_TOOLS 覆盖到本阶段全部被调用的工具，且数量与注释一致", () => {
+    // 数量写死是刻意的：这份清单每加一项都要有人重新数一遍，
+    // 而 1-B 的教训正是「我接受了别人给的数字而没有自己数」。
+    expect(REQUIRED_TOOLS).toHaveLength(23);
+    expect(new Set(REQUIRED_TOOLS).size).toBe(23);
+  });
 });
 
 describe("describeSelfCheckFailure", () => {

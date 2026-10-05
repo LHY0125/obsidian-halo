@@ -7,30 +7,46 @@ import { McpClient } from "./transport/mcp-client";
  * 自检与契约测试共同断言的工具集。站点侧少掉任何一个，插件都会在**对应的那条路径上**静默失效，
  * 所以这份清单必须覆盖全部被调用的工具 —— 漏一个，防线就在那个工具上开了口子。
  *
- * 成分（逐条核对过，两类）：
- * - **当前代码实际调用（10 个）**：文章列表 / 读取 / 新建 / 修改、发布状态、
- *   分类与标签的列举及创建、附件上传。
- * - **设计预留（3 个）**：`halo_recycle_post`、`halo_restore_post`、`halo_search_content` ——
- *   回收站与全文检索尚未接进命令，但站点侧若撤下它们，同样说明工具集已经变了，提前炸出来更好。
+ * 成分（逐条核对过，三类）：
+ * - **文章路径（11 个）**：列表 / 读取 / 新建 / 修改、发布状态、回收、恢复、
+ *   分类与标签的列举及创建、全文检索。
+ * - **独立页面路径（7 个）**：与文章同构的一套（不含分类标签 —— 页面没有这两个字段）。
+ * - **附件与上传（4 个）**：附件列表 / 读取 / 删除、附件上传。
  *
- * 评论、独立页面、主题设置等运维类工具刻意不在其中。
+ * 共 **23 项**。评论、主题设置、`upload_attachment_from_url`、插件贡献的工具
+ *（PluginMoments / image-stream）刻意不在其中 —— 见 spec 的 N2 / N3 与附录 A。
  *
- * 清单不敢靠「看起来对」：2026-10-04 对真实站点拉过一次 `tools/list`（`halo-mcp-server` 1.2.0，
- * 共 44 个工具），这 13 项**逐条命中、missing 为空**。契约测试 `pnpm test:contract` 是它的自动化版本。
+ * 清单不敢靠「看起来对」：2026-10-05 对真实站点拉过一次 `tools/list`
+ *（`halo-mcp-server` 1.2.0，共 51 个工具），下列 23 项**逐条命中**。
+ * 契约测试 `pnpm test:contract` 是它的自动化版本。
  */
 export const REQUIRED_TOOLS: readonly string[] = [
-  "halo_get_post",
+  // 文章
   "halo_list_posts",
+  "halo_get_post",
   "halo_create_post",
   "halo_update_post",
   "halo_set_post_publish_state",
   "halo_recycle_post",
   "halo_restore_post",
+  // 独立页面
+  "halo_list_single_pages",
+  "halo_get_single_page",
+  "halo_create_single_page",
+  "halo_update_single_page",
+  "halo_set_single_page_publish_state",
+  "halo_recycle_single_page",
+  "halo_restore_single_page",
+  // 分类与标签
   "halo_list_categories",
   "halo_create_category",
   "halo_list_tags",
   "halo_create_tag",
+  // 检索与附件
   "halo_search_content",
+  "halo_list_attachments",
+  "halo_get_attachment",
+  "halo_delete_attachment",
   "halo_upload_attachment",
 ];
 
