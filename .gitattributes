@@ -1,0 +1,46 @@
+# 换行与文本/二进制的唯一事实来源。
+#
+# 为什么需要这个文件：仓库此前没有 .gitattributes，而 Windows 上
+# core.autocrlf=true 会让 git 反复把工作区文件标记为「已修改」——
+# 即使内容逐字节相同（`git diff` 为空、文件大小一致）。表现为
+# `git status` 里永远挂着几个幽灵文件，且 `biome check` 报一批
+# 纯属换行冲突的 format 错误（见 CLAUDE.md 的说明）。
+#
+# 本文件把仓库的既定意图写成规则：.editorconfig 已声明
+# `end_of_line = lf`，biome.json 已声明 `lineEnding: "lf"`，
+# 只有 git 这一侧此前没有声明。三方由此对齐。
+#
+# 仓库内 108 个 blob 实测**全部是 LF**，所以本文件只是把现状写成
+# 规则，不重写任何已存内容。
+
+# 默认：git 自行嗅探文本性，文本一律 LF（仓库内与检出后都是 LF）
+* text=auto eol=lf
+
+# 二进制：禁止任何换行转换。
+#
+# ⚠️ 这一节不能省。`text=auto` 靠内容嗅探判断文本性，而 PNG 等格式
+# 的压缩负载里天然含 0x0D 0x0A 字节，会被误判成「带 CRLF 的文本」，
+# 进而被做换行转换 —— 那是**静默损坏图片**。实测本仓库 6 个 PNG
+# 全部命中该特征，故必须显式声明。
+#
+# `binary` 是 `-text -diff` 的宏：既不做换行转换，也不做文本 diff。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.bmp binary
+*.avif binary
+
+# 字体与压缩包（Obsidian 插件将来可能引入，同样不可做换行转换）
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.wasm binary
+
+# 锁文件：由工具生成，不参与 diff 统计（避免噪声淹没真实改动）
+pnpm-lock.yaml -diff
