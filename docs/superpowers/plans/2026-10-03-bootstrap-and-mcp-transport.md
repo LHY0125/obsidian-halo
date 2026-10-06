@@ -33,7 +33,7 @@
 
 | 文件                                  | 职责                                                                         | 状态 |
 | --------------------------------------- | ------------------------------------------------------------------------------ | ------ |
-| `.gitignore`                          | 忽略 `node_modules/`、构建产物、本地设置                           | 创建 |
+| `.gitignore`                          | 忽略`node_modules/`、构建产物、本地设置                                      | 创建 |
 | `manifest.json`                       | 插件清单，id 改`halo-mcp`                                                    | 修改 |
 | `package.json`                        | 包名与版本                                                                   | 修改 |
 | `README.md`                           | 写入前置条件与开发说明                                                       | 修改 |
@@ -121,7 +121,14 @@ ls src/i18n/locales/
 
 > `id` 是本次改名**唯一有功能意义**的字段：它决定了插件目录名与启用标识，改掉之后新插件才能与已有的官方 `halo` 插件共存。
 >
-> `author` / `authorUrl` **刻意保留上游署名**：本项目是 GPL-3.0 衍生作品，保留原作者署名是许可要求。等本项目成型后再另加一行 fork 说明，不要直接顶掉。`version` 暂沿用上游 `1.2.0`，首个自有版本在阶段 1 落地时再升。
+> `author` / `authorUrl` 在 2026-10-06 改为维护者署名（`Serendipity` /
+> `https://github.com/LHY0125`）。**原决定「刻意保留上游署名」已作废** ——
+> 它把两件事混为一谈：GPL-3.0 要求保留的是**版权声明**（`LICENSE` 全文与源码文件头），
+> 而 `manifest.json` 的 `author` 是 Obsidian 面向用户的**显示字段**，回答的是
+> 「谁在维护这个插件」而不是「版权归谁」。上游署名与合规性由 `LICENSE`、
+> 源码头与 `README.md` 顶部的 fork 说明承担，不依赖 `manifest.json` 的 `author`。
+> （`package.json` 的 `maintainers` 仍保留上游条目作为历史痕迹。）
+> `version` 暂沿用上游 `1.2.0`，首个自有版本在阶段 1 落地时再升。
 
 - [ ]  **Step 4: 改包名**
 
@@ -1846,11 +1853,12 @@ describe("MCP 契约（真实站点）", () => {
 
 > **必须用 `--include`，不能把路径当位置参数。** 实测（rstest 0.10.6）：
 >
-> | 调用 | 结果 |
-> |---|---|
-> | `rstest run tests/contract` | **`No test files found, exiting with code 1`** —— 脚本直接失败 |
-> | `rstest run --include "tests/transport/**/*.test.ts"` | 只跑该目录，27 个通过（说明 `--include` **覆盖** `rstest.config.ts` 的 `include`，不是追加） |
-> | `rstest run` | 全套 50 个通过 |
+>
+> | 调用                                                  | 结果                                                                                        |
+> | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+> | `rstest run tests/contract`                           | **`No test files found, exiting with code 1`** —— 脚本直接失败                            |
+> | `rstest run --include "tests/transport/**/*.test.ts"` | 只跑该目录，27 个通过（说明`--include` **覆盖** `rstest.config.ts` 的 `include`，不是追加） |
+> | `rstest run`                                          | 全套 50 个通过                                                                              |
 >
 > `run` 的位置参数不是文件路径过滤器。照原样写会让这条便捷脚本永远失败——而它偏偏是本计划里**唯一真正打真实端点**的检查。
 
@@ -1876,11 +1884,12 @@ pnpm test:contract
 
 **若 FAIL，先分辨是哪一类，别直接当成站点问题**：
 
-| 症状 | 含义 |
-|---|---|
-| 断言落在 `report.error` 上，`error.kind` 为 `network`/`unknown` | **测试根本没发出请求** —— 多半是 `useRealHttp()` 没装，或被 `beforeEach` 的 `mockReset()` 清掉了 |
-| `expect(report.missing).toEqual([])` 失败 | 才是真正的契约漂移：站点侧工具授权少了 |
-| `expect(report.server?.name)` 失败 | 站点上装的不是官方 MCP Server 插件 |
+
+| 症状                                                           | 含义                                                                                               |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 断言落在`report.error` 上，`error.kind` 为 `network`/`unknown` | **测试根本没发出请求** —— 多半是 `useRealHttp()` 没装，或被 `beforeEach` 的 `mockReset()` 清掉了 |
+| `expect(report.missing).toEqual([])` 失败                      | 才是真正的契约漂移：站点侧工具授权少了                                                             |
+| `expect(report.server?.name)` 失败                             | 站点上装的不是官方 MCP Server 插件                                                                 |
 
 - [ ]  **Step 5: 写 README 前置条件**
 
@@ -1928,6 +1937,7 @@ HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pn
 ## License
 
 GPL-3.0（沿用上游）
+
 ```
 
 - [ ]  **Step 6: 运行全部验证并提交**

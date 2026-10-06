@@ -10,6 +10,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `upstream` = `halo-sigs/obsidian-halo`（官方源，**只读参考**，不双向同步）
 - 上游 v1.2.0 的完整历史是本仓库 `main` 的基底，因此同步上游修复走 `git fetch upstream && git cherry-pick <sha>`
 
+### 署名与版本号（2026-10-06 定案）
+
+**`manifest.json` 的 `author` / `authorUrl` 是维护者署名，不是版权声明** —— 现为
+`Serendipity` / `https://github.com/LHY0125`。**不要「修」回上游的 `Ryan Wang`。**
+
+- 这个字段在 Obsidian 里是**面向用户的显示值**，回答「谁在维护」，因此写当前维护者。
+- **GPL-3.0 的署名要求落在别处**：`LICENSE` 全文、源码文件头、`README.md` 顶部的 fork 说明。
+  改 `manifest.json` 的 `author` **不影响合规性** —— 会破坏合规的是删 `LICENSE` 或抹掉源码头版权行。
+- `package.json` 的 `maintainers` **仍保留上游 `Ryan Wang` 条目**（历史痕迹），`author` 已改为 `Serendipity`。
+- 原计划 `docs/superpowers/plans/2026-10-03-bootstrap-and-mcp-transport.md` 里
+  「刻意保留上游署名」那条决定**已作废**，该处已改写为并列说明。
+
+**两套版本号刻意不同步，不是 bug**：`manifest.json` 的 `version`（`1.2.0`）是 **Obsidian 插件版本**，
+决定更新判定、必须与 release tag 一致（`pnpm version` 同步 `manifest.json` + `versions.json`）；
+`package.json` 的 `version`（`0.1.0`）是 **npm 包版本**，而该包标了 `"private": true`、永远不会发布，
+没有任何消费者。**没有任何工具会比对它们** —— `version-bump.mjs` 只碰 `manifest.json` 与 `versions.json`。
+不要去「对齐」这两个数字。
+
 **已经完成的工作**：发布后端已从「直连 Halo REST API」切到「以 Halo 官方 MCP Server 插件为后端」。
 **REST + PAT 只剩一条路**（上传超过 7 MiB 的图片），现状见 `README.md` 的「当前进度与凭据要求」。
 
