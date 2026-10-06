@@ -22,11 +22,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 原计划 `docs/superpowers/plans/2026-10-03-bootstrap-and-mcp-transport.md` 里
   「刻意保留上游署名」那条决定**已作废**，该处已改写为并列说明。
 
-**两套版本号刻意不同步，不是 bug**：`manifest.json` 的 `version`（`1.2.0`）是 **Obsidian 插件版本**，
-决定更新判定、必须与 release tag 一致（`pnpm version` 同步 `manifest.json` + `versions.json`）；
-`package.json` 的 `version`（`0.1.0`）是 **npm 包版本**，而该包标了 `"private": true`、永远不会发布，
-没有任何消费者。**没有任何工具会比对它们** —— `version-bump.mjs` 只碰 `manifest.json` 与 `versions.json`。
-不要去「对齐」这两个数字。
+**`manifest.json` 的 `version` 是插件版本，决定用户装到哪一份代码**：Obsidian 会去找
+**tag 与它完全一致**的那个 GitHub release，从那里下载 `main.js` / `manifest.json` / `styles.css`。
+所以它与 release tag **必须一致**，且**不带 `v` 前缀**（`.npmrc` 设了 `tag-version-prefix=""`）。
+
+- **现为 `0.1.0`**：这是**本 fork 的第一个自有版本**，不是上游的延续。上游 `halo-sigs/obsidian-halo`
+  的最后一个版本是 `1.2.0`（tag `1.2.0` → 提交 `34a1025`，作者 Ryan Wang），**那个 tag 仍在本仓库里**
+  —— 但它的 release 内容是**上游原版代码**（没有 MCP 能力）。**绝不要把 `manifest.json` 的 version
+  写回 `1.2.0`**：那会让 Obsidian 去下载上游那份 `main.js`，用户装到的是一个**与描述不符的旧插件**。
+- 版本号从 `0.1.0` 起步是刻意的：本 fork **改了插件 `id`**（`halo` → `halo-mcp`），
+  在 Obsidian 眼里这是一个**新插件**而非 `halo` 的更新，所以不该沿用上游的版本序列。
+- `versions.json` 因此**只剩 `0.1.0` 一条**，上游那六条（`1.0.0`–`1.2.0`）已删 ——
+  它们描述的是**另一个插件**的兼容性历史，留着会让 Obsidian 在低版本客户端上回落到上游版本。
+- `package.json` 的 `version` 也是 `0.1.0`，纯属巧合：那是 **npm 包版本**，而该包标了
+  `"private": true`、永远不会发布，没有任何消费者。**没有任何工具会比对这两个数字** ——
+  `version-bump.mjs` 只碰 `manifest.json` 与 `versions.json`。**不要**为了「对齐」去动 `package.json`。
+- **不要手工改 `manifest.json` / `versions.json` 的版本号**，走 `pnpm version`（它跑 `version-bump.mjs`
+  把两个文件一起更新）。
+
 
 **已经完成的工作**：发布后端已从「直连 Halo REST API」切到「以 Halo 官方 MCP Server 插件为后端」。
 **REST + PAT 只剩一条路**（上传超过 7 MiB 的图片），现状见 `README.md` 的「当前进度与凭据要求」。
@@ -427,11 +440,12 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 - **`src/utils/markdown.ts` 同样是死代码**（随 MCP 切换作废，见「内容管线」）：无人 import，`markdown-it` 与 `markdown-it-anchor` 这两个 `dependencies` 只为它而存在。**本次改造没有动 `package.json`**，清理时记得把这两个依赖一起处理。
 - **`src/utils/id.ts` 的 `randomUUID()` 是手写实现**（不用 `crypto`），用于生成新文章的 resource name 与 multipart boundary。
 - **`command.*.name` 里不要带 `<插件名>: ` 前缀**：Obsidian 会自己拼 `<插件名>: <命令名>`，而
-  `manifest.json` 的 `name` 是 `Halo` —— 在 locale 里再写一遍 `Halo: `，命令面板就会显示成
-  「Halo: Halo: 管理附件」。本阶段新增的 7 条命令曾这样写（计划里就是这么给的），**现已修**：
-  只去掉了**开头**那一个前缀，名字里其它位置的 `Halo` 一律不动
+  `manifest.json` 的 `name` 是 **`Halo-MCP`** —— 在 locale 里再写一遍前缀，命令面板就会显示成
+  「Halo-MCP: Halo-MCP: 管理附件」。本阶段新增的 7 条命令曾这样写（计划里就是这么给的），**现已修**：
+  **只**去掉了**开头**那一个前缀，名字里其它位置的 `Halo` 一律不动
   （例如 `publish_with_defaults` 的 `Publish to Halo (use default settings)`、以及
-  `publish` 的「发布到 Halo」）。自查一条命令：`grep -n ': "Halo: ' src/i18n/locales/*.json` 应为空。
+  `publish` 的「发布到 Halo」—— 那些 `Halo` 指的是**站点软件**，不是插件名，本来就该留）。
+  自查一条命令：`grep -n ': "Halo' src/i18n/locales/*.json` 应为空。
   ⚠️ 要改的是 locale，**不是** `manifest.json` 的 `name`（那会一并改掉设置面板与所有命令的显示名）。
 - **`command.*.name` 只有一个消费者：`main.ts` 的 `addCommand({ id, name })`**
   （`grep -rn 'command\.[a-z_]*\.name' src/` 的命中全在 `main.ts`）。因此**不要**顺手拿命令名去当别的

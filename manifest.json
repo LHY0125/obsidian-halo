@@ -1,7 +1,7 @@
 {
   "id": "halo-mcp",
-  "name": "Halo",
-  "version": "1.2.0",
+  "name": "Halo-MCP",
+  "version": "0.1.0",
   "minAppVersion": "1.4.4",
   "description": "Publish content to Halo sites through the official Halo MCP Server",
   "author": "Serendipity",
