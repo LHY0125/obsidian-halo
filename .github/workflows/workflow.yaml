@@ -30,10 +30,14 @@ jobs:
       # **冲突**：action-setup v2 在两者不一致时直接报
       # 「Multiple versions of pnpm specified」并中止 job。
       # 现在改用 corepack（Node 自带）读 `packageManager`，只有一处真值来源。
+      #
+      # ⚠️ **`cache: pnpm` 必须排在 `corepack enable` 之后**：setup-node 的 pnpm 缓存
+      # 需要**先**能在 PATH 上找到 `pnpm` 才敢去问它 store 目录，否则直接
+      # 「Unable to locate executable file: pnpm」。所以这里**不写** `cache: pnpm`，
+      # 缓存交给下面的 `pnpm store path` 那一步自己管。
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
       - name: Enable corepack
         run: corepack enable
