@@ -104,13 +104,13 @@ describe("attachmentUrl", () => {
  * 能观察到的只有 `contentEl` 上直接建出来的元素：标题、空态提示、截断提示。
  * 逐行的渲染判据落在 `attachmentUrl()` 上，由上面那个 describe 覆盖。这两条买到的是：
  *
- * ① `render()` 在**取数成功、取数为空、列表触顶**三种输入下都不抛 ——
+ * ① `render()` 在**取数成功、取数为空、用空页造出的 `truncated`** 三种输入下都不抛 ——
  *    它顺带把 `tests/setup.ts` 新补的 `Button.setWarning()` 真实地跑了一遍
  *   （删除按钮就标在那儿）。实测删掉那个桩，这里会以
  *   `button.setButtonText(...).setWarning is not a function` 变红 —— 前提正是 `renderOf()`
  *    里那句 `await`，理由见它自己的说明。
  * ② 空态提示与截断提示各自**只在对应状态下**出现 —— 前者在有条目时不该出现，
- *    后者在触顶时不该缺席。
+ *    后者在取数为空（用空页造出 `truncated`）时不该缺席。
  *
  * **没被盖住的**：删除按钮有没有真的被标成危险操作（`setWarning` 有没有被调用）——
  * 桩只做到「不抛」，不记录调用。要钉住它得让共享桩记录调用，那是 `tests/setup.ts`

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
 import { initializeI18n } from "../../src/i18n";
-import { LIST_PAGE_SIZE } from "../../src/pagination";
+import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT } from "../../src/pagination";
 import type { McpGetSinglePageResult, McpSinglePageItem } from "../../src/service/page-mapping";
 import PageService from "../../src/service/page-service";
 import { McpError } from "../../src/transport/errors";
@@ -532,9 +532,23 @@ describe("PageService.getPages", () => {
 
     await new PageService(app, createSettings(), site, client).getPages();
 
-    // `fetchAllPages` 的 maxPages 默认 20 —— 服务端永远说 hasNext 时必须能停下来
+    // `fetchAllPages` 的 maxPages 默认 20 —— 服务端永远说 hasNext 时必须能停下来。
+    // 这个 `20` 是**刻意的字面量绊线**：改用 `MAX_PAGES_DEFAULT` 的话，有人把默认上限
+    // 悄悄改掉时这条会跟着一起变，就拦不住「上限被改掉」这件事本身（本文件另外 4 处同类
+    // 断言同款）。下面那条期望值则相反，必须用常量表达式 —— 理由见那里的说明。
     expect(calls).toHaveLength(20);
-    expect(notices.length).toBeGreaterThan(seen);
+
+    // 触顶时必须提示，且提示里的 `{{size}}` 要与**实际取到的条数**对得上。
+    // 期望值用 `LIST_PAGE_SIZE * MAX_PAGES_DEFAULT`、与生产里**同一个表达式**
+    //（`page-service.ts` 的 `getPages()` 就是那么写的）—— 这个数字是**渲染给用户看的**，
+    // 抄成字面量的话，改默认上限会改到取数、改不到提示，而两边一起错时没有任何测试会红。
+    // 与 `tests/service/index.test.ts` 的分类/标签那处逐字同款。
+    expect(notices.slice(seen)).toEqual([
+      i18next.t("service.notice_list_truncated", {
+        what: i18next.t("service.what_pages"),
+        size: LIST_PAGE_SIZE * MAX_PAGES_DEFAULT,
+      }),
+    ]);
   });
 
   test("取数失败时自己弹提示并返回空数组（**不抛**）—— 与 fetchSelectablePosts 同契约", async () => {

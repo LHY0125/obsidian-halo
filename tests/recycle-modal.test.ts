@@ -118,7 +118,7 @@ async function renderOf(modal: unknown): Promise<void> {
  *
  * ⚠️ 这里钉的是**取数参数**，不是「弹窗长什么样」：逐行渲染的 `Setting` 在桩里不记录任何
  * 东西，所以每行的标题与 permalink 观察不到；能观察到的是 `contentEl` 上直接建出来的
- * 元素（标题、空态提示、触顶提示）以及**打桩后的取数调用**。取数参数才是这个弹窗里最要紧的
+ * 元素（标题、空态提示、截断提示）以及**打桩后的取数调用**。取数参数才是这个弹窗里最要紧的
  * 那一处 —— 传错的表现是两个弹窗的内容正好对调（见下面 `PageManagerModal` 那一组）。
  */
 describe("RecycleBinModal.render", () => {
