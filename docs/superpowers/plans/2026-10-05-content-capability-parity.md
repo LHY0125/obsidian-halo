@@ -30,17 +30,14 @@
    判断标准：**同一个决策出现两份实现时，它们必然在某次改动后分叉**，而分叉的表现是
    「文章路径对了、页面路径没跟上」—— 1-A 的最终审查把这一类记作最贵的缺陷来源。
    本计划的做法是**把内容类型抽成一个参数**（`ContentKind`），而不是写第二个 `HaloService`。
-
 2. **回写进 frontmatter 的必须是「本次生效的值」，不是「本地构造的值」。**
    这是 1-A 的 I1 的教训（写后回读失败时把陈旧值写进 `frontmatter.halo.publish`，下次发布
    把已发布的文章静默退回草稿）。**回写一律从 `post.spec` 取值。**
-
 3. **`null` 与「键不存在」同义；`false` / `0` / `""` 是显式值。**
    判据是 **`value !== undefined && value !== null`**，不是真假判断。
    ⚠️ **唯一例外是分类/标签回写那道真值判断**（`if (options.categoryNames)`）——
    它实际区分的是 `undefined`（解析失败）与「拿到了结果」，对 `string[] | undefined` 而言
    与 `!== undefined` 行为完全相同。**不许「顺手统一」**，理由见 `src/frontmatter-map.ts`。
-
 4. **任何"可能不命中"或"可能误命中"的判据，必须把两个方向都写出来。**
    1-B 在 glob 那条判据上错了四次，根因都是只证了一个方向。写「这样会漏掉 X」时，
    必须同时写「这样会不会把不该匹配的也匹配上」。
@@ -63,21 +60,22 @@
 
 这些是**服务端自己声明的契约**，不是推测。写代码时按它们来，不要按记忆来。
 
-| 事实 | 值 |
-|---|---|
-| MCP Server 版本 | `halo-mcp-server` **1.2.0**，协议 `2025-06-18`，**51 个工具** |
-| 独立页面的字段集 | `name / title / slug / excerpt / published / publishRequested / recycled / visible / owner / permalink / headSnapshot / releaseSnapshot / baseSnapshot / version / creationTimestamp / updateTimestamp` |
-| 页面的 `required`（outputSchema） | `["published", "publishRequested", "recycled"]` —— **`name` / `title` / `slug` 都不在其中** |
-| `halo_create_single_page` 的 `required` | `["name", "title", "raw"]` —— **`name` 必填**（MCP 没有 `generateName` 等价物） |
-| `halo_update_single_page` 的 `required` | `["name"]` |
-| `rawType` 的 schema 默认值 | **`"html"`** —— 与文章一样，**必须显式传 `"markdown"`** |
-| 页面**没有**的字段 | `categories` / `tags` / `pinned` / `priority` / `publishTime` / `template` / `cover` / `autoGenerateExcerpt` / `excerptRaw` |
-| `halo_delete_attachment` 的入参 | `name` + **`expectedVersion`（必填！）** —— 两者都在 `required` 里 |
-| `halo_search_content` 的标题 | **含 `<B>` 高亮标签**：实测 `"因为喜欢开源，我用 <B>Halo</B> 写了一个插件…"` |
-| `halo_search_content` 的 `required` | `["type", "published", "recycled", "exposed", "categories", "tags"]` |
-| 列表工具的 `size` 上限 | **100**（`maximum: 100`），全部返回 `page/size/total/totalPages/hasNext` |
-| 站点真实规模 | 文章 74 篇、**独立页面 11 个**、**附件 264 个（88 页）**、回收站 **4 篇文章 + 1 个页面** |
-| 附件项的 `required` | **`[]`** —— 全部字段可选，消费方必须自己兜底 |
+
+| 事实                                    | 值                                                                                                                                                                                                      |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP Server 版本                         | `halo-mcp-server` **1.2.0**，协议 `2025-06-18`，**51 个工具**                                                                                                                                           |
+| 独立页面的字段集                        | `name / title / slug / excerpt / published / publishRequested / recycled / visible / owner / permalink / headSnapshot / releaseSnapshot / baseSnapshot / version / creationTimestamp / updateTimestamp` |
+| 页面的`required`（outputSchema）        | `["published", "publishRequested", "recycled"]` —— **`name` / `title` / `slug` 都不在其中**                                                                                                           |
+| `halo_create_single_page` 的 `required` | `["name", "title", "raw"]` —— **`name` 必填**（MCP 没有 `generateName` 等价物）                                                                                                                       |
+| `halo_update_single_page` 的 `required` | `["name"]`                                                                                                                                                                                              |
+| `rawType` 的 schema 默认值              | **`"html"`** —— 与文章一样，**必须显式传 `"markdown"`**                                                                                                                                               |
+| 页面**没有**的字段                      | `categories` / `tags` / `pinned` / `priority` / `publishTime` / `template` / `cover` / `autoGenerateExcerpt` / `excerptRaw`                                                                             |
+| `halo_delete_attachment` 的入参         | `name` + **`expectedVersion`（必填！）** —— 两者都在 `required` 里                                                                                                                                    |
+| `halo_search_content` 的标题            | **含 `<B>` 高亮标签**：实测 `"因为喜欢开源，我用 <B>Halo</B> 写了一个插件…"`                                                                                                                           |
+| `halo_search_content` 的 `required`     | `["type", "published", "recycled", "exposed", "categories", "tags"]`                                                                                                                                    |
+| 列表工具的`size` 上限                   | **100**（`maximum: 100`），全部返回 `page/size/total/totalPages/hasNext`                                                                                                                                |
+| 站点真实规模                            | 文章 74 篇、**独立页面 11 个**、**附件 264 个（88 页）**、回收站 **4 篇文章 + 1 个页面**                                                                                                                |
+| 附件项的`required`                      | **`[]`** —— 全部字段可选，消费方必须自己兜底                                                                                                                                                          |
 
 ### 本阶段要收口的三个既有缺口（来自 1-B 的终审）
 
@@ -107,67 +105,72 @@
 
 ### 新建
 
-| 文件 | 唯一职责 |
-|---|---|
-| `src/content-kind.ts` | **零项目内依赖的叶子**：`ContentKind`（`"post" \| "page"`）与两种类型的工具名/字段集差异表。拆成叶子是为破 `service ⇄ page-service` 的 import 环（同 `glob.ts` 的处置） |
-| `src/service/page-mapping.ts` | 独立页面的扁平表示 ↔ 领域模型（`toSinglePage` / `toPageArgs`），与 `post-mapping.ts` 同构但**字段集更小** |
-| `src/service/page-service.ts` | 独立页面的编排：推 / 拉 / 发布 / 回收 / 恢复。**复用** `HaloService` 的 `withPublishRetry` / `refreshPostAfterWrite` 等私有逻辑 —— 见 Task 5 的接口设计 |
-| `src/page-selection-model.ts` | 拉取页面时选远程页面（与 `post-selection-model.ts` 同构） |
-| `src/search-modal.ts` | 查重结果列表弹窗（纯渲染，数据由纯函数构造） |
-| `src/search-preview.ts` | 查重结果的纯数据构造（`buildSearchResults`），弹窗只负责 `createEl` |
-| `src/attachment-model.ts` | 附件列表的取数 + 映射（`fetchAttachments` / `toAttachmentItems`），纯函数可测 |
-| `src/attachment-modal.ts` | 附件管理弹窗（列出 / 复制链接 / 删除） |
-| `src/recycle-model.ts` | 回收站的取数 + 映射（`fetchRecycled` / `toRecycledItems`），纯函数可测 |
-| `src/recycle-modal.ts` | 回收站弹窗（列出 / 恢复） |
-| `src/pagination.ts` | **零项目内依赖的叶子**：`fetchAllPages()` —— 按 `hasNext` 翻完所有页的通用取数器 |
+
+| 文件                          | 唯一职责                                                                                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/content-kind.ts`         | **零项目内依赖的叶子**：`ContentKind`（`"post" | "page"`）与两种类型的工具名/字段集差异表。拆成叶子是为破 `service ⇄ page-service` 的 import 环（同 `glob.ts` 的处置） |
+| `src/service/page-mapping.ts` | 独立页面的扁平表示 ↔ 领域模型（`toSinglePage` / `toPageArgs`），与 `post-mapping.ts` 同构但**字段集更小**                                                              |
+| `src/service/page-service.ts` | 独立页面的编排：推 / 拉 / 发布 / 回收 / 恢复。**复用** `HaloService` 的 `withPublishRetry` / `refreshPostAfterWrite` 等私有逻辑 —— 见 Task 5 的接口设计               |
+| `src/page-selection-model.ts` | 拉取页面时选远程页面（与`post-selection-model.ts` 同构）                                                                                                                |
+| `src/search-modal.ts`         | 查重结果列表弹窗（纯渲染，数据由纯函数构造）                                                                                                                            |
+| `src/search-preview.ts`       | 查重结果的纯数据构造（`buildSearchResults`），弹窗只负责 `createEl`                                                                                                     |
+| `src/attachment-model.ts`     | 附件列表的取数 + 映射（`fetchAttachments` / `toAttachmentItems`），纯函数可测                                                                                           |
+| `src/attachment-modal.ts`     | 附件管理弹窗（列出 / 复制链接 / 删除）                                                                                                                                  |
+| `src/recycle-model.ts`        | 回收站的取数 + 映射（`fetchRecycled` / `toRecycledItems`），纯函数可测                                                                                                  |
+| `src/recycle-modal.ts`        | 回收站弹窗（列出 / 恢复）                                                                                                                                               |
+| `src/pagination.ts`           | **零项目内依赖的叶子**：`fetchAllPages()` —— 按 `hasNext` 翻完所有页的通用取数器                                                                                      |
 
 ### 修改
 
-| 文件 | 改动 |
-|---|---|
-| `src/service/post-mapping.ts` | 抽出 `McpContentItemBase`（两种类型共有的字段），`McpPostItem` 继承它 |
-| `src/service/index.ts` | `getCategories()` / `getTags()` 改用 `fetchAllPages()`；`fetchSelectablePosts()` 的调用方改用翻页 |
-| `src/post-selection-model.ts` | 改用 `fetchAllPages()`，**删掉**那条「列表不完整」的提示（不再会不完整） |
-| `src/mcp-self-check.ts` | `REQUIRED_TOOLS` 从 13 项扩到**本阶段实际调用的全部工具**（见 Task 1） |
-| `src/main.ts` | 注册 6 条新命令；`runBatchCommand` 的汇总改用新字段 |
-| `src/batch-publish.ts` | `BatchRunSummary` 增加 `skipped: BatchSkip[]`（逐条带原因） |
-| `src/batch-confirm-modal.ts` | 末尾汇总渲染逐条跳过原因 |
-| `src/i18n/locales/{en,zh-cn,zh-tw}.json` | 新增文案（三语同步） |
-| `README.md` / `README.zh-CN.md` / `CLAUDE.md` | 新命令、新契约、两个产品语义的如实描述 |
-| `docs/e2e-manual-checklist.md` | 追加阶段 2 的手工验证项 |
+
+| 文件                                          | 改动                                                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/service/post-mapping.ts`                 | 抽出`McpContentItemBase`（两种类型共有的字段），`McpPostItem` 继承它                              |
+| `src/service/index.ts`                        | `getCategories()` / `getTags()` 改用 `fetchAllPages()`；`fetchSelectablePosts()` 的调用方改用翻页 |
+| `src/post-selection-model.ts`                 | 改用`fetchAllPages()`，**删掉**那条「列表不完整」的提示（不再会不完整）                           |
+| `src/mcp-self-check.ts`                       | `REQUIRED_TOOLS` 从 13 项扩到**本阶段实际调用的全部工具**（见 Task 1）                            |
+| `src/main.ts`                                 | 注册 6 条新命令；`runBatchCommand` 的汇总改用新字段                                               |
+| `src/batch-publish.ts`                        | `BatchRunSummary` 增加 `skipped: BatchSkip[]`（逐条带原因）                                       |
+| `src/batch-confirm-modal.ts`                  | 末尾汇总渲染逐条跳过原因                                                                          |
+| `src/i18n/locales/{en,zh-cn,zh-tw}.json`      | 新增文案（三语同步）                                                                              |
+| `README.md` / `README.zh-CN.md` / `CLAUDE.md` | 新命令、新契约、两个产品语义的如实描述                                                            |
+| `docs/e2e-manual-checklist.md`                | 追加阶段 2 的手工验证项                                                                           |
 
 ---
 
 ## 任务总览
 
-| # | 任务 | 依赖 | 产出 |
-|---|---|---|---|
-| 1 | 内容类型抽象与工具清单 | — | `src/content-kind.ts`、`REQUIRED_TOOLS` 扩到 22 项 |
-| 2 | 独立页面的映射层 | 1 | `src/service/page-mapping.ts` |
-| 3 | 通用翻页取数器 | — | `src/pagination.ts` |
-| 4 | 服务层分页收口 | 3 | `getCategories` / `getTags` / 拉取列表都翻页 |
-| 5 | 独立页面的服务层 | 1,2 | `src/service/page-service.ts` |
-| 6 | 独立页面命令与选择器 | 5 | 3 条命令 + `src/page-selection-model.ts` |
-| 7 | 查重的纯数据层 | — | `src/search-preview.ts`（含 `<B>` 清理） |
-| 8 | 查重命令与弹窗 | 7 | `src/search-modal.ts` + 命令 |
-| 9 | 附件的纯数据层 | 3 | `src/attachment-model.ts` |
-| 10 | 附件命令与弹窗 | 9 | `src/attachment-modal.ts` + 命令 |
-| 11 | 回收站的纯数据层 | — | `src/recycle-model.ts` |
-| 12 | 回收站命令与弹窗 | 11 | `src/recycle-modal.ts` + 2 条命令 |
-| 13 | 批量汇总的逐条跳过原因 | — | `batch-publish.ts` + `batch-confirm-modal.ts` |
-| 14 | 文档收口与两个产品语义 | 6,8,10,12,13 | 三份文档 + 手工清单 |
-| 15 | 全阶段自审 | 全部 | 三语键数相等、无死引用、构建通过 |
+
+| #  | 任务                   | 依赖         | 产出                                               |
+| ---- | ------------------------ | -------------- | ---------------------------------------------------- |
+| 1  | 内容类型抽象与工具清单 | —           | `src/content-kind.ts`、`REQUIRED_TOOLS` 扩到 22 项 |
+| 2  | 独立页面的映射层       | 1            | `src/service/page-mapping.ts`                      |
+| 3  | 通用翻页取数器         | —           | `src/pagination.ts`                                |
+| 4  | 服务层分页收口         | 3            | `getCategories` / `getTags` / 拉取列表都翻页       |
+| 5  | 独立页面的服务层       | 1,2          | `src/service/page-service.ts`                      |
+| 6  | 独立页面命令与选择器   | 5            | 3 条命令 +`src/page-selection-model.ts`            |
+| 7  | 查重的纯数据层         | —           | `src/search-preview.ts`（含 `<B>` 清理）           |
+| 8  | 查重命令与弹窗         | 7            | `src/search-modal.ts` + 命令                       |
+| 9  | 附件的纯数据层         | 3            | `src/attachment-model.ts`                          |
+| 10 | 附件命令与弹窗         | 9            | `src/attachment-modal.ts` + 命令                   |
+| 11 | 回收站的纯数据层       | —           | `src/recycle-model.ts`                             |
+| 12 | 回收站命令与弹窗       | 11           | `src/recycle-modal.ts` + 2 条命令                  |
+| 13 | 批量汇总的逐条跳过原因 | —           | `batch-publish.ts` + `batch-confirm-modal.ts`      |
+| 14 | 文档收口与两个产品语义 | 6,8,10,12,13 | 三份文档 + 手工清单                                |
+| 15 | 全阶段自审             | 全部         | 三语键数相等、无死引用、构建通过                   |
 
 ---
 
 ## Task 1: 内容类型抽象与工具清单
 
 **Files:**
+
 - Create: `src/content-kind.ts`
 - Modify: `src/mcp-self-check.ts`
 - Test: `tests/content-kind.test.ts`, `tests/mcp-self-check.test.ts`
 
 **Interfaces:**
+
 - Consumes: 无（本任务不依赖任何既有代码）
 - Produces:
   - `type ContentKind = "post" | "page"`
@@ -175,7 +178,7 @@
   - `const CONTENT_TOOLSETS: Record<ContentKind, ContentToolset>`
   - `const REQUIRED_TOOLS: readonly string[]`（扩到 22 项）
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/content-kind.test.ts
@@ -211,12 +214,12 @@ describe("content-kind", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/content-kind.test.ts`
 Expected: FAIL —— `Cannot find module '../src/content-kind'`
 
-- [ ] **Step 3: 写实现**
+- [ ]  **Step 3: 写实现**
 
 ```ts
 // src/content-kind.ts
@@ -278,12 +281,12 @@ export const CONTENT_TOOLSETS: Record<ContentKind, ContentToolset> = {
 };
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ]  **Step 4: 运行测试确认通过**
 
 Run: `pnpm test tests/content-kind.test.ts`
 Expected: PASS（3 个用例）
 
-- [ ] **Step 5: 扩充 `REQUIRED_TOOLS`**
+- [ ]  **Step 5: 扩充 `REQUIRED_TOOLS`**
 
 把 `src/mcp-self-check.ts` 的 `REQUIRED_TOOLS` 换成下面这份。**逐条核对过**：每一条都是
 本阶段结束后代码**真的会调用**的工具，没有一条是「预留」。
@@ -350,12 +353,12 @@ test("REQUIRED_TOOLS 覆盖到本阶段全部被调用的工具，且数量与�
 });
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ]  **Step 6: 运行测试确认通过**
 
 Run: `pnpm test tests/mcp-self-check.test.ts tests/content-kind.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/content-kind.ts src/mcp-self-check.ts tests/content-kind.test.ts tests/mcp-self-check.test.ts
@@ -367,11 +370,13 @@ git commit -m "feat: 抽出内容类型抽象，自检清单扩到本阶段全�
 ## Task 2: 独立页面的映射层
 
 **Files:**
+
 - Create: `src/service/page-mapping.ts`
 - Modify: `src/service/post-mapping.ts`（抽出共有基类）
 - Test: `tests/service/page-mapping.test.ts`
 
 **Interfaces:**
+
 - Consumes: 无
 - Produces:
   - `interface McpSinglePageItem`（字段见下）
@@ -381,7 +386,7 @@ git commit -m "feat: 抽出内容类型抽象，自检清单扩到本阶段全�
   - `function toPageUpdateArgs(page: SinglePage, raw: string): Record<string, unknown>`
   - `interface McpContentItemBase`（在 `post-mapping.ts` 里）
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/service/page-mapping.test.ts
@@ -477,12 +482,12 @@ describe("toPageCreateArgs / toPageUpdateArgs", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/service/page-mapping.test.ts`
 Expected: FAIL —— `Cannot find module '../../src/service/page-mapping'`
 
-- [ ] **Step 3: 在 `post-mapping.ts` 里抽出共有基类**
+- [ ]  **Step 3: 在 `post-mapping.ts` 里抽出共有基类**
 
 在 `src/service/post-mapping.ts` 的 `McpPostItem` **之前**插入：
 
@@ -533,7 +538,7 @@ export interface McpPostItem extends McpContentItemBase {
 这些**继承来的**字段，TypeScript 照样解析得到。跑 `pnpm test` 确认**既有测试全绿**（357 个）——
 若有一条变红，说明基类少声明了某个字段。
 
-- [ ] **Step 4: 写 `page-mapping.ts`**
+- [ ]  **Step 4: 写 `page-mapping.ts`**
 
 ```ts
 // src/service/page-mapping.ts
@@ -637,17 +642,17 @@ export function toPageUpdateArgs(page: SinglePage, raw: string): Record<string, 
 写死 `true` 与上游行为一致（新建默认允许评论）。**不要**把它做成 frontmatter 可配的 ——
 那会引入一个「读不回来」的字段，而 1-B 的教训正是「写出去读不回来的字段会静默漂移」。
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ]  **Step 5: 运行测试确认通过**
 
 Run: `pnpm test tests/service/page-mapping.test.ts`
 Expected: PASS（8 个用例）
 
-- [ ] **Step 6: 跑全量测试，确认抽基类没有破坏既有行为**
+- [ ]  **Step 6: 跑全量测试，确认抽基类没有破坏既有行为**
 
 Run: `pnpm test`
 Expected: PASS（357 + 新增）
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/service/post-mapping.ts src/service/page-mapping.ts tests/service/page-mapping.test.ts
@@ -659,17 +664,19 @@ git commit -m "feat: 独立页面的映射层，抽出两种内容类型共有�
 ## Task 3: 通用翻页取数器
 
 **Files:**
+
 - Create: `src/pagination.ts`
 - Test: `tests/pagination.test.ts`
 
 **Interfaces:**
+
 - Consumes: 无
 - Produces:
   - `interface PagedResult<T> { items: T[]; page: number; size: number; total: number; totalPages: number; hasNext: boolean }`
   - `interface FetchAllPagesOptions<T> { pageSize: number; maxPages?: number }`
   - `async function fetchAllPages<T>(fetchPage: (page: number, size: number) => Promise<PagedResult<T>>, options: FetchAllPagesOptions<T>): Promise<{ items: T[]; truncated: boolean }>`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/pagination.test.ts
@@ -747,12 +754,12 @@ describe("fetchAllPages", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/pagination.test.ts`
 Expected: FAIL —— `Cannot find module '../src/pagination'`
 
-- [ ] **Step 3: 写实现**
+- [ ]  **Step 3: 写实现**
 
 ```ts
 // src/pagination.ts
@@ -835,12 +842,12 @@ export async function fetchAllPages<T>(
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ]  **Step 4: 运行测试确认通过**
 
 Run: `pnpm test tests/pagination.test.ts`
 Expected: PASS（5 个用例）
 
-- [ ] **Step 5: 提交**
+- [ ]  **Step 5: 提交**
 
 ```bash
 git add src/pagination.ts tests/pagination.test.ts
@@ -852,15 +859,17 @@ git commit -m "feat: 通用翻页取数器，带两条终止保证"
 ## Task 4: 服务层分页收口
 
 **Files:**
+
 - Modify: `src/service/index.ts`（`getCategories` / `getTags`）
 - Modify: `src/post-selection-model.ts`（改用翻页，删掉截断提示）
 - Test: `tests/service/index.test.ts`, `tests/post-selection-model.test.ts`
 
 **Interfaces:**
+
 - Consumes: `fetchAllPages`（Task 3）
 - Produces: `getCategories()` / `getTags()` 的签名**不变**（仍返回 `McpCategoryItem[]` / `McpTagItem[]`）；`fetchSelectablePosts(client)` 的签名**不变**
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 在 `tests/service/index.test.ts` 里追加：
 
@@ -930,12 +939,12 @@ test("列表超过一页时翻页取全，**不再**提示列表不完整", asyn
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/service/index.test.ts tests/post-selection-model.test.ts`
 Expected: FAIL —— `getCategories` 只调一次、返回 100 条；拉取列表只调一次、返回 100 条
 
-- [ ] **Step 3: 改 `getCategories` / `getTags`**
+- [ ]  **Step 3: 改 `getCategories` / `getTags`**
 
 ```ts
   /**
@@ -1003,7 +1012,7 @@ export const LIST_PAGE_SIZE = 100;
 
 然后 `post-selection-model.ts` 改成 `export { LIST_PAGE_SIZE } from "./pagination";` 以保住既有 import 路径。
 
-- [ ] **Step 4: 改 `fetchSelectablePosts`**
+- [ ]  **Step 4: 改 `fetchSelectablePosts`**
 
 ```ts
 export async function fetchSelectablePosts(client: McpClient): Promise<SelectablePost[]> {
@@ -1033,7 +1042,7 @@ export async function fetchSelectablePosts(client: McpClient): Promise<Selectabl
 
 `PostListResult` 接口**删掉**（改用 `PagedResult<McpPostItem>`），并把 `hasNext` 那段注释一并删除。
 
-- [ ] **Step 5: 加三语文案**
+- [ ]  **Step 5: 加三语文案**
 
 `src/i18n/locales/en.json` 的 `service` 组里加：
 
@@ -1067,12 +1076,12 @@ export async function fetchSelectablePosts(client: McpClient): Promise<Selectabl
 new Notice(i18next.t("service.notice_list_truncated", { what: ..., size: LIST_PAGE_SIZE * 20 }));
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ]  **Step 6: 运行测试确认通过**
 
 Run: `pnpm test`
 Expected: PASS（全量）
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/pagination.ts src/service/index.ts src/post-selection-model.ts \
@@ -1086,10 +1095,12 @@ git commit -m "feat: 分类/标签/拉取列表改为翻页取全，删掉会谎
 ## Task 5: 独立页面的服务层
 
 **Files:**
+
 - Create: `src/service/page-service.ts`
 - Test: `tests/service/page-service.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CONTENT_TOOLSETS`（Task 1）、`toSinglePage` / `toPageCreateArgs` / `toPageUpdateArgs`（Task 2）
 - Produces:
   - `class PageService`，构造签名 `(app: App, settings: HaloSetting, site: HaloSite, client?: McpClient)`
@@ -1101,7 +1112,7 @@ git commit -m "feat: 分类/标签/拉取列表改为翻页取全，删掉会谎
   - `restorePage(name: string): Promise<void>`
   - `getPages(): Promise<McpSinglePageItem[]>`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/service/page-service.test.ts
@@ -1225,12 +1236,12 @@ describe("PageService 的回收与恢复", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/service/page-service.test.ts`
 Expected: FAIL —— `Cannot find module '../../src/service/page-service'`
 
-- [ ] **Step 3: 写实现**
+- [ ]  **Step 3: 写实现**
 
 `HaloService` 的 `withPublishRetry` / `sleep` / `bodyOf` / `report` / `publishFailureMessage` /
 `readFailureMessage` 都是 `private`。**先做一次纯重构**把它们提到一个可复用的基类上，
@@ -1434,17 +1445,17 @@ export default PageService;
   并让它在页面路径上**跳过** `categories` / `tags` 的赋值。这需要改 `local-content.ts`，
   **本任务允许且必须做这个改动**。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ]  **Step 4: 运行测试确认通过**
 
 Run: `pnpm test tests/service/page-service.test.ts`
 Expected: PASS（6 个用例）
 
-- [ ] **Step 5: 跑全量测试，确认基类抽取没有破坏文章路径**
+- [ ]  **Step 5: 跑全量测试，确认基类抽取没有破坏文章路径**
 
 Run: `pnpm test`
 Expected: PASS（全量）
 
-- [ ] **Step 6: 提交**
+- [ ]  **Step 6: 提交**
 
 ```bash
 git add src/service/index.ts src/service/page-service.ts src/service/local-content.ts \
@@ -1457,16 +1468,18 @@ git commit -m "feat: 独立页面服务层，与文章路径共用重试与回�
 ## Task 6: 独立页面命令与选择器
 
 **Files:**
+
 - Create: `src/page-selection-model.ts`
 - Modify: `src/main.ts`
 - Modify: `src/i18n/locales/{en,zh-cn,zh-tw}.json`
 - Test: `tests/page-selection-model.test.ts`, `tests/main.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PageService`（Task 5）
 - Produces: 3 条命令 —— `push-page` / `pull-page` / `manage-pages`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/page-selection-model.test.ts
@@ -1512,12 +1525,12 @@ test("push-page 命令在没有活动文件时静默返回，不弹任何提示"
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/page-selection-model.test.ts tests/main.test.ts`
 Expected: FAIL —— `Cannot find module '../src/page-selection-model'` / `plugin.pushPageCommand is not a function`
 
-- [ ] **Step 3: 写 `page-selection-model.ts`**
+- [ ]  **Step 3: 写 `page-selection-model.ts`**
 
 与 `post-selection-model.ts` 同构，**但取数走 `PageService.getPages()` 而不是直接造 `McpClient`**
 （页面列表要翻页，而翻页逻辑已经在服务层里了）。
@@ -1625,7 +1638,7 @@ class PageSelectionModal extends Modal {
 要么在这里挂 `.catch`。**选前者** —— 让两个取数函数的契约一致，否则调用方每次都得先看一眼
 「这个函数抛不抛」。改完把上面那句注释改成事实。
 
-- [ ] **Step 4: 在 `main.ts` 注册三条命令**
+- [ ]  **Step 4: 在 `main.ts` 注册三条命令**
 
 ```ts
     this.addCommand({
@@ -1730,29 +1743,30 @@ class PageSelectionModal extends Modal {
 本任务先让 `managePagesCommand` 弹一条 `Notice` 说明「尚未实现」，并在 Task 12 里替换掉。
 **这是一处刻意的中间态**，写进提交信息里。
 
-- [ ] **Step 5: 加三语文案**
+- [ ]  **Step 5: 加三语文案**
 
 `command` 组加（三语同步）：
 
-| key | en | zh-cn | zh-tw |
-|---|---|---|---|
-| `push_page.name` | `Halo: Push as page` | `Halo: 推为独立页面` | `Halo: 推為獨立頁面` |
-| `pull_page.name` | `Halo: Pull page` | `Halo: 拉取独立页面` | `Halo: 拉取獨立頁面` |
-| `manage_pages.name` | `Halo: Manage pages` | `Halo: 管理独立页面` | `Halo: 管理獨立頁面` |
-| `pull_page.error_no_sites` | `No sites configured` | `还没有配置站点` | `還沒有設定站點` |
-| `manage_pages.error_no_sites` | `No sites configured` | `还没有配置站点` | `還沒有設定站點` |
-| `manage_pages.notice_not_implemented` | `Not implemented yet` | `尚未实现` | `尚未實作` |
+
+| key                                   | en                    | zh-cn                | zh-tw                |
+| --------------------------------------- | ----------------------- | ---------------------- | ---------------------- |
+| `push_page.name`                      | `Halo: Push as page`  | `Halo: 推为独立页面` | `Halo: 推為獨立頁面` |
+| `pull_page.name`                      | `Halo: Pull page`     | `Halo: 拉取独立页面` | `Halo: 拉取獨立頁面` |
+| `manage_pages.name`                   | `Halo: Manage pages`  | `Halo: 管理独立页面` | `Halo: 管理獨立頁面` |
+| `pull_page.error_no_sites`            | `No sites configured` | `还没有配置站点`     | `還沒有設定站點`     |
+| `manage_pages.error_no_sites`         | `No sites configured` | `还没有配置站点`     | `還沒有設定站點`     |
+| `manage_pages.notice_not_implemented` | `Not implemented yet` | `尚未实现`           | `尚未實作`           |
 
 `page_selection_modal` 组加：`title` / `button_pull`（三语同步）。
 
 `service` 组加：`notice_push_page_success` / `what_pages`（三语同步）。
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ]  **Step 6: 运行测试确认通过**
 
 Run: `pnpm test`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/main.ts src/page-selection-model.ts src/i18n/locales/en.json \
@@ -1766,10 +1780,12 @@ git commit -m "feat: 独立页面三条命令与拉取选择器（管理页面�
 ## Task 7: 查重的纯数据层
 
 **Files:**
+
 - Create: `src/search-preview.ts`
 - Test: `tests/search-preview.test.ts`
 
 **Interfaces:**
+
 - Consumes: 无
 - Produces:
   - `interface McpSearchItem`
@@ -1778,7 +1794,7 @@ git commit -m "feat: 独立页面三条命令与拉取选择器（管理页面�
   - `function toSearchResults(items: McpSearchItem[]): SearchResult[]`
   - `async function searchContent(client: McpClient, query: string): Promise<SearchResult[]>`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/search-preview.test.ts
@@ -1849,12 +1865,12 @@ describe("toSearchResults", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/search-preview.test.ts`
 Expected: FAIL —— `Cannot find module '../src/search-preview'`
 
-- [ ] **Step 3: 写实现**
+- [ ]  **Step 3: 写实现**
 
 ```ts
 // src/search-preview.ts
@@ -1967,12 +1983,12 @@ export async function searchContent(client: McpClient, query: string): Promise<S
 ⚠️ **`limit: 50` 是 schema 的 `maximum`**（实测 `{"minimum":1,"default":10,"maximum":50}`）。
 传 51 会被服务端拒绝。**不要**把它写成 100 —— 那是列表工具的 `size` 上限，不是这个的。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ]  **Step 4: 运行测试确认通过**
 
 Run: `pnpm test tests/search-preview.test.ts`
 Expected: PASS（8 个用例）
 
-- [ ] **Step 5: 提交**
+- [ ]  **Step 5: 提交**
 
 ```bash
 git add src/search-preview.ts tests/search-preview.test.ts
@@ -1984,15 +2000,17 @@ git commit -m "feat: 查重的纯数据层，清理服务端加的高亮标签"
 ## Task 8: 查重命令与弹窗
 
 **Files:**
+
 - Create: `src/search-modal.ts`
 - Modify: `src/main.ts`, `src/i18n/locales/{en,zh-cn,zh-tw}.json`
 - Test: `tests/main.test.ts`
 
 **Interfaces:**
+
 - Consumes: `searchContent` / `SearchResult`（Task 7）
 - Produces: 命令 `search-content`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 在 `tests/main.test.ts` 的 `Internals` 里加 `searchContentCommand(): Promise<void>`：
 
@@ -2009,12 +2027,12 @@ test("search-content 命令在用户取消输入时静默返回，不打 MCP", a
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/main.test.ts`
 Expected: FAIL —— `plugin.searchContentCommand is not a function`
 
-- [ ] **Step 3: 写 `search-modal.ts`**
+- [ ]  **Step 3: 写 `search-modal.ts`**
 
 ```ts
 // src/search-modal.ts
@@ -2097,7 +2115,7 @@ export class SearchResultsModal extends Modal {
 `Setting` 没有 `setClass`，而 `?.` 会让类型检查也放过它。**删掉那一行**，
 `const setting = new Setting(contentEl).setName(...).setDesc(...)` 就够了。
 
-- [ ] **Step 4: 在 `main.ts` 注册命令**
+- [ ]  **Step 4: 在 `main.ts` 注册命令**
 
 ```ts
     this.addCommand({
@@ -2201,7 +2219,7 @@ class QueryPromptModal extends Modal {
 }
 ```
 
-- [ ] **Step 5: 加三语文案**
+- [ ]  **Step 5: 加三语文案**
 
 `command` 组：`search_content.name`（`Halo: Search site content` / `Halo: 查重（搜索线上内容）` /
 `Halo: 查重（搜尋線上內容）`）、`search_content.error_no_sites`。
@@ -2220,12 +2238,12 @@ tooltip 是这里唯一能表达「这个图标是什么意思」的地方，去
     }
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ]  **Step 6: 运行测试确认通过**
 
 Run: `pnpm test`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/main.ts src/search-modal.ts src/i18n/locales/en.json \
@@ -2238,10 +2256,12 @@ git commit -m "feat: 查重命令与结果弹窗"
 ## Task 9: 附件的纯数据层
 
 **Files:**
+
 - Create: `src/attachment-model.ts`
 - Test: `tests/attachment-model.test.ts`
 
 **Interfaces:**
+
 - Consumes: `fetchAllPages` / `LIST_PAGE_SIZE` / `PagedResult`（Task 3）
 - Produces:
   - `interface McpAttachmentItem`
@@ -2251,7 +2271,7 @@ git commit -m "feat: 查重命令与结果弹窗"
   - `async function fetchAttachments(client: McpClient): Promise<{ items: AttachmentItem[]; truncated: boolean }>`
   - `async function deleteAttachment(client: McpClient, item: AttachmentItem): Promise<void>`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/attachment-model.test.ts
@@ -2318,12 +2338,12 @@ describe("formatBytes", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/attachment-model.test.ts`
 Expected: FAIL —— `Cannot find module '../src/attachment-model'`
 
-- [ ] **Step 3: 写实现**
+- [ ]  **Step 3: 写实现**
 
 ```ts
 // src/attachment-model.ts
@@ -2448,12 +2468,12 @@ export async function deleteAttachment(client: McpClient, item: AttachmentItem):
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ]  **Step 4: 运行测试确认通过**
 
 Run: `pnpm test tests/attachment-model.test.ts`
 Expected: PASS（6 个用例）
 
-- [ ] **Step 5: 提交**
+- [ ]  **Step 5: 提交**
 
 ```bash
 git add src/attachment-model.ts tests/attachment-model.test.ts
@@ -2465,15 +2485,17 @@ git commit -m "feat: 附件的纯数据层，翻页取全并带 expectedVersion"
 ## Task 10: 附件命令与弹窗
 
 **Files:**
+
 - Create: `src/attachment-modal.ts`
 - Modify: `src/main.ts`, `src/i18n/locales/{en,zh-cn,zh-tw}.json`
 - Test: `tests/main.test.ts`
 
 **Interfaces:**
+
 - Consumes: `fetchAttachments` / `deleteAttachment` / `AttachmentItem` / `formatBytes`（Task 9）
 - Produces: 命令 `manage-attachments`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 在 `tests/main.test.ts` 的 `Internals` 里加 `manageAttachmentsCommand(): Promise<void>`：
 
@@ -2487,12 +2509,12 @@ test("manage-attachments 命令在没有站点时弹提示并返回", async () =
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/main.test.ts`
 Expected: FAIL —— `plugin.manageAttachmentsCommand is not a function`
 
-- [ ] **Step 3: 写 `attachment-modal.ts`**
+- [ ]  **Step 3: 写 `attachment-modal.ts`**
 
 ```ts
 // src/attachment-modal.ts
@@ -2665,7 +2687,7 @@ class ConfirmDeleteModal extends Modal {
     }
 ```
 
-- [ ] **Step 4: 在 `main.ts` 注册命令**
+- [ ]  **Step 4: 在 `main.ts` 注册命令**
 
 ```ts
     this.addCommand({
@@ -2694,7 +2716,7 @@ class ConfirmDeleteModal extends Modal {
   }
 ```
 
-- [ ] **Step 5: 加三语文案**
+- [ ]  **Step 5: 加三语文案**
 
 `command` 组：`manage_attachments.name`、`manage_attachments.error_no_sites`。
 
@@ -2702,12 +2724,12 @@ class ConfirmDeleteModal extends Modal {
 `button_copy_link`、`notice_link_copied`、`button_delete`、`notice_deleted`（带 `{{name}}`）、
 `confirm_title`、`confirm_body`（带 `{{name}}` / `{{size}}`）、`confirm_irreversible`。
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ]  **Step 6: 运行测试确认通过**
 
 Run: `pnpm test`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/main.ts src/attachment-modal.ts src/i18n/locales/en.json \
@@ -2720,10 +2742,12 @@ git commit -m "feat: 附件管理命令与弹窗，删除带二次确认"
 ## Task 11: 回收站的纯数据层
 
 **Files:**
+
 - Create: `src/recycle-model.ts`
 - Test: `tests/recycle-model.test.ts`
 
 **Interfaces:**
+
 - Consumes: `fetchAllPages` / `LIST_PAGE_SIZE` / `PagedResult`（Task 3）
 - Produces:
   - `type RecycleKind = "post" | "page"`
@@ -2731,7 +2755,7 @@ git commit -m "feat: 附件管理命令与弹窗，删除带二次确认"
   - `async function fetchRecycled(client: McpClient, kind: RecycleKind): Promise<{ items: RecycledItem[]; truncated: boolean }>`
   - `async function restoreRecycled(client: McpClient, item: RecycledItem): Promise<void>`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 ```ts
 // tests/recycle-model.test.ts
@@ -2773,12 +2797,12 @@ describe("toRecycledItems", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/recycle-model.test.ts`
 Expected: FAIL —— `Cannot find module '../src/recycle-model'`
 
-- [ ] **Step 3: 写实现**
+- [ ]  **Step 3: 写实现**
 
 ```ts
 // src/recycle-model.ts
@@ -2884,12 +2908,12 @@ export async function restoreRecycled(client: McpClient, item: RecycledItem): Pr
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ]  **Step 4: 运行测试确认通过**
 
 Run: `pnpm test tests/recycle-model.test.ts`
 Expected: PASS（4 个用例）
 
-- [ ] **Step 5: 提交**
+- [ ]  **Step 5: 提交**
 
 ```bash
 git add src/recycle-model.ts tests/recycle-model.test.ts
@@ -2901,15 +2925,17 @@ git commit -m "feat: 回收站的纯数据层，翻页取全并显式传 recycle
 ## Task 12: 回收站命令与弹窗（并替换 Task 6 的占位）
 
 **Files:**
+
 - Create: `src/recycle-modal.ts`
 - Modify: `src/main.ts`, `src/i18n/locales/{en,zh-cn,zh-tw}.json`
 - Test: `tests/main.test.ts`
 
 **Interfaces:**
+
 - Consumes: `fetchRecycled` / `restoreRecycled` / `RecycledItem`（Task 11）
 - Produces: 命令 `recycle-post` / `recycle-page`；`PageManagerModal`（替换 Task 6 的占位）
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 在 `tests/main.test.ts` 的 `Internals` 里加 `recycleContentCommand(kind: "post" | "page"): Promise<void>`：
 
@@ -2923,12 +2949,12 @@ test("recycle-content 命令在没有站点时弹提示并返回", async () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/main.test.ts`
 Expected: FAIL —— `plugin.recycleContentCommand is not a function`
 
-- [ ] **Step 3: 写 `recycle-modal.ts`**
+- [ ]  **Step 3: 写 `recycle-modal.ts`**
 
 ```ts
 // src/recycle-modal.ts
@@ -3019,7 +3045,7 @@ export class RecycleBinModal extends Modal {
 }
 ```
 
-- [ ] **Step 4: 写 `PageManagerModal` 并替换 Task 6 的占位**
+- [ ]  **Step 4: 写 `PageManagerModal` 并替换 Task 6 的占位**
 
 把 `PageManagerModal` 加进 `src/recycle-modal.ts`（它复用同一个 `RecycleBinModal` 家族，
 放一起比新开一个文件更省事）：
@@ -3162,7 +3188,7 @@ async function fetchByKind(
 
 `fetchRecycled` = `fetchByKind(client, kind, true)`；`fetchPagesByRecycled` = `fetchByKind(client, "page", recycled)`。
 
-- [ ] **Step 5: 在 `main.ts` 注册命令并替换占位**
+- [ ]  **Step 5: 在 `main.ts` 注册命令并替换占位**
 
 ```ts
     this.addCommand({
@@ -3205,7 +3231,7 @@ async function fetchByKind(
 
 同时**删掉** `command.manage_pages.notice_not_implemented` 这个键（三语都删）。
 
-- [ ] **Step 6: 加三语文案**
+- [ ]  **Step 6: 加三语文案**
 
 `command` 组：`recycle_post.name`、`recycle_page.name`、`recycle_post.error_no_sites`、
 `recycle_page.error_no_sites`。
@@ -3215,12 +3241,12 @@ async function fetchByKind(
 
 `page_manager_modal` 组：`title`、`empty`、`button_recycle`、`notice_recycled`（带 `{{title}}`）。
 
-- [ ] **Step 7: 运行测试确认通过**
+- [ ]  **Step 7: 运行测试确认通过**
 
 Run: `pnpm test`
 Expected: PASS
 
-- [ ] **Step 8: 提交**
+- [ ]  **Step 8: 提交**
 
 ```bash
 git add src/main.ts src/recycle-modal.ts src/recycle-model.ts src/i18n/locales/en.json \
@@ -3233,14 +3259,16 @@ git commit -m "feat: 回收站两条命令与弹窗，替换管理页面的占�
 ## Task 13: 批量汇总的逐条跳过原因
 
 **Files:**
+
 - Modify: `src/batch-publish.ts`, `src/batch-confirm-modal.ts`, `src/i18n/locales/{en,zh-cn,zh-tw}.json`
 - Test: `tests/batch-publish.test.ts`, `tests/batch-confirm-modal.test.ts`
 
 **Interfaces:**
+
 - Consumes: 无
 - Produces: `BatchRunSummary` 增加 `skipped: BatchSkip[]`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ]  **Step 1: 写失败的测试**
 
 在 `tests/batch-publish.test.ts` 里追加：
 
@@ -3298,12 +3326,12 @@ test("末尾汇总逐条列出跳过原因，而不只报数字", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ]  **Step 2: 运行测试确认失败**
 
 Run: `pnpm test tests/batch-publish.test.ts tests/batch-confirm-modal.test.ts`
 Expected: FAIL —— `summary.skipped` 是 `undefined`
 
-- [ ] **Step 3: 改 `batch-publish.ts`**
+- [ ]  **Step 3: 改 `batch-publish.ts`**
 
 `BatchRunSummary` 加字段：
 
@@ -3353,7 +3381,7 @@ export interface BatchRunSummary {
   };
 ```
 
-- [ ] **Step 4: 改 `batch-confirm-modal.ts` 的汇总渲染**
+- [ ]  **Step 4: 改 `batch-confirm-modal.ts` 的汇总渲染**
 
 在 `BatchSummaryModal.onOpen()` 里，失败项那一段**之后**加：
 
@@ -3370,20 +3398,21 @@ export interface BatchRunSummary {
     }
 ```
 
-- [ ] **Step 5: 加三语文案**
+- [ ]  **Step 5: 加三语文案**
 
 `batch` 组加 `summary_skipped_title`（带 `{{count}}`）：
 
-| en | zh-cn | zh-tw |
-|---|---|---|
+
+| en                                   | zh-cn                     | zh-tw                     |
+| -------------------------------------- | --------------------------- | --------------------------- |
 | `Skipped before running ({{count}})` | `执行前跳过（{{count}}）` | `執行前跳過（{{count}}）` |
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ]  **Step 6: 运行测试确认通过**
 
 Run: `pnpm test`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ]  **Step 7: 提交**
 
 ```bash
 git add src/batch-publish.ts src/batch-confirm-modal.ts src/i18n/locales/en.json \
@@ -3397,14 +3426,16 @@ git commit -m "feat: 批量汇总逐条列出跳过原因，收掉 1-B 的开放
 ## Task 14: 文档收口与两个产品语义
 
 **Files:**
+
 - Modify: `README.md`, `README.zh-CN.md`, `CLAUDE.md`, `docs/e2e-manual-checklist.md`
 - Test: 无（本任务不写代码）
 
 **Interfaces:**
+
 - Consumes: 全部前序任务的产出
 - Produces: 四份文档与实现一致
 
-- [ ] **Step 1: 核对 `CLAUDE.md` 的命令表与架构表**
+- [ ]  **Step 1: 核对 `CLAUDE.md` 的命令表与架构表**
 
 - 在「常用命令」附近的命令列表里补上本阶段新增的 **6 条命令**：
   `push-page` / `pull-page` / `manage-pages` / `search-content` / `manage-attachments` /
@@ -3416,7 +3447,7 @@ git commit -m "feat: 批量汇总逐条列出跳过原因，收掉 1-B 的开放
 - **`REQUIRED_TOOLS` 那句「这 13 项」必须改成 23** —— 它在 `CLAUDE.md` 的「站点侧前置条件」
   一节里，与 `src/mcp-self-check.ts` 的注释是**两处**，都要改。
 
-- [ ] **Step 2: 核对两个产品语义的文档是否如实**
+- [ ]  **Step 2: 核对两个产品语义的文档是否如实**
 
 这两条**代码不改**（用户 2026-10-05 已拍板），文档必须**如实且完整**地描述：
 
@@ -3427,7 +3458,7 @@ git commit -m "feat: 批量汇总逐条列出跳过原因，收掉 1-B 的开放
 ⚠️ **这两条是「文档即交付物」**：代码行为不变，所以文档若写错，用户会按错的理解去操作。
 核对时**逐字读一遍**，不要只看有没有那一段。
 
-- [ ] **Step 3: 追加 `docs/e2e-manual-checklist.md` 的阶段 2 条目**
+- [ ]  **Step 3: 追加 `docs/e2e-manual-checklist.md` 的阶段 2 条目**
 
 追加 **8 项**（编号接在现有的 13 之后，从 14 开始）。每项仍是三段
 （**做什么 → 预期看到什么 → 若不符，最可能的错在哪**）。八项是：
@@ -3445,7 +3476,7 @@ git commit -m "feat: 批量汇总逐条列出跳过原因，收掉 1-B 的开放
 21. **批量汇总逐条列出跳过原因**：跑一次批量，其中至少有一篇没有 `halo.name` →
     末尾汇总里应**逐条**列出那一篇与原因，而不只是一个数字。
 
-- [ ] **Step 4: 更新 `README.md` / `README.zh-CN.md`**
+- [ ]  **Step 4: 更新 `README.md` / `README.zh-CN.md`**
 
 两份都要加：新命令清单、附件删除**不可逆**的警告、以及「查重会查到草稿」这一条
 （用户可能以为它只查已发布的）。
@@ -3453,7 +3484,7 @@ git commit -m "feat: 批量汇总逐条列出跳过原因，收掉 1-B 的开放
 ⚠️ **`README.zh-CN.md` 与 `README.md` 的结构此前不一致过**（1-B 的记录里提到
 `README.zh-CN.md` 曾缺整个 MCP 章节）。**加完之后逐节对一遍**，确认两份的章节名与顺序一致。
 
-- [ ] **Step 5: 提交**
+- [ ]  **Step 5: 提交**
 
 ```bash
 git add README.md README.zh-CN.md CLAUDE.md docs/e2e-manual-checklist.md
@@ -3465,10 +3496,11 @@ git commit -m "docs: 阶段 2 的命令、契约与手工清单"
 ## Task 15: 全阶段自审
 
 **Files:**
+
 - 无新增
 - Test: 全量
 
-- [ ] **Step 1: 三语键数必须相等**
+- [ ]  **Step 1: 三语键数必须相等**
 
 ```bash
 node -e "
@@ -3490,7 +3522,7 @@ console.log([...missing(a,b,'zh-cn'),...missing(b,a,'en'),...missing(a,c,'zh-tw'
 
 Expected: 三个数字相等，且输出「键集一致」。
 
-- [ ] **Step 2: 全量测试与构建**
+- [ ]  **Step 2: 全量测试与构建**
 
 ```bash
 pnpm test
@@ -3499,7 +3531,7 @@ pnpm build
 
 Expected: 全部通过；`main.js` 生成成功。**记录测试总数与 `main.js` 字节数**，写进提交信息。
 
-- [ ] **Step 3: 类型检查**
+- [ ]  **Step 3: 类型检查**
 
 ```bash
 npx tsc --noEmit -p tsconfig.json 2>&1 | grep "^src/" | head -20
@@ -3508,7 +3540,7 @@ npx tsc --noEmit -p tsconfig.json 2>&1 | grep "^src/" | head -20
 Expected: **只有既有的 4 条 `@halo-dev/api-client` TS2307**（`moduleResolution: "node"`
 忽略 `exports`，该包解析不了）。**多出一条都是本阶段引入的**，必须修。
 
-- [ ] **Step 4: 确认没有死引用**
+- [ ]  **Step 4: 确认没有死引用**
 
 ```bash
 grep -rn "utils/markdown\|utils/yaml" src tests
@@ -3517,7 +3549,7 @@ grep -rn "notice_not_implemented" src tests
 
 Expected: 两条都**零命中**（第一条本就零命中；第二条是 Task 12 删掉的占位键）。
 
-- [ ] **Step 5: 确认没有密钥泄漏**
+- [ ]  **Step 5: 确认没有密钥泄漏**
 
 ```bash
 grep -rn "hmcp_" --include="*.ts" --include="*.json" --include="*.md" . \
@@ -3530,7 +3562,7 @@ Expected: 只命中**文档里作为前缀说明**的那几处（`hmcp_` 后面�
 ⚠️ **聚合计数不是发现**：1-B 的记录里，一次密钥扫描报了 7 处命中，全部是散文里的字面前缀
 `hmcp_`。**逐条看内容**，不要只看数量。
 
-- [ ] **Step 6: 提交（若有改动）**
+- [ ]  **Step 6: 提交（若有改动）**
 
 ```bash
 git add <逐个文件名>
