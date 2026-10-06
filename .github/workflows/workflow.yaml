@@ -1,9 +1,19 @@
 name: Release
 
+# 打 tag 触发：构建后把 manifest.json + main.js 作为 Release 产物。
+#
+# ⚠️ tag 必须与 manifest.json 的 `version` **完全一致**，且**不带 `v` 前缀**
+#（`.npmrc` 设了 `tag-version-prefix=""`）。Obsidian 正是按这个对应关系去
+# 找 release 并下载 main.js / manifest.json / styles.css —— 对不上就会装到旧版本。
+#
+# `workflow_dispatch` 是刻意加的：只有 `push: tags` 时，workflow 一旦没被触发
+# 就**无法手动重跑**（`gh workflow run` 会报 422「does not have workflow_dispatch trigger」），
+# 只能再打一个 tag。留一个手动入口，排查时不必污染 tag 列表。
 on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,37 +23,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-      - uses: pnpm/action-setup@v2
-        name: Install pnpm
-        with:
-          version: 8
-          run_install: false
 
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@v3
-        name: Setup pnpm cache
+      # ⚠️ **不要**在这里写 `node-version` 之外的 pnpm 版本 —— pnpm 版本由
+      # `package.json` 的 `packageManager` 字段（`pnpm@10.34.4`）唯一决定。
+      # 此前这里写的是 `pnpm/action-setup@v2` + `version: 8`，与 `packageManager`
+      # **冲突**：action-setup v2 在两者不一致时直接报
+      # 「Multiple versions of pnpm specified」并中止 job。
+      # 现在改用 corepack（Node 自带）读 `packageManager`，只有一处真值来源。
+      - uses: actions/setup-node@v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          node-version: 20
+          cache: pnpm
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm build
 
+      # 产物清单必须与 Obsidian 的期望一致：manifest.json 必需，main.js 必需，
+      # styles.css 可选（本插件不打包 CSS，仓库根那个是给使用方本地覆盖的占位文件，
+      # 见 CLAUDE.md 的「发布机制」一节 —— 因此**不**上传它）。
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             manifest.json
