@@ -26,23 +26,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **tag 与它完全一致**的那个 GitHub release，从那里下载 `main.js` / `manifest.json` / `styles.css`。
 所以它与 release tag **必须一致**，且**不带 `v` 前缀**（`.npmrc` 设了 `tag-version-prefix=""`）。
 
-- **现为 `0.1.0`**：这是**本 fork 的第一个自有版本**，不是上游的延续。上游 `halo-sigs/obsidian-halo`
+- **现为 `0.1.1`**：这是**本 fork 的第二个自有版本**，不是上游的延续。上游 `halo-sigs/obsidian-halo`
   的最后一个版本是 `1.2.0`（tag `1.2.0` → 提交 `34a1025`，作者 Ryan Wang），**那个 tag 仍在本仓库里**
   —— 但它的 release 内容是**上游原版代码**（没有 MCP 能力）。**绝不要把 `manifest.json` 的 version
   写回 `1.2.0`**：那会让 Obsidian 去下载上游那份 `main.js`，用户装到的是一个**与描述不符的旧插件**。
 - 版本号从 `0.1.0` 起步是刻意的：本 fork **改了插件 `id`**（`halo` → `halo-mcp`），
   在 Obsidian 眼里这是一个**新插件**而非 `halo` 的更新，所以不该沿用上游的版本序列。
-- `versions.json` 因此**只剩 `0.1.0` 一条**，上游那六条（`1.0.0`–`1.2.0`）已删 ——
+- `versions.json` 因此**只剩 `0.1.0` 与 `0.1.1` 两条**，上游那六条（`1.0.0`–`1.2.0`）已删 ——
   它们描述的是**另一个插件**的兼容性历史，留着会让 Obsidian 在低版本客户端上回落到上游版本。
-- `package.json` 的 `version` 也是 `0.1.0`，纯属巧合：那是 **npm 包版本**，而该包标了
+- **`minAppVersion` 是 `1.13.0`**（`0.1.0` 时是 `1.4.4`，`0.1.1` 起提高）：设置面板用
+  `setDestructive()`（1.13.0 起取代废弃的 `setWarning()`）。**不要为了兼容更老的客户端把它降回去** ——
+  降了就得同时把 `setDestructive()` 换回 `setWarning()`，而后者在 1.13.0+ 上会报废弃警告。
+- `package.json` 的 `version` 与 `manifest.json` 的版本**没有联动关系**：那是 **npm 包版本**，而该包标了
   `"private": true`、永远不会发布，没有任何消费者。**没有任何工具会比对这两个数字** ——
-  `version-bump.mjs` 只碰 `manifest.json` 与 `versions.json`。**不要**为了「对齐」去动 `package.json`。
+  `version-bump.mjs` 只碰 `manifest.json` 与 `versions.json`。
 - **不要手工改 `manifest.json` / `versions.json` 的版本号**，走 `pnpm version`（它跑 `version-bump.mjs`
   把两个文件一起更新）。
 
 
 **已经完成的工作**：发布后端已从「直连 Halo REST API」切到「以 Halo 官方 MCP Server 插件为后端」。
-**REST + PAT 只剩一条路**（上传超过 7 MiB 的图片），现状见 `README.md` 的「当前进度与凭据要求」。
+**REST + PAT 只剩一条路**（上传超过 7 MiB 的图片），现状见 `README.md` 的 Requirements 一节。
 
 - 设计文档：`docs/superpowers/specs/2026-10-03-obsidian-halo-mcp-reshape-design.md`
 - 阶段 0 / 传输层计划：`docs/superpowers/plans/2026-10-03-bootstrap-and-mcp-transport.md`
@@ -87,9 +90,53 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 ## 架构
 
+### 目录结构（2026-10-07 重构）
+
+`src/` 根目录只留**入口与全局单例**，其余按职责分目录。**`tests/` 逐目录镜像 `src/`**
+（项目约定：测试文件放 `tests/` 下、镜像 `src/` 结构、命名 `*.test.ts`）。
+
+```
+src/
+├── main.ts            入口：HaloPlugin，注册 16 条命令与功能区图标
+├── plugin-context.ts  HaloPluginContext —— 弹窗/设置面板依赖的**最小契约**
+├── settings.ts        HaloSetting / HaloSite + 设置面板
+├── mcp-self-check.ts  MCP 连通性自检（REQUIRED_TOOLS 的权威定义）
+├── icons.ts           Halo 图标注册
+├── core/              零项目内依赖的叶子：glob / pagination / content-kind /
+│                      frontmatter-map / site-routing
+├── ui/
+│   ├── modals/        12 个 Modal（含 post-selection-modal / page-selection-modal）
+│   └── models/        4 个取数与映射（无 UI）：attachment / recycle / search-preview /
+│                      publish-preview
+├── commands/          batch-publish（批量规划与执行）
+├── service/           MCP 业务层：index / page-service / image-upload / local-content /
+│                      post-mapping / page-mapping
+├── transport/         MCP 传输层：mcp-client / errors / types
+├── i18n/              i18next 初始化 + error-message + locales/
+└── utils/             id.ts（手写 randomUUID）
+```
+
+**为什么 `core/` 必须保持零项目内依赖**：`site-routing.ts` 要用 `settings.ts` 的
+`isSameSiteUrl()`，而 `settings.ts`（设置面板要显示每条规则命中多少篇）又要用 `glob.ts` 的
+`matchGlob()`。把 `matchGlob()` 的实现写进 `site-routing.ts` 就成了
+`settings ⇄ site-routing` 的**真环**。环在打包器里未必直接报错，而是在某些 import 顺序下让某个
+绑定变成 `undefined` —— 本地测试跑得通、发布出去的 `main.js` 才出问题，属于最难反查的一类故障。
+所以 `glob.ts` 被刻意独立成叶子，`site-routing.ts` 也放在 `core/` 里（它只依赖 `glob` 与 `settings`）。
+
+**`plugin-context.ts` 存在的理由**：此前 12 个 UI 文件都写 `import type HaloPlugin from "./main"`，
+而 `main.ts` 又 import 了这些 UI 文件 —— 入口点同时是「类型中心」和「被依赖方」，结构上是双向依赖。
+`HaloPluginContext` 只声明被真正用到的三个成员（`app` / `settings` / `saveSettings`），
+`HaloPlugin implements HaloPluginContext`，环就此切断。**UI 文件不要再 import `main.ts`。**
+
+- **唯一的例外是 `settings.ts`**：`PluginSettingTab` 的构造函数签名是 `(app: App, plugin: Plugin)`，
+  它要 Obsidian 的**基类** `Plugin`，而 `HaloPluginContext` 是刻意收窄的接口、不满足它。
+  这是类型系统的硬性要求，不是漏改 —— 该处已就地注释说明。
+- 给 `HaloPluginContext` 加成员**只在 UI 真的要用新东西时**才做，不要照抄 `HaloPlugin` 的公开面。
+
 ### 入口与命令编排 — `src/main.ts`
 
-`HaloPlugin extends Plugin`。`onload()` 里做三件事：初始化 i18next、`loadSettings()`、注册命令与功能区图标。
+`HaloPlugin extends Plugin implements HaloPluginContext`。`onload()` 里做三件事：初始化 i18next、
+`loadSettings()`、注册命令与功能区图标。
 
 命令本身很薄，真正的编排在私有方法里，统一模式是：**解析目标站点 → 规划（零写入）→ 预览确认 →
 上传图片 → 执行**。
@@ -124,9 +171,9 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 - 发布时把上传后的 markdown 作为 `{ markdown }` 传进去，避免重新读盘拿到未替换的旧内容
 
 **站点解析只有一处入口 —— 不要另行解析**：`src/main.ts` 的 `HaloPlugin.resolveSiteFor(file)` 一层薄胶水
-（只负责从 `metadataCache` 取 `halo.site` 再转交，**不补 `?? ""`**），真正的规则在 `src/site-routing.ts`
+（只负责从 `metadataCache` 取 `halo.site` 再转交，**不补 `?? ""`**），真正的规则在 `src/core/site-routing.ts`
 的 `resolveSite(sites, rules, filePath, frontmatterUrl)`（纯函数）。**发布与上传图片共用它**，
-批量路径（`src/batch-publish.ts` 的 `collectBatchCandidates()`）也走它，只是把结果当**数据**收着
+批量路径（`src/commands/batch-publish.ts` 的 `collectBatchCandidates()`）也走它，只是把结果当**数据**收着
 （批量不能一篇一弹窗）而不是就地处置。
 
 `resolveSite` 返回带 `kind` 的**联合**而不是 `HaloSite | undefined`，因为批量必须能说清
@@ -135,18 +182,18 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 两处「**报错而不是继续往下找**」（`unknown-site` / `unknown-rule-site`）是刻意的：继续往下找的后果是
 把笔记发到**另一个站**上，而那是不可恢复的；报错只是让用户去改一行配置。
 
-`src/glob.ts` 是 glob 匹配的**零项目内依赖叶子**（`matchGlob()` / `normalizeRulePattern()`）。
+`src/core/glob.ts` 是 glob 匹配的**零项目内依赖叶子**（`matchGlob()` / `normalizeRulePattern()`）。
 拆出去是为了破一个真 import 环：`settings.ts`（设置面板要显示每条规则命中几篇）要用 `matchGlob()`，
 而 `site-routing.ts` 要用 `settings.ts` 的 `isSameSiteUrl()`。**往 `glob.ts` 加任何 `import` 之前先读它顶部的说明** ——
 环在打包器里未必直接报错，而是在某些 import 顺序下让某个绑定变成 `undefined`（本地测试跑得通，发出去的 `main.js` 才出问题）。
 匹配**大小写不敏感**（`globToRegExp` 构造正则时带 `i` 标志），因为用户在 Windows 上看到的目录名与实际
 大小写未必一致，而**没命中是没有任何提示的**。`matchGlob()` 归一化的是**模式**、**不**归一化**路径**：
 传进来的 `filePath` 必须是 `/` 分隔的库内相对路径 —— 传反斜杠路径**可能导致规则不命中，
-也可能命中本不该命中的规则**。细节见 `src/glob.ts` 的 `matchGlob()` 文档。
+也可能命中本不该命中的规则**。细节见 `src/core/glob.ts` 的 `matchGlob()` 文档。
 
 **批量操作**：三个命令（推草稿 / 发布 / 撤回）共用 `HaloPlugin.runBatchCommand(action)`，只在 `action` 上分档。
-候选是**全库的 markdown 笔记**；规划（`planBatch()`）与执行（`runBatch()`）都在 `src/batch-publish.ts`，
-确认与两处弹窗在 `src/batch-confirm-modal.ts`。三条必须记住的性质：
+候选是**全库的 markdown 笔记**；规划（`planBatch()`）与执行（`runBatch()`）都在 `src/commands/batch-publish.ts`，
+确认与两处弹窗在 `src/ui/modals/batch-confirm-modal.ts`。三条必须记住的性质：
 
 - **规划阶段零写入**，且 `planBatch()` 的分类标签是**按站点取一次的快照** —— 留着它才能让
   「将新建」跟着勾选实时重算，而不必每勾一次就打一次 MCP。
@@ -183,7 +230,7 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 （`tests/batch-publish.test.ts` 有用例钉住「撤回不碰 `publishPost`」。）
 
 ⚠️ **措辞纪律：这里写「不改写正文」，不写「不读正文」。** 后者在**推草稿 / 发布**两条路径上仍是假的 ——
-`planBatch()` 在那两条路径上会在循环里调 `deps.summarizeImages(candidate)`（`src/batch-publish.ts`），
+`planBatch()` 在那两条路径上会在循环里调 `deps.summarizeImages(candidate)`（`src/commands/batch-publish.ts`），
 而它经 `summarizeImages(file)` 落到 `summarizeLocalImages`，**靠读盘取正文**；读不出来的笔记进不了批
 （记成 `batch.skip_unreadable`，理由是「读不出这篇笔记的内容」）。
 **撤回是例外**：`planBatch()` 的 `unpublish` 分支不调 `summarizeImages` —— 撤回不改写正文、也不上传图片，
@@ -313,11 +360,11 @@ pnpm version          # 触发 version-bump.mjs，同步 manifest.json 与 versi
 
 | 文件 | 作用 |
 |---|---|
-| `src/sites-modal.ts` | 站点列表（增删、设为默认） |
-| `src/site-editing-modal.ts` | 编辑单个站点。内含「Validate」按钮，已改为跑 **MCP 自检**（`runSelfCheck` + `mcpToken`）——校验的正是用户真正要填的那把密钥 |
-| `src/site-selection-modal.ts` | 发布时选目标站点 |
-| `src/post-selection-model.ts` | 拉取时选远程文章，列表走 MCP 的 `halo_list_posts`。⚠️ **文件名是 `-model` 不是 `-modal`**，容易写错，但它是个 Modal。取数（`fetchSelectablePosts(client)`，含翻页，失败与触顶由它自己弹 Notice）与映射（`toSelectablePosts(items)`，纯函数）已抽开，UI 层刻意不做 client 注入 |
-| `src/page-selection-model.ts` | 同上，但选的是**独立页面**（`toSelectablePages(items)`）。同样 `-model` 后缀、同样是 Modal；取数走 `PageService.getPages()` 而不是自己造 client |
+| `src/ui/modals/sites-modal.ts` | 站点列表（增删、设为默认） |
+| `src/ui/modals/site-editing-modal.ts` | 编辑单个站点。内含「Validate」按钮，已改为跑 **MCP 自检**（`runSelfCheck` + `mcpToken`）——校验的正是用户真正要填的那把密钥 |
+| `src/ui/modals/site-selection-modal.ts` | 发布时选目标站点 |
+| `src/ui/modals/post-selection-modal.ts` | 拉取时选远程文章，列表走 MCP 的 `halo_list_posts`。取数（`fetchSelectablePosts(client)`，含翻页，失败与触顶由它自己弹 Notice）与映射（`toSelectablePosts(items)`，纯函数）已抽开，UI 层刻意不做 client 注入 |
+| `src/ui/modals/page-selection-modal.ts` | 同上，但选的是**独立页面**（`toSelectablePages(items)`）；取数走 `PageService.getPages()` 而不是自己造 client |
 
 内容管理类的弹窗（查重 / 附件 / 回收站 / 独立页面管理）不在这里逐条列 —— 它们各自与自己的
 纯数据层配成一对，见上方「业务层」模块表。
@@ -341,9 +388,9 @@ halo:
   template: ""                     # 自定义渲染模板
 ```
 
-这 6 个字段**双向读写**：发布时由 `src/frontmatter-map.ts` 的 `parseHaloPostFields()` 校验、
+这 6 个字段**双向读写**：发布时由 `src/core/frontmatter-map.ts` 的 `parseHaloPostFields()` 校验、
 `src/service/local-content.ts` 的 `applyPostFrontmatter()` 稀疏展开进 `spec`；发布后由
-`src/frontmatter-map.ts` 的 `applyPostToFrontmatter()` 从**服务端归一化之后的** `post.spec` 回写进笔记
+`src/core/frontmatter-map.ts` 的 `applyPostToFrontmatter()` 从**服务端归一化之后的** `post.spec` 回写进笔记
 （发布 / 更新 / 拉取三处共用它）。注意**两个方向分居两个文件**（不是同一个文件）：展开进 `spec` 的那一半在
 `service/local-content.ts`（它同时管正文里的图片引用），回写的那一半与校验同在 `frontmatter-map.ts`
 （契约的唯一定义处）。页面对应的一对是 `applyPageFrontmatter()` / `applyPageToFrontmatter()`，
@@ -375,7 +422,7 @@ halo:
 只有真正写下的键进 `haloFields`，其余保留远端值。因此「删掉一行」只影响这一次的读取语义，
 它不会、也不需要把那一行从笔记里抹掉。
 
-这 6 个字段在预览弹窗里逐行显示（`src/publish-preview.ts` 的 `buildPublishPreview()`），
+这 6 个字段在预览弹窗里逐行显示（`src/ui/models/publish-preview.ts` 的 `buildPublishPreview()`），
 而预览与执行读的是**同一份** `planned.plan.post.spec`（`src/service/index.ts` 的 `planPublish()` /
 `executePublish()`）—— 预览里给用户看过的取值就是最终会发出去的那份。
 
@@ -389,13 +436,15 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
   item 是扁平表示（经 post-mapping.ts 转成嵌套 Post），content.raw 是原文
 ```
 
-**客户端渲染那一步已被删除**：`createPostContent(raw) = { content: markdownIt.render(raw), … }` 随 MCP 切换作废，
-`src/utils/markdown.ts`（配置过的 markdown-it 实例，`html` / `breaks` / `linkify` / `typographer` 全开 + `markdown-it-anchor`）
-**现在没有任何地方引用它** —— `grep -rn "utils/markdown" src tests` **零命中**（连注释都没有）。
-它是死代码，与 `src/utils/yaml.ts` 同类；清理前先确认没有外部引用（`markdown-it` / `markdown-it-anchor` 两个依赖只为它存在）。
-（复核时注意区分**路径**与**符号名**：`grep -rn "markdownIt" src tests` 共 **4 处** ——
-`src/service/index.ts:331` 的一句注释（说的是「客户端跑 `markdownIt.render()` 的结果不是读者看到的 HTML」），
-加上死模块自身的 `src/utils/markdown.ts:4` / `:12` / `:14`。**无任何一处是 import**，故它确是死代码。）
+**客户端渲染那一步已被删除**：`createPostContent(raw) = { content: markdownIt.render(raw), … }` 随 MCP 切换作废。
+
+**2026-10-07 已清理**：`src/utils/markdown.ts`（配置过的 markdown-it 实例）与 `src/utils/yaml.ts`
+（`readMatter()`）两个死模块**已删除**，连带从 `package.json` 移除五个依赖：
+`markdown-it` / `markdown-it-anchor` / `gray-matter` / `js-yaml` / `builtin-modules`。
+**不要再把它们加回来** —— 触发这次清理的是 Obsidian 官方审核报告，那五个依赖带来 7 条依赖漏洞告警
+（`js-yaml` 的 merge-key 二次复杂度、`markdown-it` 的 ReDoS 等），而它们**一个字节都没进产物**
+（实测 `main.js` 里 `markdown-it` / `gray-matter` / `js-yaml` 出现次数均为 0）。
+读 frontmatter 一律走 Obsidian 的 `metadataCache.getFileCache().frontmatter`。
 
 **关键事实：客户端渲染结果不是读者看到的东西。** Halo 存储的 `rawType` 是 `markdown`，前台 HTML 由 Halo 服务端自己的管线生成（实测线上页面的 mermaid 被渲染成 `<div class="bytemd-mermaid"><svg>`，裸 markdown-it 不可能产出该结构）。所以在插件里换渲染器对前台显示无效——要改渲染得改 Halo 侧的插件或主题。
 
@@ -418,14 +467,49 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 
 `tests/setup.ts` 用 `rs.mock("obsidian", ...)` **整体 mock 掉 obsidian 模块**，包括 `TFile` / `TFolder` / `Notice` / `Modal` / `Setting` 等类，以及 `requestUrl`（一个 `rs.fn()`）。因此任何测试都能直接注入 HTTP 响应。
 
-- 测试文件放 `tests/` 下，镜像 `src/` 结构，命名 `*.test.ts`
+- 测试文件放 `tests/` 下，**逐目录镜像 `src/` 结构**，命名 `*.test.ts`。
+  2026-10-07 起 `tests/` 与 `src/` 的目录树一致（`core/` `ui/modals/` `ui/models/` `commands/` …）。
+  四处**有意的不对称**，别当成漏搬：`src/i18n/locales/`（数据，由 `i18n/index.test.ts` 覆盖）、
+  `src/utils/id.ts`（无专属测试）、`tests/contract/`（对真实站点的契约测试，不测某个模块）、
+  `tests/helpers/`（测试脚手架本身）。
 - 断言 HTTP 行为用 `requestUrl as unknown as RequestUrlMock` 取到 mock，再 `mockImplementation` / `mockReset`
 - rstest 的 mock API 是 Jest 风格的：`rs.fn(impl)` / `rs.spyOn(obj, k)` / `mock.calls` / `mockRestore()` 都可用
 - 测 `HaloService` 的现成脚手架在 `tests/service/index.test.ts`：`createMockApp()` / `createFile()` / `createSettings()`，照抄用法即可
+- ⚠️ **`rs.mock("...", ...)` 的路径参数也要跟着搬移一起改**。它不走 `from "..."`，所以任何
+  「批量替换 import 路径」的脚本都会漏掉它 —— 2026-10-07 搬目录时 `tests/batch-command.test.ts`
+  的 `rs.mock("src/batch-confirm-modal", …)` 就是这么漏的，症状是 `mockReset is not a function`
+  （mock 没生效，拿到的是真模块的导出）。**改完路径后 `grep -rn 'rs\.mock(' tests/` 复核一遍。**
 
 ## 发布机制
 
 打 tag 触发 `.github/workflows/workflow.yaml`：构建后把 **`manifest.json` + `main.js`** 作为 Release 产物。
+
+### ⚠️ 本仓库是 fork，`push` 触发**不生效** —— 推 tag 后必须手动跑一次
+
+**这是实测结论，不是猜测。** 排查时逐条排除了四个假设：Actions 被禁用（`actions/permissions`
+返回 `enabled: true`）、workflow 被停用（`state: "active"`）、文件不在 tag 指向的 commit 里
+（`git show <tag>:.github/workflows/workflow.yaml` 有内容）、tag 配置写错（`push: tags: ["*"]` 正确）——
+四条全部排除后，运行列表里**一条 push 触发的记录都没有**，加上仓库 `fork: true`
+（parent `halo-sigs/obsidian-halo`）这一条，根因就唯一了：**GitHub 对 fork 默认不运行 `push` 触发的 workflow**。
+
+所以发布流程是：
+
+```bash
+git tag 0.1.1 && git push origin 0.1.1
+gh workflow run Release --repo LHY0125/obsidian-halo --ref 0.1.1
+```
+
+- **`--ref` 必须指向 tag，不是 `main`。** 指向 main 会失败，报
+  「⚠️ GitHub Releases requires a tag」—— `softprops/action-gh-release` 要靠当前 ref
+  推断往哪个 release 传产物，而 main 上没有 tag 上下文。
+- 若本地已有同名 tag，先 `git tag -d <tag>` 再重建（`git tag` 不会覆盖已存在的 tag）。
+- **产物必须由 CI 构建。** Obsidian 审核器会把 release 上的 `main.js` 与「从源码重建的产物」
+  逐字节比对，对不上就报 "Build output does not match the released main.js artifact"。
+  手工上传的本地产物（Windows + Node 24）与 CI 产物（Linux + Node 20）**不必**逐字节相同 ——
+  只要以后都走 CI，比对就恒成立。workflow 里有 `Report artifact hash` 与
+  `Verify the build is reproducible` 两步，日志里能直接看到 sha256。
+
+### 其余约定
 
 - **产物里没有 `styles.css`**。`rslib.config.ts` 的 entry 只有 `src/main.ts`，也不打包 CSS——所以仓库根那个 `styles.css` 是给使用方本地覆盖用的占位文件（164 字节注释），改它不会被发布，也不会被更新覆盖。
 - **tag 不带 `v` 前缀**（`1.2.0` 而非 `v1.2.0`），因为 `.npmrc` 里设了 `tag-version-prefix=""`。
@@ -434,10 +518,12 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 
 ## 其它需要注意的地方
 
-- **`tsconfig.json` 设了 `baseUrl: "."`**，所以源码里用 `import { randomUUID } from "src/utils/id"` 这种以 `src/` 开头的路径，而不是相对路径。跟着写。
+- **import 一律用相对路径**（`./` / `../`）。`tsconfig.json` 虽然设了 `baseUrl: "."`、技术上支持
+  `import ... from "src/utils/id"` 这种以 `src/` 开头的写法，但 **2026-10-07 重构后全仓已统一为相对路径**
+  （实测 `src/` 下 124 条相对、0 条绝对）。跟着写相对路径；混用两种风格会让搬文件时的批量改写
+  漏掉一半（`src/` 绝对形式与 `./` 相对形式的解析基准不同）。
+  **唯一的绝对形式在测试里**：`rs.mock("src/xxx", …)` 这类 mock 路径参数，见「测试约定」。
 - **代码风格由 Biome 定**（`biome.json`）：120 列、LF、双引号、尾逗号 always、自动整理 import。`pnpm check` 会自动改，别手写格式化。
-- **`src/utils/yaml.ts` 是死代码**：导出的 `readMatter()` 没有任何地方引用，`gray-matter` 与 `js-yaml` 这两个依赖只为它而存在。代码实际读 frontmatter 走 Obsidian 的 `metadataCache.getFileCache().frontmatter`。清理前先确认没有外部引用。
-- **`src/utils/markdown.ts` 同样是死代码**（随 MCP 切换作废，见「内容管线」）：无人 import，`markdown-it` 与 `markdown-it-anchor` 这两个 `dependencies` 只为它而存在。**本次改造没有动 `package.json`**，清理时记得把这两个依赖一起处理。
 - **`src/utils/id.ts` 的 `randomUUID()` 是手写实现**（不用 `crypto`），用于生成新文章的 resource name 与 multipart boundary。
 - **`command.*.name` 里不要带 `<插件名>: ` 前缀**：Obsidian 会自己拼 `<插件名>: <命令名>`，而
   `manifest.json` 的 `name` 是 **`Halo-MCP`** —— 在 locale 里再写一遍前缀，命令面板就会显示成
