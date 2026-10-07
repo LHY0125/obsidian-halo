@@ -268,7 +268,10 @@ class PageService extends HaloServiceBase {
           ? refreshed
           : { ...refreshed, spec: { ...refreshed.spec, publish: intendedPublish } };
 
-      this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      // ⚠️ **必须 await**：`processFrontMatter` 是异步的，不 await 时下面那句「推送成功」
+      // 会早于 frontmatter 落盘弹出 —— 用户看到成功提示后立刻关窗口，`halo.name` 就没写进去，
+      // 下次推送走新建分支 → 站点上多出一篇重复页面。
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
         applyPageToFrontmatter(frontmatter, finalPage, {
           siteUrl: this.site.url,
           // ⚠️ 用本地那个 name，不是 `finalPage.metadata.name`：回读可能拿到一个缺 `name` 的 item，
@@ -342,9 +345,12 @@ class PageService extends HaloServiceBase {
     }
 
     const file = await this.app.vault.create(`${result.page.spec.title}.md`, `${result.content.raw}`);
-    this.app.workspace.getLeaf().openFile(file);
+    // 与 `pullPost` 同款：打开笔记只是顺手的便利，不等它渲染完 —— 但要用 `void` 显式声明
+    // 「知道它是 promise，故意不等」，而不是漏写。
+    void this.app.workspace.getLeaf().openFile(file);
 
-    this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    // 必须 await：frontmatter 落盘后本函数才返回。
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       applyPageToFrontmatter(frontmatter, result.page, {
         siteUrl: this.site.url,
         // ⚠️ 是**入参** name，不是 `result.page.metadata.name` —— 理由同 `pushPage` 的回写
@@ -376,8 +382,15 @@ function createEmptyPage(): SinglePage {
       visible: "PUBLIC",
       publish: false,
       excerpt: { autoGenerate: true, raw: "" },
+      // `SinglePageSpec` 的必填字段，MCP 的页面工具不暴露它们（理由见 `toSinglePage` 的说明）。
+      // 取值必须与 `toSinglePage` 保持一致：两处构造同一类型，键集分叉过一次（`toPost` 漏 `deleted`），
+      // 不再重犯。
+      allowComment: true,
+      deleted: false,
+      pinned: false,
+      priority: 0,
     },
-  } as SinglePage;
+  };
 }
 
 export default PageService;

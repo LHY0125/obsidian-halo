@@ -34,8 +34,6 @@ export default class HaloPlugin extends Plugin {
   settings: HaloSetting;
 
   async onload() {
-    console.log("loading obsidian-halo plugin");
-
     // 语言取 Obsidian 自己的 locale（`moment.locale()`，可能是 `zh-cn` 这种小写形态），
     // 回落 `en` 由 `initializeI18n` 负责。**不要在这里自己拼 options** ——
     // 全局的 `interpolation.escapeValue` 必须只有一份，理由见 `initializeI18n` 的注释。

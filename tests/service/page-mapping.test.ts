@@ -51,12 +51,48 @@ describe("toSinglePage", () => {
     expect(toSinglePage(pageItem({ publishRequested: undefined })).spec.publish).toBe(false);
   });
 
-  it("页面没有的字段不会凭空出现在 spec 上", () => {
+  /**
+   * ⚠️ 这条用例此前把 `pinned` / `priority` 也列进「不该出现」的清单 —— **那个前提是错的**。
+   *
+   * `SinglePageSpec` 里 `pinned` / `priority` / `allowComment` / `deleted` 都是**必填**字段
+   *（页面这个资源确实有这些概念），只是 MCP 的页面工具不暴露它们。此前 `SinglePage` 因为
+   * `moduleResolution: "node"` 解析不了 `@halo-dev/api-client` 而退化成 `any`，所以
+   * `toSinglePage` 少填这四个键也不会报错，用例就按「页面没有这些字段」写了下来。
+   *
+   * 真正要防的是**另一件事**：文章独有的字段（`categories` / `tags` / `cover` / `template` /
+   * `publishTime`）不能出现在 `spec` 上，因为它们会被 `toPageUpdateArgs` 传回服务端，
+   * 而 MCP 的 schema 是 `additionalProperties: false` —— 多传一个键整次调用就被拒。
+   *
+   * 所以断言分两层：`spec` 上不许有**文章独有**字段；而「不传回服务端」这件事由下面
+   * `toPageUpdateArgs` 的键集用例钉住（那才是真正的边界）。
+   */
+  it("文章独有的字段不会出现在页面的 spec 上", () => {
     const page = toSinglePage(pageItem()) as unknown as { spec: Record<string, unknown> };
 
-    for (const absent of ["categories", "tags", "pinned", "priority", "publishTime", "template"]) {
+    for (const absent of ["categories", "tags", "cover", "template", "publishTime"]) {
       expect(page.spec).not.toHaveProperty(absent);
     }
+  });
+
+  /**
+   * `SinglePageSpec` 的必填字段必须填上 —— 与 `createEmptyPage()` 的键集**逐个对齐**。
+   *
+   * 这条用例的存在理由是一次真实缺陷：`toPost` 漏填了必填的 `deleted`，而 `as Post` 断言
+   * 把类型检查挡住了，直到把 `moduleResolution` 改成 `bundler`（类型真正解析出来）才暴露。
+   * 两个构造同一类型的函数给出不一致的键集，是缺陷而不是风格 —— 这里把它钉住。
+   */
+  it("spec 的必填字段都填了，且与 createEmptyPage 的键集一致", () => {
+    const spec = toSinglePage(pageItem()).spec as unknown as Record<string, unknown>;
+
+    for (const required of ["allowComment", "deleted", "pinned", "priority", "excerpt", "publish", "slug", "title", "visible"]) {
+      expect(spec).toHaveProperty(required);
+    }
+
+    // 取值也必须是「页面默认值」而不是从文章字段误映射过来的
+    expect(spec.allowComment).toBe(true);
+    expect(spec.deleted).toBe(false);
+    expect(spec.pinned).toBe(false);
+    expect(spec.priority).toBe(0);
   });
 });
 

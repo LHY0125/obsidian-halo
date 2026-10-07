@@ -25,6 +25,18 @@ export interface McpSinglePageItem extends McpContentItemBase {
   version?: number;
   creationTimestamp?: string;
   updateTimestamp?: string;
+  /**
+   * 页面作者的 `metadata.name`（实测 `halo_list_single_pages` 返回体里有这个键）。
+   *
+   * 声明它**不是为了消费** —— 服务层一处都没读它。声明是因为测试的 fixture 要逐字复刻真实
+   * 返回体，而 fixture 上标了 `McpSinglePageItem`：不声明的话那个多出来的键会让 tsc 报
+   * TS2322（`object literal may only specify known properties`），逼着 fixture 删掉一个
+   * **真实存在**的字段 —— 那等于让类型去迁就测试，而不是让测试忠实于服务端。
+   *
+   * 与 `McpContentItemBase` 里 `published` 的处置同源：声明一个不消费的字段，是为了让
+   * 「服务端确实回了它」这件事留在类型里。
+   */
+  owner?: string;
 }
 
 export interface McpGetSinglePageResult {
@@ -40,6 +52,16 @@ export interface McpGetSinglePageResult {
  * **只填页面真有的字段** —— 与 `toPost` 的关键差别就在这里：`toPost` 会把 9 个文章字段
  * 全部填上（缺的用默认值），而页面填了就会被 `toPageUpdateArgs` 传出去、被 schema 拒绝。
  * 所以这里**不补任何文章独有的字段**。
+ *
+ * ⚠️ 「不补文章独有的字段」指的是 `categories` / `tags` / `cover` / `template` / `publishTime`
+ * 这一类 —— 它们**不在** `SinglePageSpec` 上，补了会被 MCP schema 拒绝。
+ * 但 `allowComment` / `deleted` / `pinned` / `priority` **是** `SinglePageSpec` 的必填字段
+ *（该资源确实有这些概念，只是 MCP 的页面工具不暴露它们），必须填上，否则类型不成立。
+ *
+ * 这四处的取值是**本地默认值**，不是从服务端读来的 —— 与 `toPageUpdateArgs` 里
+ * `allowComment: true` 写死同源：MCP 的 `halo_get_single_page` 不回这些字段，本地无从得知
+ * 远端值。它们**不会**被传回服务端（`toPageUpdateArgs` 只挑 schema 认的键），
+ * 所以这里填什么都不会改变站点状态 —— 填默认值是为了让类型成立，不是为了让它们生效。
  */
 export function toSinglePage(item: McpSinglePageItem): SinglePage {
   return {
@@ -58,8 +80,15 @@ export function toSinglePage(item: McpSinglePageItem): SinglePage {
         autoGenerate: true,
         raw: item.excerpt ?? "",
       },
+      // 以下四个是 `SinglePageSpec` 的必填字段，MCP 的页面工具不暴露它们（见上面的说明）。
+      // 取值与 `createEmptyPage()` 保持一致 —— 两个构造同一类型的函数给出不一致的键集，
+      // 正是 `toPost` 漏掉 `deleted` 那处缺陷的成因，这里不再重犯。
+      allowComment: true,
+      deleted: false,
+      pinned: false,
+      priority: 0,
     },
-  } as SinglePage;
+  };
 }
 
 /**

@@ -29,21 +29,14 @@
     "@rslib/core": "^0.23.0",
     "@rstest/core": "^0.10.6",
     "@rstest/coverage-istanbul": "^0.10.6",
-    "@types/js-yaml": "^4.0.9",
-    "@types/markdown-it": "^12.2.3",
     "@types/node": "^24.13.2",
-    "builtin-modules": "3.3.0",
     "obsidian": "latest",
     "tslib": "2.6.0",
     "typescript": "5.1.6"
   },
   "dependencies": {
     "@halo-dev/api-client": "^2.25.2",
-    "gray-matter": "^4.0.3",
     "i18next": "^23.16.8",
-    "js-yaml": "^4.2.0",
-    "markdown-it": "^13.0.2",
-    "markdown-it-anchor": "^8.6.7",
     "transliteration": "^2.6.1"
   },
   "packageManager": "pnpm@10.34.4"

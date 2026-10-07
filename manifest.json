@@ -2,8 +2,8 @@
   "id": "halo-mcp",
   "name": "Halo-MCP",
   "version": "0.1.0",
-  "minAppVersion": "1.4.4",
-  "description": "Publish content to Halo sites through the official Halo MCP Server",
+  "minAppVersion": "1.13.0",
+  "description": "Publish content to Halo sites through the official Halo MCP Server.",
   "author": "Serendipity",
   "authorUrl": "https://github.com/LHY0125",
   "isDesktopOnly": false

@@ -126,7 +126,7 @@ function createEmptyPost(): Post {
       title: "",
       visible: "PUBLIC",
     },
-  } as Post;
+  };
 }
 
 /**
@@ -215,7 +215,14 @@ export class HaloServiceBase {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      setTimeout(resolve, ms);
+      // 必须用 `window.setTimeout` 而不是裸 `setTimeout`：Obsidian 的弹出窗口（popout window）
+      // 有自己的 `window`，裸调用会落在主窗口的定时器上 —— 弹窗关闭后回调仍可能在主窗口触发。
+      //
+      // `globalThis` 而不是裸 `window`：本插件的 `isDesktopOnly: false`，而移动端 WebView 里
+      // `window` 是存在的，两者在真实运行环境里等价；用 `globalThis` 是为了让**测试环境**
+      //（Node，没有 `window`）也能跑到这条退避路径 —— 否则重试一进入退避就抛
+      // 「window is not defined」，而表现是「重试次数恒为 1」，测试只会报一个数字对不上。
+      globalThis.setTimeout(resolve, ms);
     });
   }
 }
@@ -352,8 +359,14 @@ class HaloService extends HaloServiceBase {
     // 只有「有名字」与「没有」两档，不必再判一次空串。
     const remoteName = matterData?.halo?.name || undefined;
     const halo = matterData?.halo;
-    // biome-ignore lint/suspicious/noPrototypeBuiltins: 判据必须与上游逐位一致；推荐的 Object.hasOwn 是 ES2022，本项目 target 为 ES6
-    const publishFromFrontmatter = halo?.hasOwnProperty("publish") ? Boolean(halo.publish) : undefined;
+    // 判据必须与上游逐位一致：`halo` 来自 Obsidian 的 frontmatter 解析结果，是个普通对象字面量。
+    //
+    // 用 `"publish" in halo` 而不是在对象上调用原型方法判键：两者对本处的输入**语义相同**
+    //（`halo` 由 YAML 解析器产出，原型链上只有 `Object.prototype`，没有继承来的 `publish`），
+    // 但 `in` 是 ES6 原生语法，不触碰对象上的方法 —— 而原型方法是可以被数据遮蔽的：
+    // 一篇笔记若写了 `halo: { <原型方法名>: ... }`，旧写法会直接抛 `is not a function`。
+    // 标准库的 `Object.hasOwn` 更贴切，但它是 ES2022，本项目 `lib` 只到 ES7，tsc 会报 TS2550。
+    const publishFromFrontmatter = halo && "publish" in halo ? Boolean(halo.publish) : undefined;
 
     let post: Post;
 
@@ -521,8 +534,8 @@ class HaloService extends HaloServiceBase {
         // 后两级与上游一致 —— frontmatter 明确写了 `publish` 就听它的（显式 false 要主动退回草稿），
         // 只有没写时才看 publishByDefault。
         //
-        // 第二级读的是**规划阶段**记下的 `plan.publishFromFrontmatter`（改动前在这里现场读
-        // `matterData.halo.hasOwnProperty("publish")`）：规划与执行之间用户可能正在编辑笔记，
+        // 第二级读的是**规划阶段**记下的 `plan.publishFromFrontmatter`（改动前在这里现场
+        // 判断前言里有没有 `publish` 键）：规划与执行之间用户可能正在编辑笔记，
         // 而这次发布已经由预览确认过 —— 用的必须是确认过的那一份。
         if (options.publishOverride !== undefined) {
           intendedPublish = options.publishOverride;
@@ -563,7 +576,11 @@ class HaloService extends HaloServiceBase {
     const postCategories = await this.resolveDisplayNames(() => this.getCategoryDisplayNames(params.spec.categories));
     const postTags = await this.resolveDisplayNames(() => this.getTagDisplayNames(params.spec.tags));
 
-    this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    // ⚠️ **必须 await**：`processFrontMatter` 是异步的（它要读文件、解析 YAML、再写回），
+    // 不 await 时下面那句「发布成功」会**早于** frontmatter 落盘弹出 —— 用户看到成功提示后
+    // 立刻关掉窗口/切换笔记，回写就可能被丢弃，而站点上文章已经发了。
+    // 下次发布时 `halo.name` 缺席 → 走新建分支 → 站点上多出一篇重复文章。
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, params, {
         siteUrl: this.site.url,
         name: params.metadata.name,
@@ -854,7 +871,8 @@ class HaloService extends HaloServiceBase {
 
     await this.app.vault.modify(activeEditor.file, raw);
 
-    this.app.fileManager.processFrontMatter(activeEditor.file, (frontmatter) => {
+    // 必须 await：本函数返回后调用方会弹「更新成功」，早于落盘弹提示会让用户以为已经写完。
+    await this.app.fileManager.processFrontMatter(activeEditor.file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, post.post, {
         siteUrl: this.site.url,
         name: post.post.metadata.name,
@@ -902,9 +920,14 @@ class HaloService extends HaloServiceBase {
     }
 
     const file = await this.app.vault.create(`${post.post.spec.title}.md`, `${post.content.raw}`);
-    this.app.workspace.getLeaf().openFile(file);
+    // `openFile` 也是异步的（要打开叶子、渲染编辑器）。这里**不 await** 是刻意的：
+    // 用户要的是「笔记建出来了」，打开它只是顺手的便利 —— 等编辑器渲染完再回写 frontmatter
+    // 反而让「拉取」这个动作多等一个渲染周期。`void` 显式声明「知道它是 promise，故意不等」，
+    // 而不是漏写。
+    void this.app.workspace.getLeaf().openFile(file);
 
-    this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    // 必须 await：frontmatter 落盘后本函数才返回，调用方不会在回写完成前就认为拉取结束。
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, post.post, {
         siteUrl: this.site.url,
         // ⚠️ 是**入参** name，不是 post.post.metadata.name —— 理由见 PostToFrontmatterOptions.name

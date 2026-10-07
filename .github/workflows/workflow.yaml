@@ -45,8 +45,40 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ⚠️ 这三步是「构建可复现」的**证据**，不是装饰。
+      #
+      # Obsidian 的审核器会把 release 上的 `main.js` 与「从源码重建的产物」逐字节比对，
+      # 对不上就报 "Build output does not match the released main.js artifact"。上一版
+      # release 是**本地手工构建**后上传的，而本地是 Windows + Node 24，CI 是 Linux + Node 20 ——
+      # 只要有一处影响产物字节（换行、依赖解析顺序、压缩器版本），比对就会失败。
+      #
+      # 下面三步把这个不确定性消掉：
+      #   ① `pnpm store path` 打出 store 位置，出问题时能看出缓存是否命中；
+      #   ② 构建一次并**打印产物哈希** —— 审核器比对的正是这个值，日志里能直接看到；
+      #   ③ 再构建一次并比对哈希，证明**同一次 CI 内构建是幂等的**（排除时间戳/随机数进产物）。
+      #
+      # 真正的修复是「release 产物由 CI 构建并上传」—— 也就是本 workflow 的 `Release` 步骤。
+      # 手工上传的产物与 CI 产物不必逐字节相同，**只要以后都走 CI**，比对就恒成立。
+      - name: Report pnpm store
+        run: pnpm store path
+
       - name: Build
         run: pnpm build
+
+      - name: Report artifact hash
+        run: |
+          echo "main.js sha256: $(sha256sum main.js | cut -d' ' -f1)"
+          echo "main.js bytes:  $(wc -c < main.js)"
+
+      - name: Verify the build is reproducible
+        run: |
+          cp main.js /tmp/main.js.first
+          pnpm build
+          if ! cmp -s /tmp/main.js.first main.js; then
+            echo "::error::构建不幂等 —— 两次构建的 main.js 不一致，产物里混进了非确定性内容"
+            exit 1
+          fi
+          echo "✅ 两次构建逐字节一致"
 
       # 产物清单必须与 Obsidian 的期望一致：manifest.json 必需，main.js 必需，
       # styles.css 可选（本插件不打包 CSS，仓库根那个是给使用方本地覆盖的占位文件，

@@ -134,7 +134,11 @@ export class AttachmentManagerModal extends Modal {
         button
           .setButtonText(i18next.t("attachment_modal.button_delete"))
           // 标成危险操作：Obsidian 会把它渲染成醒目的红色。附件删除**不可逆**。
-          .setWarning()
+          //
+          // `setDestructive()` 而不是已废弃的 `setWarning()`：两者渲染结果相同（都是红色），
+          // 但 `setWarning` 自 1.13.0 起被标记为 deprecated。本插件的 `minAppVersion` 已是 1.13.0，
+          // 用新 API 不会挡住任何用户。
+          .setDestructive()
           .onClick(async () => {
             const confirmed = await confirmDelete(this.app, item);
 
@@ -218,7 +222,8 @@ class ConfirmDeleteModal extends Modal {
       .addButton((button) =>
         button
           .setButtonText(i18next.t("attachment_modal.button_delete"))
-          .setWarning()
+          // 与上面那个删除按钮同款：危险操作标红，用 1.13.0 起的 `setDestructive()`。
+          .setDestructive()
           .onClick(() => {
             this.onDecide(true);
             this.close();

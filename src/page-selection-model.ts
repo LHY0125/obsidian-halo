@@ -86,7 +86,10 @@ class PageSelectionModal extends Modal {
     // 这里**没有 `.catch`**：`getPages` 的契约就是「不抛」—— 失败时它自己弹提示并给空数组
     //（与 `fetchSelectablePosts` 同款，见那里的说明）。再挂一个 catch 只会是死代码，
     // 而且会掩盖契约：读的人会以为失败是从这里兜的。
-    this.service
+    //
+    // `void` 是给 lint 的显式声明：这条链**故意**不被 await（`onOpen` 是同步的，UI 要先画出来，
+    // 列表异步填进去），而它又确实带 `.finally` 收尾 —— 不是漏写。
+    void this.service
       .getPages()
       .then((items) => {
         for (const page of toSelectablePages(items)) {

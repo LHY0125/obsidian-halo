@@ -168,7 +168,7 @@ export class HaloSettingTab extends PluginSettingTab {
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.publishByDefault).onChange((value) => {
           this.plugin.settings.publishByDefault = value;
-          this.plugin.saveSettings();
+          void this.plugin.saveSettings();
         });
       });
 
@@ -181,7 +181,7 @@ export class HaloSettingTab extends PluginSettingTab {
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.skipPreviewOnPublish).onChange((value) => {
           this.plugin.settings.skipPreviewOnPublish = value;
-          this.plugin.saveSettings();
+          void this.plugin.saveSettings();
         });
       });
 
@@ -246,7 +246,7 @@ export class HaloSettingTab extends PluginSettingTab {
       setting.addExtraButton((button) =>
         button.setIcon("lucide-trash").onClick(() => {
           rules.splice(index, 1);
-          this.plugin.saveSettings();
+          void this.plugin.saveSettings();
           this.display();
         }),
       );
@@ -272,7 +272,7 @@ export class HaloSettingTab extends PluginSettingTab {
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.replaceImageLinks).onChange((value) => {
           this.plugin.settings.replaceImageLinks = value;
-          this.plugin.saveSettings();
+          void this.plugin.saveSettings();
         });
       });
   }

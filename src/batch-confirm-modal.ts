@@ -115,8 +115,10 @@ export class BatchConfirmModal extends Modal {
       }
     }
 
-    // 用 `createEl("div")` 而不是 `createDiv()`：两者等价（后者只是前者的糖），
-    // 但测试脚手架的 `contentEl` 只有 `createEl` —— 这一行决定了整块重画能否在测试里跑到。
+    // 用 `createEl("div")` 而不是 DOM 的 `document.createElement`：前者是 Obsidian 的
+    // 元素工厂，能自动带上主题类名；后者创建的元素游离在 Obsidian 的样式体系之外。
+    // 另一个理由更具体：测试脚手架的 `contentEl` 只有 `createEl` ——
+    // 这一行决定了整块重画能否在测试里跑到。
     this.summaryEl = contentEl.createEl("div");
 
     // 这条提示必须在确认**之前**出现：「批量发布」听起来像只动远端，实际会改一批本地文件。

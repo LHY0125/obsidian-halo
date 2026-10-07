@@ -133,8 +133,19 @@ export function createMockApp(
   };
 
   const fileManager = {
+    // ⚠️ **必须返回 Promise**，与真实的 `FileManager.processFrontMatter` 一致。
+    //
+    // 此前这里返回 `undefined`，而生产代码**不 await** 它 —— 于是「不 await」这个缺陷
+    // 在测试里完全隐形：`await undefined` 与不 await 的观测结果一模一样。
+    // 生产代码改成 `await` 之后，返回 `undefined` 的桩会让整条发布流程多跨一个微任务，
+    // 重试计数与「第一次写入前只读过一次远端」这类断言全部错位（实测 5 条用例挂掉）。
+    //
+    // 返回 `Promise.resolve()` 而不是 `async () => {...}`：回调要**同步**执行完，
+    // 这样「回调里改了 frontmatter」这件事在 `await` 返回之前就已经发生，
+    // 与真实实现的时序一致（真实实现是异步读文件、同步跑回调、异步写回）。
     processFrontMatter: rs.fn((file: TFile, callback: (frontmatter: Record<string, unknown>) => void) => {
       callback({});
+      return Promise.resolve();
     }),
   };
 

@@ -117,8 +117,16 @@ export function toPost(item: McpPostItem): Post {
       categories: item.categories ?? [],
       tags: item.tags ?? [],
       htmlMetas: [],
+      // `deleted` 是 `PostSpec` 的**必填**字段，而 MCP 的扁平表示里没有它 ——
+      // 写死 `false` 是刻意的，不是偷懒：能走到这里的文章都是 `halo_get_post` 读回来的，
+      // 而回收站里的文章读不到（要读得先 `halo_restore_post`）。所以「读到即未删除」。
+      //
+      // ⚠️ 之前这里**整个漏了这个键**，而 `as Post` 断言把类型检查挡住了 ——
+      // 与 `createEmptyPost()` 逐键对比才看出来（那份字面量有 `deleted: false`）。
+      // 两个构造同一类型的函数给出不一致的键集，是真缺陷而不是风格问题。
+      deleted: false,
     },
-  } as Post;
+  };
 }
 
 /**
@@ -133,7 +141,7 @@ export function toContent(content: McpGetPostResult["content"]): Content {
     content: "",
     raw: content.raw ?? "",
     rawType: content.rawType ?? "markdown",
-  } as Content;
+  };
 }
 
 /**
