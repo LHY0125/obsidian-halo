@@ -484,25 +484,40 @@ frontmatter 之后的部分 → raw（原始 Markdown，客户端不渲染）
 
 打 tag 触发 `.github/workflows/workflow.yaml`：构建后把 **`manifest.json` + `main.js`** 作为 Release 产物。
 
-### ⚠️ 本仓库是 fork，`push` 触发**不生效** —— 推 tag 后必须手动跑一次
+### ⚠️ 不要「删除 tag 后立刻重建同名 tag」—— 那样不会触发 workflow
 
-**这是实测结论，不是猜测。** 排查时逐条排除了四个假设：Actions 被禁用（`actions/permissions`
-返回 `enabled: true`）、workflow 被停用（`state: "active"`）、文件不在 tag 指向的 commit 里
-（`git show <tag>:.github/workflows/workflow.yaml` 有内容）、tag 配置写错（`push: tags: ["*"]` 正确）——
-四条全部排除后，运行列表里**一条 push 触发的记录都没有**，加上仓库 `fork: true`
-（parent `halo-sigs/obsidian-halo`）这一条，根因就唯一了：**GitHub 对 fork 默认不运行 `push` 触发的 workflow**。
+**推全新 tag 是正常触发的。** 实测（2026-10-07）：
 
-所以发布流程是：
+| 操作 | 结果 |
+|---|---|
+| 推全新 tag `0.1.1` | **正常触发**（run 37588618232，`event=push`，`success`） |
+| `0.1.0` 那次：先 `gh release delete --cleanup-tag` 删远端 tag，再重建同名 tag 推送 | **一条 push 触发的记录都没有**，只能手动补跑 |
+
+两次的唯一差别是「有没有先删同名 tag」，所以原因在**删除+重建同名 ref 的时序**上。
+
+> **此前这里写着「本仓库是 fork，`push` 触发在 fork 上不生效」—— 那个结论是错的，已被 0.1.1 推翻。**
+> 仓库 `fork: true`（parent `halo-sigs/obsidian-halo`）是事实，但它与这次现象无关。
+> 当时的排查排除了四个假设（Actions 被禁用 / workflow 被停用 / 文件不在 tag 指向的 commit 里 /
+> tag 配置写错），四条都对 —— 但**排除法只能证明「不是这四个」，推不出「是 fork」**。
+> 那次缺的是第五个假设：操作序列本身。教训是**排除法得出的结论要标成「待验证」而不是「已证实」**。
+
+### 发布流程
 
 ```bash
-git tag 0.1.1 && git push origin 0.1.1
-gh workflow run Release --repo LHY0125/obsidian-halo --ref 0.1.1
+pnpm version 0.1.2          # 改 manifest.json + versions.json（不要手工改）
+git push origin main
+git tag 0.1.2 && git push origin 0.1.2
 ```
 
-- **`--ref` 必须指向 tag，不是 `main`。** 指向 main 会失败，报
+- **要改已发布的 tag，用新版本号，不要重建旧 tag** —— 重建同名 tag 会踩上面那个坑。
+- 万一确实没触发，手动补跑。**`--ref` 必须指向 tag，不是 `main`**：指向 main 会失败，报
   「⚠️ GitHub Releases requires a tag」—— `softprops/action-gh-release` 要靠当前 ref
   推断往哪个 release 传产物，而 main 上没有 tag 上下文。
-- 若本地已有同名 tag，先 `git tag -d <tag>` 再重建（`git tag` 不会覆盖已存在的 tag）。
+
+  ```bash
+  gh workflow run Release --repo LHY0125/obsidian-halo --ref 0.1.2
+  ```
+
 - **产物必须由 CI 构建。** Obsidian 审核器会把 release 上的 `main.js` 与「从源码重建的产物」
   逐字节比对，对不上就报 "Build output does not match the released main.js artifact"。
   手工上传的本地产物（Windows + Node 24）与 CI 产物（Linux + Node 20）**不必**逐字节相同 ——
