@@ -9,6 +9,24 @@ name: Release
 # `workflow_dispatch` 是刻意加的：只有 `push: tags` 时，workflow 一旦没被触发
 # 就**无法手动重跑**（`gh workflow run` 会报 422「does not have workflow_dispatch trigger」），
 # 只能再打一个 tag。留一个手动入口，排查时不必污染 tag 列表。
+#
+# ⚠️ **本仓库是 fork，`push` 触发在 fork 上不生效** —— 这是实测结论，不是猜测。
+#
+# 证据：仓库 `fork: true`（parent `halo-sigs/obsidian-halo`）。Actions 本身是启用的
+#（`actions/permissions` 返回 `enabled: true`），workflow 也是 `active`，文件在 tag 指向的
+# commit 里确实存在，tag 配置 `push: tags: ["*"]` 也正确 —— 但推 tag 后运行列表里
+# **一条 push 触发的记录都没有**（总共只有 2 条，都是 workflow_dispatch）。
+# GitHub 对 fork 默认不运行 `push` 触发的 workflow，这是平台行为。
+#
+# 所以发布流程是：**推 tag 之后必须手动跑一次**
+#
+#     gh workflow run Release --repo LHY0125/obsidian-halo --ref 0.1.0
+#
+# `--ref` 必须指向 **tag**（不是 main）。指向 main 会失败，报
+# 「⚠️ GitHub Releases requires a tag」—— 因为 `softprops/action-gh-release` 要靠
+# 当前 ref 推断要往哪个 release 传产物，而 main 上没有 tag 上下文。
+#
+# 实测：`--ref 0.1.0` 跑通，产出的 main.js / manifest.json 与本地产物 sha256 逐字节一致。
 on:
   push:
     tags:
