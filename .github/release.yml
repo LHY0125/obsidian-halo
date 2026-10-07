@@ -1,0 +1,28 @@
+# GitHub 自动生成 release notes 的分类规则。
+#
+# 为什么需要这个文件：默认配置**按 PR 分组**，而本仓库是直接往 `main` 推 commit
+# （单人项目，不走 PR）。结果是 `generate_release_notes: true` 只产出一行
+# 「Full Changelog: .../compare/...」，等于没有描述 —— 而 Obsidian 的审核器会对
+# 空描述的 release 报「The release has no description」。
+#
+# 加了这份配置之后，GitHub 会按下面的 `categories` 把 **commit** 分组列出
+# （`categories` 的 `labels` 匹配不到时，仍会按 commit 的 conventional-commit
+# 前缀归类；本仓库的提交全部遵循 `feat:` / `fix:` / `docs:` / `chore:` / `ci:` / `refactor:`）。
+#
+# ⚠️ 改这个文件**不影响已发布的 release** —— 它只在下次 `generate_release_notes` 时生效。
+# 要改已有的 release，用 `gh release edit <tag> --notes-file <file>`。
+
+changelog:
+  categories:
+    - title: Features
+      labels: ["feat", "feature", "enhancement"]
+    - title: Bug Fixes
+      labels: ["fix", "bug"]
+    - title: Refactoring
+      labels: ["refactor", "perf"]
+    - title: Documentation
+      labels: ["docs", "documentation"]
+    - title: CI & Build
+      labels: ["ci", "build", "chore"]
+    - title: Other Changes
+      labels: ["*"]
