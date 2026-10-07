@@ -1,7 +1,8 @@
 # Halo-MCP
 
-Publish your Obsidian notes to [Halo](https://github.com/halo-dev/halo), with the
+Publish your Obsidian notes to [Halo](https://github.com/halo-dev/halo), with the official
 [Halo MCP Server](https://github.com/halo-dev/plugin-mcp-server) as the backend.
+
 > **This is a fork of [`halo-sigs/obsidian-halo`](https://github.com/halo-sigs/obsidian-halo).**
 > The publishing backend has been migrated from Halo's REST API to the official MCP Server plugin,
 > and the plugin `id` changed from `halo` to `halo-mcp` so that it can coexist with the original.
@@ -39,47 +40,46 @@ Publish your Obsidian notes to [Halo](https://github.com/halo-dev/halo), with th
   If you grant fewer, the self-check will report the missing tools by name.
   Comments, theme settings, theme templates and image search are not used by this plugin.
 
-## Connection self-check
-
-Run **`Halo-MCP: MCP connection self-check`** from the command palette. It performs the handshake
-and reports whether every required tool is available. When troubleshooting, this is the only
-verification method you have — run it first.
-
-## Contract test (optional, needs a real site)
-
-```bash
-HALO_MCP_ENDPOINT=https://<your-site>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
-```
-
-It asserts against a real site that every tool in `REQUIRED_TOOLS`
-(see `src/mcp-self-check.ts`) exists. There are two cases depending on the environment variables:
-
-- **Neither is set** — this is the expected skip; it stays silent (reports 1 passed, but asserts
-  nothing).
-- **Only one is set** — almost certainly a misconfiguration. The test writes a warning to stderr
-  **naming the missing variable**. If you see that warning, no assertion was made; set both.
-
 ## Installation
 
 1. In Obsidian, open **Settings → Community plugins → Browse**.
 2. Search for **Halo-MCP** and click **Install**.
-3. Enable it, then go to **Settings → Halo-MCP** and add a site:
-   - **Site name** — optional.
-   - **Site URL** — e.g. `https://blog.example.com`.
-   - **MCP token** — the `hmcp_` access key from the step above. **This is required.**
-   - **Personal access token** — optional. Only used to upload images **larger than 7 MiB**;
-     leave it empty if you do not need that.
+3. Enable it, then go to **Settings → Halo-MCP** and add a site via **Halo sites → Add**.
+   The site dialog has these fields:
+
+   | Field | Required | Notes |
+   |---|---|---|
+   | **Site name** | No | A label for yourself; falls back to the URL when empty |
+   | **Site URL** | Yes | e.g. `https://blog.example.com` |
+   | **MCP access key** | **Yes** | The `hmcp_` key from the step above |
+   | **Personal Access Token (fallback only)** | No | Only for images **larger than 7 MiB**; leave empty otherwise |
+   | **Set as default** | No | The site used when no routing rule matches |
+
+   The dialog also has a **Validate** button that runs the MCP self-check against what you typed —
+   use it before saving.
 4. Run the command **`Halo-MCP: MCP connection self-check`** to verify.
 
 ### Upgrading from the upstream plugin
 
-If you previously used `halo-sigs/obsidian-halo`, its settings do **not** carry over — this is a
-separate plugin with its own configuration. Add your site again and fill in the `hmcp_` token.
+This is a separate plugin with its own configuration — upstream settings do **not** carry over.
+Add your site again and fill in the **MCP access key**.
 
 The upstream plugin only stored a PAT. After switching to MCP, **even small image uploads go
-through MCP**, so a missing `hmcp_` token makes publishing fail — and because any failed image
+through MCP**, so a missing `hmcp_` key makes publishing fail — and because any failed image
 upload aborts the whole publish, all you see is "publish failed". Run the self-check command;
-it will tell you plainly if the token is invalid.
+it will tell you plainly if the key is invalid.
+
+## Settings
+
+Beyond the site list, the settings page has three global switches:
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Publish post by default** | off | When on, publishing a note that does not say `halo.publish` sends it as published instead of a draft |
+| **Skip preview when publishing** | off | When on, the preview dialog is skipped and publishing starts immediately |
+| **Replace image links** | **on** | Whether the **local note** gets rewritten with Halo URLs after upload. When off, the published content still uses the uploaded URLs — only your note keeps the local paths |
+
+And **Site routing rules** — see below.
 
 ## Commands
 
@@ -97,15 +97,24 @@ All commands are prefixed with the plugin name by Obsidian; the names below are 
 | **Manage pages** | List the site's pages and move them to the recycle bin | — |
 | **Search site content** | Search the site (**including drafts**) | — |
 | **Manage attachments** | List / copy links / **delete** attachments | — |
-| **Recycle bin (posts)** / **(pages)** | List recycled content and restore it | — |
+| **Recycle bin (posts)** / **Recycle bin (pages)** | List recycled content and restore it | — |
 | **MCP connection self-check** | Handshake and report missing tools | — |
 | **Batch push as drafts** / **Batch publish** / **Batch unpublish** | Act on the whole vault after one confirmation | See below |
 
+## Connection self-check
+
+Run **`Halo-MCP: MCP connection self-check`** from the command palette. It performs the handshake
+and reports whether every required tool is available. When troubleshooting, this is the only
+verification method you have — run it first.
+
 ## Preview
 
-![settings](./images/settings-en.png)
+Before a note is published, a dialog shows exactly what will be sent: target site (and *how* it was
+resolved — from the note, from a routing rule, from the default, or chosen by you), title, slug,
+body size, the six metadata fields, categories and tags that will be created, and how many images
+need uploading. Nothing is written until you confirm.
 
-![commands](./images/commands-en.png)
+Turn it off with **Skip preview when publishing** if you do not want it.
 
 ## Metadata fields
 
@@ -180,8 +189,8 @@ them by site, and list them in a confirmation dialog:
 
 - **Batch push as drafts** — create/update each post and set its publish state to draft.
 - **Batch publish** — create/update each post and set its publish state to published.
-- **Batch unpublish** — set already-published posts back to draft. Does not read the body,
-  does not rewrite the body, does not upload images.
+- **Batch unpublish** — set already-published posts back to draft. Does not rewrite the body,
+  does not write back to local notes, does not upload images.
 
 Every row has a checkbox (all checked by default), and the "will process N notes" count
 **updates live as you toggle them**. Notes that cannot enter the batch — no site, no `halo.name`
@@ -226,15 +235,15 @@ commands **do not touch local notes at all** — they only read and act on the r
 | **Manage pages** | List pages not in the recycle bin; move them there one by one | No |
 | **Search site content** | Search the site by keyword to see if you already wrote it | No |
 | **Manage attachments** | List all attachments; copy links or **delete** | No |
-| **Recycle bin (posts)** / **(pages)** | List recycled content and **restore** it | No |
+| **Recycle bin (posts)** / **Recycle bin (pages)** | List recycled content and **restore** it | No |
 
 A few behaviours worth knowing:
 
 - **Search includes drafts.** It deliberately does not filter by publish state — the point of
   searching is "have I already written this?", and an unpublished draft is exactly the thing
-  you most need to find (otherwise you write it twice). Draft rows carry a **pencil icon**
-  (hover shows "draft"); rows with a permalink also get an **Open** button that opens that
-  post on your site in the system browser.
+  you most need to find (otherwise you write it twice). Draft rows carry a **Draft** badge;
+  rows with a permalink also get an **Open** button that opens that post on your site in the
+  system browser.
 - **Deleting an attachment is irreversible.** Attachments have **no recycle bin** — once deleted
   it cannot be recovered, and notes referencing it will show a broken image. So every delete
   requires **a second confirmation** naming the file and its size.
@@ -251,13 +260,23 @@ A few behaviours worth knowing:
   whether a row is a post or a page, so rather than mixing them and making you guess, they are
   split by content type — "I deleted a post by mistake" and "I deleted a page by mistake" are
   two different actions anyway.
+- **Long lists say so when they are cut short.** Every list (posts, pages, attachments, categories,
+  tags, recycle bin) is fetched page by page. If a site has more than can be fetched in one run,
+  the dialog tells you the list below is incomplete rather than silently showing a partial list.
 
-## Manual end-to-end checklist
+## Contract test (optional, needs a real site)
 
-Some of the behaviours above can only be verified with a real Obsidian and a real site
-(dialogs, checkboxes, image link write-back). See
-**[docs/e2e-manual-checklist.md](./docs/e2e-manual-checklist.md)** for the item-by-item list.
-(It is written in Chinese.)
+```bash
+HALO_MCP_ENDPOINT=https://<your-site>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
+```
+
+It asserts against a real site that every tool in `REQUIRED_TOOLS`
+(see `src/mcp-self-check.ts`) exists. There are two cases depending on the environment variables:
+
+- **Neither is set** — this is the expected skip; it stays silent (reports 1 passed, but asserts
+  nothing).
+- **Only one is set** — almost certainly a misconfiguration. The test writes a warning to stderr
+  **naming the missing variable**. If you see that warning, no assertion was made; set both.
 
 ## Development
 
@@ -282,6 +301,10 @@ Some of the behaviours above can only be verified with a real Obsidian and a rea
 4. Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
 The plugin `id` must match the directory name.
+
+There is also a **[manual end-to-end checklist](./docs/e2e-manual-checklist.md)** for behaviours
+that can only be verified with a real Obsidian and a real site (dialogs, checkboxes, image link
+write-back). It is written in Chinese.
 
 ## Credits
 
