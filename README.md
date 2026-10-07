@@ -1,191 +1,106 @@
-# Obsidian plugin for Halo
+# Halo-MCP
 
-> **本仓库是 `halo-sigs/obsidian-halo` 的 fork**，发布后端已从直连 REST API
-> 迁移到 Halo 官方 MCP Server 插件。原上游的使用说明见下方，仍然有效。
+Publish your Obsidian notes to [Halo](https://github.com/halo-dev/halo), with the
+[Halo MCP Server](https://github.com/halo-dev/plugin-mcp-server) as the backend.
 
-## 当前进度与凭据要求
+> **This is a fork of [`halo-sigs/obsidian-halo`](https://github.com/halo-sigs/obsidian-halo).**
+> The publishing backend has been migrated from Halo's REST API to the official MCP Server plugin,
+> and the plugin `id` changed from `halo` to `halo-mcp` so that it can coexist with the original.
+> It is a **separate plugin**, not an update to the upstream one.
 
-发布后端已经切到 MCP：**发布 / 更新 / 拉取（含选文列表）/ 小图上传 / 连通性自检**，
-以及新增的**独立页面（推 / 拉 / 管理）、线上查重、附件管理、回收站（文章 / 页面）**全部走 MCP，
-站点侧只需要填 `hmcp_` 访问密钥。
+## Features
 
-**REST + PAT 只剩一条路**：上传**超过 7 MiB** 的图片 —— MCP 的 `halo_upload_attachment` 上限就是 7 MiB，
-超出才会回退 REST 的分片上传。
+- **Posts** — publish / update / pull, with a preview dialog before anything is written.
+- **Single pages** — push a note as a Halo *page* (not a post), pull, and manage them.
+- **Search** — full-text search your site to check whether you have already written something.
+  **Drafts are included.**
+- **Attachments** — list, copy links, and delete.
+- **Recycle bin** — list and restore recycled posts and pages.
+- **Batch operations** — push as drafts / publish / unpublish across the whole vault,
+  after one aggregate confirmation.
+- **Site routing** — route notes to different Halo sites by glob patterns on their path.
+- **Metadata fields** — six Halo post fields (`visible`, `pinned`, `priority`, `publishTime`,
+  `allowComment`, `template`) readable and writable from a note's frontmatter.
 
-- **`hmcp_` 访问密钥（必需）**：上面那些功能全靠它。在站点编辑弹窗里填 `mcpToken`。
-- **个人访问令牌 PAT（可选）**：只有上传超过 7 MiB 的图片时才需要，用不到可以留空。
-  `hmcp_` 密钥在 REST API 上无效（实测返回 401），两者不可互换。
+## Requirements
 
-### ⚠️ 从旧版本升级：请补填 `hmcp_` 密钥
+- Halo **≥ 2.26**, with the official
+  [MCP Server plugin](https://github.com/halo-dev/plugin-mcp-server) installed and enabled.
+- An access key created in the Halo console under **Tools → MCP Service**. It starts with `hmcp_`.
+  Grant it the following **four groups, 23 tools in total**:
 
-旧安装只配了 PAT、没有 `mcpToken`。切换之后**小图上传也会失败**（小图已改走 MCP），
-而任意一张图上传失败都会**中止整次发布** —— 用户看到的只是「发布失败」，
-从这句话里看不出真正的原因是密钥没填。
+  | Group | Count | Tools |
+  |---|---|---|
+  | Posts | 7 | list / get / create / update, publish state, recycle, restore |
+  | Single pages | 7 | the same set, for pages |
+  | Categories & tags | 4 | list and create, for each |
+  | Search & attachments | 5 | full-text search, attachment list / get / delete, attachment upload |
 
-请到「设置 → Halo → 编辑站点」补填 `mcpToken`，再执行命令 `Halo: MCP 连通性自检`：
-它会握手并逐项列出站点侧缺少的工具（密钥无效时会直接说明密钥无效）。
+  This list matches `REQUIRED_TOOLS` in `src/mcp-self-check.ts` — **that file is the authority**.
+  If you grant fewer, the self-check will report the missing tools by name.
+  Comments, theme settings, theme templates and image search are not used by this plugin.
 
-## 前置条件
+## Connection self-check
 
-- 站点 Halo 版本 **≥ 2.26**
-- 站点已安装并启用官方 [MCP Server 插件](https://github.com/halo-dev/plugin-mcp-server)
-- 在 Halo 后台「工具 → MCP 服务」创建一个访问密钥（以 `hmcp_` 开头），
-  并为其勾选下面**四组共 23 个**工具：
+Run **`Halo-MCP: MCP connection self-check`** from the command palette. It performs the handshake
+and reports whether every required tool is available. When troubleshooting, this is the only
+verification method you have — run it first.
 
-  - **文章**（7 个）：列表 / 读取 / 新建 / 修改、发布状态、回收、恢复
-  - **独立页面**（7 个）：与文章同构的一套
-  - **分类与标签**（4 个）：两类各自的列举与创建
-  - **检索与附件**（5 个）：全文检索、附件列表 / 读取 / 删除、附件上传
-
-  这份清单与 `src/mcp-self-check.ts` 的 `REQUIRED_TOOLS` 一致：**勾少了，连通性自检会报「缺少 N 个工具」**，
-  而自检正是排错时唯一的验证手段。评论、主题设置、主题模板、图片搜索这一类插件用不到，不必勾选。
-
-## 连通性自检
-
-在 Obsidian 命令面板执行 `Halo: MCP 连通性自检`，它会握手并检查所需工具是否齐备。
-
-## 契约测试（可选，需真实站点）
+## Contract test (optional, needs a real site)
 
 ```bash
-HALO_MCP_ENDPOINT=https://<你的站点>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
+HALO_MCP_ENDPOINT=https://<your-site>/mcp HALO_MCP_TOKEN="$HALO_MCP_TOKEN" pnpm test:contract
 ```
 
-它对真实站点断言 `REQUIRED_TOOLS`（见 `src/mcp-self-check.ts`）里的工具全部存在。
-环境变量的设置情况分两种：
+It asserts against a real site that every tool in `REQUIRED_TOOLS`
+(see `src/mcp-self-check.ts`) exists. There are two cases depending on the environment variables:
 
-- **两个都没设**：这是预期的跳过，保持静默（输出 1 passed，但什么都没验证）。
-- **只设了一个**：几乎肯定是配置失误，测试会往 stderr 打一行**点名缺失变量**的告警。看到告警就说明本次没有做任何断言，请把两个变量都设上。
+- **Neither is set** — this is the expected skip; it stays silent (reports 1 passed, but asserts
+  nothing).
+- **Only one is set** — almost certainly a misconfiguration. The test writes a warning to stderr
+  **naming the missing variable**. If you see that warning, no assertion was made; set both.
 
-## 元数据字段
+## Installation
 
-下面 6 个字段写在 `halo:` 下，发布时**双向**生效 —— 发布会把它们传给站点，发布完的回写会把站点上的实际值写回笔记：
+1. In Obsidian, open **Settings → Community plugins → Browse**.
+2. Search for **Halo-MCP** and click **Install**.
+3. Enable it, then go to **Settings → Halo-MCP** and add a site:
+   - **Site name** — optional.
+   - **Site URL** — e.g. `https://blog.example.com`.
+   - **MCP token** — the `hmcp_` access key from the step above. **This is required.**
+   - **Personal access token** — optional. Only used to upload images **larger than 7 MiB**;
+     leave it empty if you do not need that.
+4. Run the command **`Halo-MCP: MCP connection self-check`** to verify.
 
-```yaml
-halo:
-  site: https://blog.example.com
-  name: <post metadata.name>
-  publish: true
-  visible: PUBLIC                  # PUBLIC | INTERNAL | PRIVATE
-  pinned: false                    # 置顶
-  priority: 0                      # 排序权重，整数
-  publishTime: ""                  # 空串 = 立即发布；非空 = 定时发布（RFC 3339）
-  allowComment: true               # 单篇评论开关
-  template: ""                     # 自定义渲染模板
-```
+### Upgrading from the upstream plugin
 
-**删掉一行 ≠ 清空它。** 对**已经发布过**的笔记，删掉 `halo.pinned:` 那一行表示「跟随远端当前的值」；
-要取消置顶必须写 `pinned: false`。写成空值（`pinned:` 后面什么都不写）与删掉这一行同义。
-这条规则对 `visible` / `pinned` / `priority` / `allowComment` / `template` 都成立。
+If you previously used `halo-sigs/obsidian-halo`, its settings do **not** carry over — this is a
+separate plugin with its own configuration. Add your site again and fill in the `hmcp_` token.
 
-对**从没发布过**的笔记，没有「远端当前的值」可跟随（它还没有对应的远端文章）——
-这些字段用插件内置的默认值；这些默认值不在本文档里逐项列出，请以代码为准，免得两份说法分叉。
+The upstream plugin only stored a PAT. After switching to MCP, **even small image uploads go
+through MCP**, so a missing `hmcp_` token makes publishing fail — and because any failed image
+upload aborts the whole publish, all you see is "publish failed". Run the self-check command;
+it will tell you plainly if the token is invalid.
 
-**「空值」指的是不写值，不是写一对引号。** `visible:`（冒号后留空）在 YAML 里解析为「没有值」，
-所以它和删掉那一行一样表示「跟随远端」；而 `visible: ""`（一对引号）是一个**显式字符串**，
-会被当成写错的值而拦下 —— 想跟随远端就留空，不要写引号。
+## Commands
 
-**唯一的例外是 `publishTime`**：写 `""`（空串）表示「立即发布」，是一条**有内容**的指令 ——
-要取消一篇已排定的定时发布，必须显式写 `publishTime: ""`，光删掉那一行只会让它继续跟随远端。
+All commands are prefixed with the plugin name by Obsidian; the names below are what you see.
 
-写错的值会在发布**之前**被拦下（本地校验，一次网络请求都不会发），例如 `visible: public`（小写）
-会告诉你哪一行、写了什么、该写什么。`visible` 只认三个大写取值。
-
-## 站点路由规则
-
-在「设置 → Halo → 站点路由规则」里按**笔记在库内的相对路径**指定目标站点：
-
-| 模式 | 含义 |
-|---|---|
-| `博客/**` | `博客/` 下的所有笔记（`**` 跨目录） |
-| `日记/*.md` | `日记/` 下一层的 markdown（`*` 不跨 `/`） |
-| `草稿?.md` | `?` 匹配单个非 `/` 字符 |
-
-模式**大小写不敏感**（`Blog/**` 与 `blog/**` 等效），开头的 `./`、`/` 与反斜杠会被自动规整。
-规则自上而下取首个命中；设置页每一行会显示它当前命中了多少篇笔记。
-
-**命中一个已被删除的站点时，插件会停下来报错，而不是改用默认站点。** 这是刻意的：
-把笔记发到另一个站是不可逆的（目标站上可能已经建了同名文章），而报错只是让你去改一行配置。
-
-站点的解析优先级是：
-
-```
-笔记里的 halo.site  >  路由规则首个命中  >  设置里的默认站点  >  唯一站点  >  弹窗让你选
-```
-
-注意「发布到 Halo（使用默认配置）」这条命令**不经过**路由规则 —— 它的语义就是用默认站点。
-
-## 批量操作
-
-三个批量命令都从**当前库里的全部 markdown 笔记**取候选，按站点分组后在确认弹窗里列出：
-
-- **Halo: 批量推草稿**：逐篇建/更新文章，并把发布状态设为草稿。
-- **Halo: 批量发布**：逐篇建/更新文章，并把发布状态设为已发布。
-- **Halo: 批量撤回**：只把已发布文章的发布状态退回草稿，不读正文、不改写正文、不上传图片。
-
-确认弹窗里每一篇都有勾选框（默认全勾），「将处理 N 篇」会**跟着你的勾选实时变化**。
-没有站点、没有 `halo.name`（撤回时）、正文读不出来（**只有推草稿 / 发布会这样 —— 撤回不读正文**）
-等进不了批的笔记，会单独列在「已跳过」里并逐条给出原因 —— 它们不会被算进失败。
-
-**批量推草稿与批量发布也会改写本地笔记**（不是只动远端）：执行过程中会把文章元数据
-（`title` / `slug` / `cover` / `excerpt` / `categories` / `tags`）与整个 `halo` 块回写进笔记 ——
-包括发布状态 `halo.publish`。这一步**与「替换图片链接」开关无关**，关着它照样发生；
-开了那个开关时，笔记里的本地图片地址还会被换成 Halo 地址。
-
-**批量撤回只动远端，不写回本地笔记。** 它把站点上那几篇退回草稿，而笔记本地的 `halo.publish`
-**仍是原值**（撤回只调发布状态接口，不改写正文）。这一点要留意，因为
-「批量发布」的语义是「把这批文章发布」—— 它对每一篇都显式传「发布」，**不看本地 `halo.publish`**。
-所以**撤回之后再跑一次批量发布，这些文章会全部重新发出去**。想让它保持草稿，就别把它们纳入
-批量发布，或先跑一次「批量推草稿」把它推回草稿。
-
-**批量命令按命令名决定发布状态，不看笔记里的 `halo.publish`。** `Halo: 批量发布` 会把清单里每一篇
-都设为已发布，`Halo: 批量推草稿` 会把每一篇都设为草稿 —— 哪怕那篇笔记自己写着
-`halo.publish: false`。**想排除某一篇，唯一的办法是在确认弹窗里取消勾选它。**
-（单篇的 `Halo: 发布` 命令不受此影响，它仍然读笔记里的 `halo.publish`。）
-
-批量执行**失败不中断**：某一篇失败了，后面的继续跑，跑完在一个汇总弹窗里报
-「成功 N 篇，失败 N 篇，另有 N 篇在执行前就被跳过」，并**分两段**列出明细 ——
-先逐条列出失败项及原因，再另起一段逐条列出**执行前被跳过的那几篇及原因**。
-
-## 独立页面、查重、附件与回收站
-
-除发布文章之外，插件还能管**站点上的其它内容**。先分清哪几条会动你的本地笔记
-（`Halo: 管理附件` / `Halo: 查重（搜索线上内容）` / 两条回收站命令**完全不动本地笔记**，
-它们只读远端、只在远端做动作）：
-
-| 命令 | 做什么 | 动不动本地笔记 |
+| Command | What it does | Touches local notes |
 |---|---|---|
-| `Halo: 推为独立页面` | 把当前笔记推成一篇**独立页面**（Halo 的「页面」，不是文章） | **会**：回写当前笔记的 frontmatter |
-| `Halo: 拉取独立页面` | 从站点拉一个独立页面到本地 | **会**：新建一篇笔记 |
-| `Halo: 管理独立页面` | 列出站点上**不在回收站**的独立页面，可逐条**移入回收站** | 不动 |
-| `Halo: 查重（搜索线上内容）` | 用关键词搜站点上的内容，看这一篇是不是已经写过了 | 不动 |
-| `Halo: 管理附件` | 列出站点上的全部附件，可复制链接、**删除** | 不动 |
-| `Halo: 回收站（文章）` / `Halo: 回收站（页面）` | 列出回收站里的内容并**恢复** | 不动 |
-
-几条必须知道的行为：
-
-- **查重会查到草稿。** 它刻意不过滤发布状态 —— 查重的用途是「我是不是已经写过这个」，
-  而一篇还没发布的草稿正是最需要被查出来的（否则你会写第二遍）。草稿那一行会多出一个**铅笔图标**
-  （鼠标悬停显示「草稿」）；有 permalink 的条目还带一个「打开」按钮，用系统浏览器打开站点上那一篇。
-- **删除附件是不可逆的。** 附件**没有回收站** —— 删掉之后无法恢复，引用了它的笔记会显示为图片损坏。
-  所以每一行的删除都要求**二次确认**，确认文案里点名你要删的那个文件名与大小。
-  （文章与独立页面的「移入回收站」是可恢复的，两者不一样，别把这条经验套过去。）
-- **独立页面的 frontmatter 只有三个 `halo` 键**：`site` / `name` / `publish`。文章那 6 个元数据字段
-  （`visible` / `pinned` / `priority` / `publishTime` / `allowComment` / `template`）以及
-  `cover` / `excerpt` / `categories` / `tags` **对页面没有意义** —— 页面这个资源本来就没有这些概念，
-  写了也不会有任何结果。推完一篇页面之后，笔记里只会出现那三个键，**不会**被塞进多余的字段。
-- **推页面没有预览弹窗，也不上传图片。** 页面通常是「关于」「友链」这类短文档；真需要传图的页面，
-  先跑一次 `Halo: 上传图片` 即可。
-- **页面与文章的回收站是两个分开的入口**（各一条命令）：列表里没有哪一列能告诉你某一行是文章还是页面，
-  与其混在一起让你猜，不如按内容类型分开 —— 「我的文章误删了」和「我的页面误删了」本来就是两个动作。
-
-## 端到端手工验证清单
-
-上面这些行为里有一部分只有真实的 Obsidian 与真实站点才验得到（弹窗、勾选框、图片链接回写）。
-逐项清单见 **[docs/e2e-manual-checklist.md](./docs/e2e-manual-checklist.md)**。
-
-This plugin allows you to publish your Obsidian documents to [Halo](https://github.com/halo-dev/halo).
-
-[中文文档](./README.zh-CN.md)
+| **Publish to Halo** | Publish the current note to the resolved site | Writes back frontmatter |
+| **Publish to Halo (use default settings)** | Publish to the default site, **bypassing routing rules** | Writes back frontmatter |
+| **Upload images to Halo** | Upload local images and replace the links | Rewrites image links |
+| **Pull posts from Halo** | Pull a post from Halo into a new note | Creates a note |
+| **Update content from Halo** | Update the current note from Halo | Rewrites the note |
+| **Push as page** | Push the current note as a single page | Writes back frontmatter |
+| **Pull page** | Pull a single page into a new note | Creates a note |
+| **Manage pages** | List the site's pages and move them to the recycle bin | — |
+| **Search site content** | Search the site (**including drafts**) | — |
+| **Manage attachments** | List / copy links / **delete** attachments | — |
+| **Recycle bin (posts)** / **(pages)** | List recycled content and restore it | — |
+| **MCP connection self-check** | Handshake and report missing tools | — |
+| **Batch push as drafts** / **Batch publish** / **Batch unpublish** | Act on the whole vault after one confirmation | See below |
 
 ## Preview
 
@@ -193,75 +108,189 @@ This plugin allows you to publish your Obsidian documents to [Halo](https://gith
 
 ![commands](./images/commands-en.png)
 
-## Usage
+## Metadata fields
 
-1. Search for "Halo" in Obsidian's community plugins browser.
-2. Click **Install**.
-3. Go to **Settings** -> **Community Plugins** -> **Halo** and configure the settings.
-4. Create a new site:
-   1. Site name: the name of the site, optional.
-   2. Site URL: the URL of the site, e.g. `https://example.com`.
-   3. Personal access token:
-      The personal access token of your Halo site, needs `Post Manage` permission.
+These six fields live under `halo:` in a note's frontmatter and work **in both directions** —
+they are sent to the site on publish, and the site's actual values are written back afterwards.
 
-       ![PAT](./images/pat-en.png)
+```yaml
+halo:
+  site: https://blog.example.com
+  name: <post metadata.name>
+  publish: true
+  visible: PUBLIC                  # PUBLIC | INTERNAL | PRIVATE
+  pinned: false                    # pin to top
+  priority: 0                      # sort weight, integer
+  publishTime: ""                  # empty string = publish now; otherwise a scheduled time (RFC 3339)
+  allowComment: true               # per-post comment toggle
+  template: ""                     # custom rendering template
+```
 
-       More information about personal access token: [Personal Access Token](https://docs.halo.run/user-guide/user-center#%E4%B8%AA%E4%BA%BA%E4%BB%A4%E7%89%8C)
+**Deleting a line is not the same as clearing it.** For a note that has **already been published**,
+removing the `halo.pinned:` line means "follow whatever the site currently has"; to unpin it you
+must write `pinned: false`. Writing an empty value (`pinned:` with nothing after it) is the same
+as deleting the line. This holds for `visible` / `pinned` / `priority` / `allowComment` / `template`.
 
-   4. Set as default: set the site as the default site.
-5. Open a note you want to publish, and run the command `Halo: Publish to Halo`.
-6. All available commands:
-   - **Halo: Publish to Halo**: publish the current note to Halo.
-   - **Halo: Publish to Halo (use default settings)**: publish the current note to the default site.
-   - **Halo: Upload images to Halo**: upload local images in the current note to Halo and replace them with remote URLs.
-   - **Halo: Pull posts from Halo**: pull posts from Halo to Obsidian.
-   - **Halo: Update content from Halo**: update the content of the current note from Halo.
-   - **Halo: Push as page**: push the current note as a single page (not a post). The page's frontmatter keeps only three `halo` keys: `site` / `name` / `publish`.
-   - **Halo: Pull page**: pull a single page from Halo to Obsidian as a new note.
-   - **Halo: Manage pages**: list the site's single pages (those not in the recycle bin) and move them to the recycle bin one by one.
-   - **Halo: Search site content**: full-text search the site to check whether you have already written something. **Drafts are included** in the results.
-   - **Halo: Manage attachments**: list all attachments on the site, copy their links, or **delete** them. **Deleting an attachment is irreversible** (attachments have no recycle bin).
-   - **Halo: Recycle bin (posts)** / **Halo: Recycle bin (pages)**: list the recycled content and restore it.
-   - **Halo: MCP connection self-check**: handshake with the site and list any required tools that are missing.
-   - **Halo: Batch push as drafts / Batch publish / Batch unpublish**: act on the whole vault after one aggregate confirmation. See 「批量操作」 above.
+For a note that has **never been published** there is no remote value to follow — the plugin's
+built-in defaults apply. Those defaults are deliberately not repeated here; see the code, so that
+there is only one source of truth.
+
+**"Empty" means no value, not a pair of quotes.** `visible:` (nothing after the colon) parses as
+"no value" in YAML, so it means "follow the site"; `visible: ""` (a pair of quotes) is an explicit
+string and will be rejected as an invalid value.
+
+**`publishTime` is the one exception**: `""` (empty string) is a **meaningful** instruction meaning
+"publish immediately". To cancel a scheduled publish you must write `publishTime: ""` explicitly —
+merely deleting the line leaves it following the site.
+
+Invalid values are caught **before** publishing, locally, without a single network request —
+e.g. `visible: public` (lowercase) tells you which line, what you wrote, and what is allowed.
+
+## Site routing rules
+
+Under **Settings → Halo-MCP → Site routing rules**, route notes to sites by their **path within
+the vault**:
+
+| Pattern | Meaning |
+|---|---|
+| `blog/**` | every note under `blog/` (`**` crosses directories) |
+| `diary/*.md` | markdown one level below `diary/` (`*` does not cross `/`) |
+| `draft?.md` | `?` matches a single non-`/` character |
+
+Patterns are **case-insensitive**, and a leading `./`, `/` or backslash is normalized away.
+Rules are evaluated top-down, first match wins; the settings page shows how many notes each
+rule currently matches.
+
+**If a rule points at a site you have deleted, the plugin stops and reports an error rather than
+falling back to the default site.** That is deliberate: publishing to the wrong site is
+irreversible (a post of the same name may already exist there), whereas an error just asks you
+to fix one line of configuration.
+
+Site resolution order:
+
+```
+halo.site in the note  >  first matching routing rule  >  default site in settings  >  the only site  >  ask you
+```
+
+Note that **Publish to Halo (use default settings)** deliberately **bypasses** the routing rules.
+
+## Batch operations
+
+All three batch commands take their candidates from **every markdown note in the vault**, group
+them by site, and list them in a confirmation dialog:
+
+- **Batch push as drafts** — create/update each post and set its publish state to draft.
+- **Batch publish** — create/update each post and set its publish state to published.
+- **Batch unpublish** — set already-published posts back to draft. Does not read the body,
+  does not rewrite the body, does not upload images.
+
+Every row has a checkbox (all checked by default), and the "will process N notes" count
+**updates live as you toggle them**. Notes that cannot enter the batch — no site, no `halo.name`
+(for unpublish), body unreadable (**only for push-as-draft / publish; unpublish does not read
+the body**) — are listed separately under "skipped", each with its own reason. They are not
+counted as failures.
+
+**Batch push-as-draft and batch publish also rewrite your local notes** (not just the remote
+site): they write the post metadata (`title` / `slug` / `cover` / `excerpt` / `categories` /
+`tags`) and the whole `halo` block back into the note, including the publish state
+`halo.publish`. This happens **regardless of the "replace image links" setting**; with that
+setting on, local image paths are also replaced with Halo URLs.
+
+**Batch unpublish only touches the remote site and does not write back to local notes.** It
+returns those posts to draft on the site, while `halo.publish` in your notes **keeps its original
+value**. This matters because **Batch publish** means "publish this batch" — it passes
+"publish" explicitly for every note and **does not look at the local `halo.publish`**. So
+**running batch publish again after unpublishing will republish all of them.** To keep them as
+drafts, either leave them out of batch publish, or run batch push-as-draft first.
+
+**Batch commands decide the publish state from the command name, not from `halo.publish` in the
+note.** `Batch publish` sets every note in the list to published and `Batch push as drafts` sets
+every one to draft — even if a note itself says `halo.publish: false`. **The only way to exclude
+a note is to uncheck it in the confirmation dialog.** (The single-note **Publish to Halo** command
+is unaffected; it still reads `halo.publish`.)
+
+Batch execution **does not stop on failure**: if one note fails, the rest keep going, and a
+summary dialog at the end reports "N succeeded, N failed, N skipped before running", listing
+the details in **two separate sections** — failures first, then the notes skipped before
+execution, each with its reason.
+
+## Pages, search, attachments and the recycle bin
+
+Besides publishing posts, the plugin manages **other content on your site**. First, which of
+these touch your local notes (`Manage attachments` / `Search site content` / the two recycle-bin
+commands **do not touch local notes at all** — they only read and act on the remote site):
+
+| Command | What it does | Touches local notes |
+|---|---|---|
+| **Push as page** | Push the current note as a single page | **Yes** — writes back frontmatter |
+| **Pull page** | Pull a single page into a new note | **Yes** — creates a note |
+| **Manage pages** | List pages not in the recycle bin; move them there one by one | No |
+| **Search site content** | Search the site by keyword to see if you already wrote it | No |
+| **Manage attachments** | List all attachments; copy links or **delete** | No |
+| **Recycle bin (posts)** / **(pages)** | List recycled content and **restore** it | No |
+
+A few behaviours worth knowing:
+
+- **Search includes drafts.** It deliberately does not filter by publish state — the point of
+  searching is "have I already written this?", and an unpublished draft is exactly the thing
+  you most need to find (otherwise you write it twice). Draft rows carry a **pencil icon**
+  (hover shows "draft"); rows with a permalink also get an **Open** button that opens that
+  post on your site in the system browser.
+- **Deleting an attachment is irreversible.** Attachments have **no recycle bin** — once deleted
+  it cannot be recovered, and notes referencing it will show a broken image. So every delete
+  requires **a second confirmation** naming the file and its size.
+  (Moving posts and pages to the recycle bin *is* recoverable — do not carry this rule over.)
+- **A single page's frontmatter has only three `halo` keys**: `site` / `name` / `publish`. The six
+  metadata fields (`visible` / `pinned` / `priority` / `publishTime` / `allowComment` /
+  `template`) as well as `cover` / `excerpt` / `categories` / `tags` **have no meaning for pages** —
+  the page resource simply has no such concepts, and writing them has no effect. After pushing a
+  page, the note gets exactly those three keys and is **not** stuffed with extra fields.
+- **Pushing a page has no preview dialog and uploads no images.** Pages are usually short
+  documents like "About" or "Links"; if you do need images on one, run **Upload images to Halo**
+  first.
+- **Posts and pages have separate recycle-bin commands.** No column in a list could tell you
+  whether a row is a post or a page, so rather than mixing them and making you guess, they are
+  split by content type — "I deleted a post by mistake" and "I deleted a page by mistake" are
+  two different actions anyway.
+
+## Manual end-to-end checklist
+
+Some of the behaviours above can only be verified with a real Obsidian and a real site
+(dialogs, checkboxes, image link write-back). See
+**[docs/e2e-manual-checklist.md](./docs/e2e-manual-checklist.md)** for the item-by-item list.
+(It is written in Chinese.)
 
 ## Development
 
-1. [Create a new Obisidian vault](https://help.obsidian.md/Getting+started/Create+a+vault) for development.
-2. Clone this repo to the **plugins folder** of the newly created vault.
+1. [Create a new Obsidian vault](https://help.obsidian.md/Getting+started/Create+a+vault) for development.
+2. Clone this repo into the vault's **plugins folder**:
 
    ```bash
    cd path/to/vault/.obsidian/plugins
 
-   git clone https://github.com/ruibaby/obsidian-halo
+   git clone https://github.com/LHY0125/obsidian-halo
    ```
 
-3. Install dependencies
+3. Install dependencies and build:
 
    ```bash
    cd obsidian-halo
 
-   npm install
+   pnpm install
+   pnpm dev     # watch mode; rebuilds main.js on change
    ```
 
-4. Build the plugin
+4. Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
-   ```bash
-   npm run dev
-   ```
-
-5. Reload Obsidian and enable the plugin in Settings.
+The plugin `id` must match the directory name.
 
 ## Credits
 
-- [obsidian-wordpress](https://github.com/devbean/obsidian-wordpress): the original idea came from this repo.
-
-## TODO
-
-- [x] i18n
-- [x] Upload images
-- [x] Publish this plugin to Obsidian community
+- [halo-sigs/obsidian-halo](https://github.com/halo-sigs/obsidian-halo) — the upstream plugin this
+  is forked from.
+- [obsidian-wordpress](https://github.com/devbean/obsidian-wordpress) — the original idea came
+  from this repo.
 
 ## License
 
-GPL-3.0（沿用上游）
+GPL-3.0（沿用上游 / inherited from upstream）
