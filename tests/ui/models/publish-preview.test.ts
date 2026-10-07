@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { buildPublishPreview } from "src/publish-preview";
+import { buildPublishPreview } from "../../../src/ui/models/publish-preview";
 
 describe("buildPublishPreview", () => {
   const base = {

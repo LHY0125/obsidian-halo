@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18next from "i18next";
 import { type App, Setting, type TFile } from "obsidian";
-import { BatchConfirmModal, BatchSummaryModal } from "src/batch-confirm-modal";
-import type { BatchGroup, BatchItem, BatchPlan, BatchRunSummary } from "src/batch-publish";
-import { initializeI18n } from "src/i18n";
-import type HaloPlugin from "src/main";
-import type { HaloSetting, HaloSite } from "src/settings";
-import { createSettings } from "./helpers/obsidian-mocks";
+import type { BatchGroup, BatchItem, BatchPlan, BatchRunSummary } from "../../../src/commands/batch-publish";
+import { initializeI18n } from "../../../src/i18n";
+import type { HaloPluginContext } from "../../../src/plugin-context";
+import type { HaloSetting, HaloSite } from "../../../src/settings";
+import { BatchConfirmModal, BatchSummaryModal } from "../../../src/ui/modals/batch-confirm-modal";
+import { createSettings } from "../../helpers/obsidian-mocks";
 
 /**
  * `src/batch-confirm-modal.ts` 的**决定路径**测试。
@@ -96,7 +96,7 @@ function openModal(plan: BatchPlan, settings: HaloSetting = createSettings()): H
   // 只要满足弹窗构造与渲染的读取面（`app` 传给 Modal 基类）。`settings` 曾经也被读到
   //（改写提示门控在 `replaceImageLinks` 上），那条门控已改成按 action —— 但仍显式传进来，
   // 好让「关掉那个开关时的行为」有地方可测，也避免 fixture 与生产读取面悄悄脱节。
-  const plugin = { app: {} as App, settings } as unknown as HaloPlugin;
+  const plugin = { app: {} as App, settings } as unknown as HaloPluginContext;
 
   const modal = new BatchConfirmModal(plugin, plan, (value) => {
     decided = true;
@@ -347,7 +347,7 @@ function summaryOf(
  *（`Modal.open()` 不调 `onOpen`），所以直接构造导出的类。
  */
 function renderSummary(summary: BatchRunSummary): string[] {
-  const plugin = { app: {} as App, settings: createSettings() } as unknown as HaloPlugin;
+  const plugin = { app: {} as App, settings: createSettings() } as unknown as HaloPluginContext;
   const modal = new BatchSummaryModal(plugin, summary) as unknown as {
     contentEl: HTMLElement;
     onOpen(): void;

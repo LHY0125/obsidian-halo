@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, expect, rs, test } from "@rstest/core";
 import type { PluginManifest, TFile } from "obsidian";
-import { confirmBatchPlan, showBatchSummary } from "../src/batch-confirm-modal";
 import { initializeI18n } from "../src/i18n";
 import HaloPlugin from "../src/main";
 import HaloService from "../src/service";
+import { confirmBatchPlan, showBatchSummary } from "../src/ui/modals/batch-confirm-modal";
 import { createFile, createSettings } from "./helpers/obsidian-mocks";
 
 /**
@@ -26,7 +26,7 @@ import { createFile, createSettings } from "./helpers/obsidian-mocks";
  * 这是唯一能越过去的办法：真弹窗的 Promise 没有别的出口（`Button.onClick` 在
  * `tests/setup.ts` 里也不记录回调）。
  */
-rs.mock("src/batch-confirm-modal", () => ({
+rs.mock("src/ui/modals/batch-confirm-modal", () => ({
   confirmBatchPlan: rs.fn(),
   showBatchSummary: rs.fn(),
 }));

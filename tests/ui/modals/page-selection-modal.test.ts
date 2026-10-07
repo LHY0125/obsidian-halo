@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@rstest/core";
-import { type SelectablePage, toSelectablePages } from "../src/page-selection-model";
+import { type SelectablePage, toSelectablePages } from "../../../src/ui/modals/page-selection-modal";
 
 /**
  * `toSelectablePages` 的三条规范化，各自对应 schema 的一条事实：

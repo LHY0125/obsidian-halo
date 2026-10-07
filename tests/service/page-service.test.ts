@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
+import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT } from "../../src/core/pagination";
 import { initializeI18n } from "../../src/i18n";
-import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT } from "../../src/pagination";
 import type { McpGetSinglePageResult, McpSinglePageItem } from "../../src/service/page-mapping";
 import PageService from "../../src/service/page-service";
 import { McpError } from "../../src/transport/errors";

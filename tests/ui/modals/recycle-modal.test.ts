@@ -2,14 +2,14 @@ import { beforeAll, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
 import type { PluginManifest } from "obsidian";
-import { initializeI18n } from "../src/i18n";
-import HaloPlugin from "../src/main";
-import { LIST_PAGE_SIZE, type PagedResult } from "../src/pagination";
-import { PageManagerModal, RecycleBinModal } from "../src/recycle-modal";
-import type { McpRecycledPostItem, RecycledItem } from "../src/recycle-model";
-import PageService from "../src/service/page-service";
-import { McpClient } from "../src/transport/mcp-client";
-import { TEST_SITE, createFile, createMockApp, createSettings } from "./helpers/obsidian-mocks";
+import { LIST_PAGE_SIZE, type PagedResult } from "../../../src/core/pagination";
+import { initializeI18n } from "../../../src/i18n";
+import HaloPlugin from "../../../src/main";
+import PageService from "../../../src/service/page-service";
+import { McpClient } from "../../../src/transport/mcp-client";
+import { PageManagerModal, RecycleBinModal } from "../../../src/ui/modals/recycle-modal";
+import type { McpRecycledPostItem, RecycledItem } from "../../../src/ui/models/recycle-model";
+import { TEST_SITE, createFile, createMockApp, createSettings } from "../../helpers/obsidian-mocks";
 
 /**
  * 初始化 i18n（生产同一条入口）。理由同 `attachment-modal.test.ts`：不初始化时

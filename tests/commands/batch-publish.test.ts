@@ -9,11 +9,11 @@ import {
   planBatch,
   runBatch,
   summarizeSelection,
-} from "src/batch-publish";
-import { initializeI18n } from "src/i18n";
-import type HaloService from "src/service";
-import type { HaloSetting, HaloSite } from "src/settings";
-import type { SiteRoutingRule } from "src/site-routing";
+} from "../../src/commands/batch-publish";
+import type { SiteRoutingRule } from "../../src/core/site-routing";
+import { initializeI18n } from "../../src/i18n";
+import type HaloService from "../../src/service";
+import type { HaloSetting, HaloSite } from "../../src/settings";
 
 /**
  * `src/batch-publish.ts` 的测试。

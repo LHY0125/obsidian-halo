@@ -229,7 +229,7 @@ describe("McpClient.listTools / callTool", () => {
   });
 });
 
-import { parseToolResult } from "src/transport/mcp-client";
+import { parseToolResult } from "../../src/transport/mcp-client";
 
 // 以下两个外壳取自 2026-10-03 对 https://blog.liuhangyv.top/mcp 的实测原始响应
 const SUCCESS_RESULT = {

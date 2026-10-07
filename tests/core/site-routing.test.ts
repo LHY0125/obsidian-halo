@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import type { HaloSite } from "src/settings";
-import { matchGlob, normalizeRulePattern, resolveSite } from "src/site-routing";
+import { matchGlob, normalizeRulePattern, resolveSite } from "../../src/core/site-routing";
+import type { HaloSite } from "../../src/settings";
 
 function site(url: string, name = url, isDefault = false): HaloSite {
   return { name, url, token: "", mcpToken: "", default: isDefault };

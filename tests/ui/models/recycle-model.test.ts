@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@rstest/core";
-import { LIST_PAGE_SIZE } from "../src/pagination";
+import { LIST_PAGE_SIZE } from "../../../src/core/pagination";
 import {
   type McpRecycledPostItem,
   type RecycleKind,
@@ -7,8 +7,8 @@ import {
   fetchRecycled,
   restoreRecycled,
   toRecycledItems,
-} from "../src/recycle-model";
-import { createFakeClient } from "./helpers/mcp-mock";
+} from "../../../src/ui/models/recycle-model";
+import { createFakeClient } from "../../helpers/mcp-mock";
 
 function recycledPost(overrides: Partial<McpRecycledPostItem> = {}): McpRecycledPostItem {
   return {

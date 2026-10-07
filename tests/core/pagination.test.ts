@@ -1,5 +1,5 @@
 import { describe, expect, rs, test } from "@rstest/core";
-import { fetchAllPages } from "../src/pagination";
+import { fetchAllPages } from "../../src/core/pagination";
 
 function paged<T>(items: T[], page: number, total: number, size: number) {
   const totalPages = Math.ceil(total / size);

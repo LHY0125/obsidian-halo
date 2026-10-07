@@ -11,7 +11,7 @@ import {
   getWikiImageAlt,
   isRemotePath,
   parseMarkdownImageTarget,
-} from "src/service/local-content";
+} from "../../src/service/local-content";
 
 describe("isRemotePath", () => {
   it.each([

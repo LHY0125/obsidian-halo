@@ -9,7 +9,7 @@ import {
 } from "../../src/service/image-upload";
 import type { HaloSetting, HaloSite } from "../../src/settings";
 import { createFakeClient } from "../helpers/mcp-mock";
-import { createFile, createMockApp, createSettings, requestUrlMock, TEST_SITE } from "../helpers/obsidian-mocks";
+import { TEST_SITE, createFile, createMockApp, createSettings, requestUrlMock } from "../helpers/obsidian-mocks";
 
 describe("toBase64", () => {
   it("编码已知字节", () => {

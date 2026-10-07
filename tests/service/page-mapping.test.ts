@@ -4,7 +4,7 @@ import {
   toPageCreateArgs,
   toPageUpdateArgs,
   toSinglePage,
-} from "src/service/page-mapping";
+} from "../../src/service/page-mapping";
 
 /**
  * 页面的**扁平**骨架 —— 逐字取自 2026-10-05 实测的 `halo_list_single_pages` outputSchema。
@@ -84,7 +84,17 @@ describe("toSinglePage", () => {
   it("spec 的必填字段都填了，且与 createEmptyPage 的键集一致", () => {
     const spec = toSinglePage(pageItem()).spec as unknown as Record<string, unknown>;
 
-    for (const required of ["allowComment", "deleted", "pinned", "priority", "excerpt", "publish", "slug", "title", "visible"]) {
+    for (const required of [
+      "allowComment",
+      "deleted",
+      "pinned",
+      "priority",
+      "excerpt",
+      "publish",
+      "slug",
+      "title",
+      "visible",
+    ]) {
       expect(spec).toHaveProperty(required);
     }
 

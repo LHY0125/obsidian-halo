@@ -1,9 +1,9 @@
 import { describe, expect, test } from "@rstest/core";
-import { buildSearchRows, normalizeQuery } from "../src/search-modal";
+import { buildSearchRows, normalizeQuery } from "../../../src/ui/modals/search-modal";
 // 类型从它**定义**的地方取（`search-preview.ts`），不从 `search-modal.ts` 转一道 ——
 // 后者只是 `import type`，并没有 re-export，而 rstest 会剥掉类型所以测试照样绿，
 // 只有 `tsc --noEmit` 会报 TS2459。
-import type { SearchResult } from "../src/search-preview";
+import type { SearchResult } from "../../../src/ui/models/search-preview";
 
 /**
  * `search-modal.ts` 里两个纯函数的测试。

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@rstest/core";
-import { type McpSearchItem, stripHighlight, toSearchResults } from "../src/search-preview";
+import { type McpSearchItem, stripHighlight, toSearchResults } from "../../../src/ui/models/search-preview";
 
 describe("stripHighlight", () => {
   test("去掉服务端加的高亮标签", () => {

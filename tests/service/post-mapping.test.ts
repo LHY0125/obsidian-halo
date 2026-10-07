@@ -1,5 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { type McpPostItem, generateResourceName, pickNewTerms, toContent, toPost } from "src/service/post-mapping";
+import {
+  type McpPostItem,
+  generateResourceName,
+  pickNewTerms,
+  toContent,
+  toPost,
+} from "../../src/service/post-mapping";
 
 /**
  * fixture 取自实抓的 `halo_get_post` 返回体（2026-10-04 对真实站点复核过字段名）。

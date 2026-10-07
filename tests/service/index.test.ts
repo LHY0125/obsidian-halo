@@ -2,8 +2,8 @@ import { beforeAll, beforeEach, describe, expect, rs, test } from "@rstest/core"
 import i18next from "i18next";
 import type { RequestUrlParam, TFile } from "obsidian";
 import * as obsidianRuntime from "obsidian";
+import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT } from "../../src/core/pagination";
 import { initializeI18n } from "../../src/i18n";
-import { LIST_PAGE_SIZE, MAX_PAGES_DEFAULT } from "../../src/pagination";
 import HaloService, { type PublishPlan, type PublishResult } from "../../src/service";
 import { MCP_UPLOAD_MAX_BYTES } from "../../src/service/image-upload";
 import type { McpCategoryItem, McpGetPostResult, McpPostItem, McpTagItem } from "../../src/service/post-mapping";
@@ -1170,7 +1170,7 @@ describe("publishPost 走 MCP", () => {
     expect(writtenArgs?.pinned).toBe(true);
   });
 
-  test("halo.template 被送进写工具的参数（用与默认值相反的 \"custom\" 才判别得了接线）", async () => {
+  test('halo.template 被送进写工具的参数（用与默认值相反的 "custom" 才判别得了接线）', async () => {
     // 判别器同上：`template` 的默认值是空串，而 `toUpdateArgs` 用 `|| null` 把它折成 null，
     // 所以 `template: ""` 写不出判别力（接线在不在都是 null）。非空字符串才判别得了。
     const note = createFile("post.md");
@@ -1233,7 +1233,7 @@ describe("publishPost 走 MCP", () => {
     expect(writtenArgs?.publishTime).toBe("2026-10-06 10:00");
   });
 
-  test("更新分支：本地写 halo.publishTime: \"\" 会把远端的定时发布清成 null", async () => {
+  test('更新分支：本地写 halo.publishTime: "" 会把远端的定时发布清成 null', async () => {
     // 判别器：把 `haloFields: haloFields.fields` 从 `planPublish` 的 `applyPostFrontmatter`
     // 调用点上删掉就会红 —— 那时 `spec.publishTime` 保留**远端**的定时时间，这一条读到的是
     // 那个时间而不是 null。下一条是它「本可以发生」的对照物。

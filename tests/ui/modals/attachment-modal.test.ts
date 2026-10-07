@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, rs, test } from "@rstest/core";
 import i18next from "i18next";
 import type { PluginManifest } from "obsidian";
-import { AttachmentManagerModal, attachmentUrl } from "../src/attachment-modal";
-import type { McpAttachmentItem } from "../src/attachment-model";
-import { initializeI18n } from "../src/i18n";
-import HaloPlugin from "../src/main";
-import { LIST_PAGE_SIZE, type PagedResult } from "../src/pagination";
-import { McpClient } from "../src/transport/mcp-client";
-import { TEST_SITE, createFile, createMockApp } from "./helpers/obsidian-mocks";
+import { LIST_PAGE_SIZE, type PagedResult } from "../../../src/core/pagination";
+import { initializeI18n } from "../../../src/i18n";
+import HaloPlugin from "../../../src/main";
+import { McpClient } from "../../../src/transport/mcp-client";
+import { AttachmentManagerModal, attachmentUrl } from "../../../src/ui/modals/attachment-modal";
+import type { McpAttachmentItem } from "../../../src/ui/models/attachment-model";
+import { TEST_SITE, createFile, createMockApp } from "../../helpers/obsidian-mocks";
 
 /**
  * 初始化 i18n（生产同一条入口）。

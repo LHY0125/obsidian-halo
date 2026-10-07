@@ -1,6 +1,6 @@
 import type { Post } from "@halo-dev/api-client";
 import { describe, expect, it } from "@rstest/core";
-import { applyPostToFrontmatter, parseHaloPostFields } from "src/frontmatter-map";
+import { applyPostToFrontmatter, parseHaloPostFields } from "../../src/core/frontmatter-map";
 
 describe("parseHaloPostFields —— 缺席语义", () => {
   it("halo 整个缺席时给空对象（等于「一个字段都不要动」）", () => {

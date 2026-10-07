@@ -2,7 +2,7 @@ import { describe, expect, it, rs, test } from "@rstest/core";
 import { Modal } from "obsidian";
 import { isSameSiteUrl, normalizeSite, normalizeSiteUrl } from "../src/settings";
 import { CURRENT_SETTINGS_VERSION, DEFAULT_SETTINGS, mcpEndpointOf, migrateSettings } from "../src/settings";
-import { openSiteRoutingModal } from "../src/site-routing-modal";
+import { openSiteRoutingModal } from "../src/ui/modals/site-routing-modal";
 
 describe("settings URL normalization", () => {
   test("trims whitespace and removes trailing slashes", () => {

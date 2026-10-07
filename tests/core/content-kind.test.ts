@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@rstest/core";
-import { CONTENT_TOOLSETS, type ContentKind } from "../src/content-kind";
+import { CONTENT_TOOLSETS, type ContentKind } from "../../src/core/content-kind";
 
 describe("content-kind", () => {
   test("两种内容类型的工具名逐项不同，且都带正确的前缀", () => {

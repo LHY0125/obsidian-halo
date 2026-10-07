@@ -1,14 +1,14 @@
 import { beforeAll, describe, expect, test } from "@rstest/core";
 import i18next from "i18next";
 import * as obsidianRuntime from "obsidian";
-import { initializeI18n } from "../src/i18n";
 // `MAX_PAGES_DEFAULT` 从**定义处**取（`pagination.ts`），不从 `post-selection-model.ts` 转一道 ——
 // 后者只重导出了 `LIST_PAGE_SIZE`（那是为了不断既有 import），并没有这一个。
-import { MAX_PAGES_DEFAULT } from "../src/pagination";
-import { LIST_PAGE_SIZE, fetchSelectablePosts, toSelectablePosts } from "../src/post-selection-model";
-import type { McpPostItem } from "../src/service/post-mapping";
-import { McpError } from "../src/transport/errors";
-import { createFakeClient } from "./helpers/mcp-mock";
+import { MAX_PAGES_DEFAULT } from "../../../src/core/pagination";
+import { initializeI18n } from "../../../src/i18n";
+import type { McpPostItem } from "../../../src/service/post-mapping";
+import { McpError } from "../../../src/transport/errors";
+import { LIST_PAGE_SIZE, fetchSelectablePosts, toSelectablePosts } from "../../../src/ui/modals/post-selection-modal";
+import { createFakeClient } from "../../helpers/mcp-mock";
 
 /**
  * 初始化 i18n —— 走**生产同一条入口** `initializeI18n()`（`main.ts` 的 `onload` 调的就是它）。

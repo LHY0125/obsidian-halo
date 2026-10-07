@@ -1,13 +1,13 @@
 import { describe, expect, test } from "@rstest/core";
+import { LIST_PAGE_SIZE } from "../../../src/core/pagination";
 import {
   type McpAttachmentItem,
   deleteAttachment,
   fetchAttachments,
   formatBytes,
   toAttachmentItems,
-} from "../src/attachment-model";
-import { LIST_PAGE_SIZE } from "../src/pagination";
-import { createFakeClient } from "./helpers/mcp-mock";
+} from "../../../src/ui/models/attachment-model";
+import { createFakeClient } from "../../helpers/mcp-mock";
 
 function attachment(overrides: Partial<McpAttachmentItem> = {}): McpAttachmentItem {
   return {
