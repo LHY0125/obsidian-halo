@@ -1,7 +1,7 @@
 {
   "name": "obsidian-halo-mcp",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "type": "module",
   "description": "Halo's Obsidian integration supports publishing content to Halo sites",
   "main": "main.js",
