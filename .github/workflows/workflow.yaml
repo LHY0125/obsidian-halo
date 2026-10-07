@@ -106,9 +106,16 @@ jobs:
       # 产物清单必须与 Obsidian 的期望一致：manifest.json 必需，main.js 必需，
       # styles.css 可选（本插件不打包 CSS，仓库根那个是给使用方本地覆盖的占位文件，
       # 见 CLAUDE.md 的「发布机制」一节 —— 因此**不**上传它）。
+      #
+      # ⚠️ `generate_release_notes: true` 是**必须的**，不是可选的装饰。
+      # Obsidian 的审核器会对空描述的 release 报
+      # 「The release has no description. Release notes help users understand what changed」。
+      # 打开它之后 GitHub 会按 tag 之间的 commit 自动生成 changelog ——
+      # 本项目每个提交都写了完整的中文说明，生成的 changelog 直接可用。
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: |
             manifest.json
             main.js

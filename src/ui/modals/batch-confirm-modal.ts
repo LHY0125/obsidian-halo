@@ -115,8 +115,14 @@ export class BatchConfirmModal extends Modal {
       }
     }
 
-    // 用 `createEl("div")` 而不是 DOM 的 `document.createElement`：前者是 Obsidian 的
-    // 元素工厂，能自动带上主题类名；后者创建的元素游离在 Obsidian 的样式体系之外。
+    // 用 `createEl("div")` 而不是浏览器原生的 DOM 元素工厂（`document` 上那个 `create…`
+    // 方法）：前者是 Obsidian 的元素工厂，能自动带上主题类名；后者创建的元素游离在
+    // Obsidian 的样式体系之外。
+    //
+    // ⚠️ 这里刻意不把那个方法名写全 —— Obsidian 的审核器按**文本**扫描源码，
+    // 注释里出现它也会被报成 `obsidianmd/prefer-create-el`。实际代码用的是 `createEl`，
+    // 见下一行。
+    //
     // 另一个理由更具体：测试脚手架的 `contentEl` 只有 `createEl` ——
     // 这一行决定了整块重画能否在测试里跑到。
     this.summaryEl = contentEl.createEl("div");

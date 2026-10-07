@@ -215,14 +215,20 @@ export class HaloServiceBase {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      // 必须用 `window.setTimeout` 而不是裸 `setTimeout`：Obsidian 的弹出窗口（popout window）
-      // 有自己的 `window`，裸调用会落在主窗口的定时器上 —— 弹窗关闭后回调仍可能在主窗口触发。
+      // 用 Obsidian 的 `activeWindow`，**不是**裸 `setTimeout`、也不是 `globalThis`。
       //
-      // `globalThis` 而不是裸 `window`：本插件的 `isDesktopOnly: false`，而移动端 WebView 里
-      // `window` 是存在的，两者在真实运行环境里等价；用 `globalThis` 是为了让**测试环境**
-      //（Node，没有 `window`）也能跑到这条退避路径 —— 否则重试一进入退避就抛
-      // 「window is not defined」，而表现是「重试次数恒为 1」，测试只会报一个数字对不上。
-      globalThis.setTimeout(resolve, ms);
+      // 裸 `setTimeout` 落在主窗口的定时器上：Obsidian 的弹出窗口（popout window）有自己的
+      // `window`，弹窗关闭后回调仍可能在主窗口触发。
+      //
+      // `globalThis` 虽然能跑，但 Obsidian 的审核器会报
+      // 「Avoid using 'globalThis'. Use 'window' or 'activeWindow' for popout window compatibility」
+      // —— 而 `activeWindow` 正是官方为此提供的 API：它指向**当前聚焦**的窗口，
+      // 弹窗场景下就是那个弹窗，主窗口下就是主窗口。
+      //
+      // 测试环境（Node，没有 `window`）由 `tests/setup.ts` 的 obsidian mock 提供
+      // `activeWindow: { setTimeout, clearTimeout }` —— 在桩里补，而不是在生产代码里
+      // 加 `globalThis` 兜底：为测试而放宽生产代码的类型与语义，是把测试的便利凌驾于产品正确性。
+      activeWindow.setTimeout(resolve, ms);
     });
   }
 }
@@ -819,7 +825,9 @@ class HaloService extends HaloServiceBase {
       return;
     }
 
-    const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter;
+    const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter as
+      | HaloPostFrontmatter
+      | undefined;
 
     if (!matterData?.halo?.name) {
       new Notice(i18next.t("service.error_not_published"));

@@ -1,5 +1,5 @@
 import i18next from "i18next";
-import { PluginSettingTab, Setting } from "obsidian";
+import { PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
 // 从 "glob" 而不是 "site-routing" 取这两个符号：glob.ts 是零项目内依赖的叶子，
 // 而 site-routing.ts 反过来 import 本文件。从那边取会重新造出 settings ⇄ site-routing 的 import 环。
 import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./core/glob";
@@ -160,42 +160,96 @@ export class HaloSettingTab extends PluginSettingTab {
     super(plugin.app, plugin);
   }
 
+  /**
+   * 声明式设置定义 —— 让设置项出现在 Obsidian 1.13+ 的**设置搜索**里。
+   *
+   * 为什么必须实现它：不实现时审核器会报
+   * 「This PluginSettingTab does not implement getSettingDefinitions(); its settings will not
+   * appear in Obsidian's settings search」。而 `display()` 里手写的 `new Setting(...)` 对
+   * 搜索索引是**不可见**的 —— 用户搜「图片链接」找不到这个开关。
+   *
+   * ⚠️ **只声明「简单项」**：四个开关/按钮。站点路由规则那张表**留在 `display()` 里**，
+   * 因为它每行带三个图标按钮（上移/下移/编辑/删除）与实时命中数，声明式 API 表达不了
+   * 这种「一行多个动作 + 每次渲染重算」的结构 —— 硬套只会写出比现在更难懂的代码。
+   *
+   * 两类混用是官方支持的：`getSettingDefinitions()` 提供可搜索的项，`display()` 里
+   * 追加自定义 UI。**顺序上 `display()` 先执行**（父类渲染声明式项之后调用它），
+   * 所以下面用 `containerEl.createEl("h3")` 自己画小标题，把两组分开。
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    const t = (key: string) => i18next.t(`settings.${key}`);
+
+    return [
+      {
+        type: "page",
+        name: t("site.name"),
+        desc: t("site.description"),
+        items: [
+          {
+            name: t("site.name"),
+            desc: t("site.description"),
+            action: () => {
+              new HaloSitesModal(this.plugin).open();
+            },
+          },
+        ],
+      },
+      {
+        type: "page",
+        name: "Publishing",
+        items: [
+          {
+            name: t("publishByDefault.name"),
+            desc: t("publishByDefault.description"),
+            control: { type: "toggle", key: "publishByDefault" },
+          },
+          // 紧挨着 `publishByDefault`：两者都是「发布这一次要怎么做」的开关，放在一起才不会被
+          // 当成两件无关的事。注意它们的语义**完全不同**（一个是"发还是存草稿"、一个是"要不要
+          // 先看一眼"），所以是两个键 —— 见 `HaloSetting.skipPreviewOnPublish` 的说明。
+          {
+            name: t("skipPreviewOnPublish.name"),
+            desc: t("skipPreviewOnPublish.description"),
+            control: { type: "toggle", key: "skipPreviewOnPublish" },
+          },
+          {
+            name: t("replaceImageLinks.name"),
+            desc: t("replaceImageLinks.description"),
+            control: { type: "toggle", key: "replaceImageLinks" },
+          },
+        ],
+      },
+    ];
+  }
+
+  /**
+   * 读一个声明式控件的当前值。基类默认从 `app.vault.getConfig` 读（那是给 Obsidian
+   * 自己的设置页用的），插件必须覆盖成读自己的设置对象。
+   */
+  getControlValue(key: string): unknown {
+    return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+  }
+
+  /**
+   * 写一个声明式控件的值并落盘。
+   *
+   * 返回 Promise 会让框架等它写完再重绘 —— 但本插件的设置是纯内存赋值 + `saveData()`，
+   * 不 await 也不会出现「界面显示了新值、磁盘上还是旧的」的错位（`saveData` 失败时
+   * 用户下次打开会看到回退，属于可接受的降级）。这里仍然返回 Promise 以如实反映
+   * `saveSettings()` 的签名。
+   */
+  setControlValue(key: string, value: unknown): Promise<void> {
+    (this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+    return this.plugin.saveSettings();
+  }
+
   display() {
     const { containerEl } = this;
 
     containerEl.empty();
 
-    new Setting(containerEl)
-      .setName(i18next.t("settings.site.name"))
-      .setDesc(i18next.t("settings.site.description"))
-      .addButton((button) =>
-        button.setButtonText(i18next.t("settings.site.actions.open")).onClick(() => {
-          new HaloSitesModal(this.plugin).open();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName(i18next.t("settings.publishByDefault.name"))
-      .setDesc(i18next.t("settings.publishByDefault.description"))
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.publishByDefault).onChange((value) => {
-          this.plugin.settings.publishByDefault = value;
-          void this.plugin.saveSettings();
-        });
-      });
-
-    // 紧挨着 `publishByDefault`：两者都是「发布这一次要怎么做」的开关，放在一起才不会被
-    // 当成两件无关的事。注意它们的语义**完全不同**（一个是"发还是存草稿"、一个是"要不要
-    // 先看一眼"），所以是两个键 —— 见 `HaloSetting.skipPreviewOnPublish` 的说明。
-    new Setting(containerEl)
-      .setName(i18next.t("settings.skipPreviewOnPublish.name"))
-      .setDesc(i18next.t("settings.skipPreviewOnPublish.description"))
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.skipPreviewOnPublish).onChange((value) => {
-          this.plugin.settings.skipPreviewOnPublish = value;
-          void this.plugin.saveSettings();
-        });
-      });
+    // ⚠️ 站点、发布开关、替换图片链接这三组**不在这里渲染** —— 它们已经由
+    // `getSettingDefinitions()` 声明式提供（那样才能进设置搜索）。这里再写一遍会让
+    // 每一项**渲染两次**。本方法只负责声明式 API 表达不了的部分：路由规则那张表。
 
     new Setting(containerEl)
       .setName(i18next.t("settings.siteRouting.name"))
@@ -251,7 +305,7 @@ export class HaloSettingTab extends PluginSettingTab {
           if (updated) {
             rules[index] = updated;
             await this.plugin.saveSettings();
-            this.display();
+            this.update();
           }
         }),
       );
@@ -259,7 +313,7 @@ export class HaloSettingTab extends PluginSettingTab {
         button.setIcon("lucide-trash").onClick(() => {
           rules.splice(index, 1);
           void this.plugin.saveSettings();
-          this.display();
+          this.update();
         }),
       );
     });
@@ -273,20 +327,10 @@ export class HaloSettingTab extends PluginSettingTab {
           // 静默插到最前面会让既有用户下次发布时突然改了目标站点。
           rules.push(rule);
           await this.plugin.saveSettings();
-          this.display();
+          this.update();
         }
       }),
     );
-
-    new Setting(containerEl)
-      .setName(i18next.t("settings.replaceImageLinks.name"))
-      .setDesc(i18next.t("settings.replaceImageLinks.description"))
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.replaceImageLinks).onChange((value) => {
-          this.plugin.settings.replaceImageLinks = value;
-          void this.plugin.saveSettings();
-        });
-      });
   }
 
   /** 交换两条规则的顺序。**顺序就是优先级**，所以这是本设置面板里唯一改语义的操作 */
@@ -304,6 +348,6 @@ export class HaloSettingTab extends PluginSettingTab {
     const [moved] = rules.splice(from, 1);
     rules.splice(to, 0, moved);
     void this.plugin.saveSettings();
-    this.display();
+    this.update();
   }
 }

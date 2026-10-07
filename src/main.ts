@@ -7,6 +7,7 @@ import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
 import type { HaloPluginContext } from "./plugin-context";
 import HaloService from "./service";
+import type { HaloPostFrontmatter } from "./service/local-content";
 import PageService from "./service/page-service";
 import {
   type HaloSetting,
@@ -92,7 +93,9 @@ export default class HaloPlugin extends Plugin implements HaloPluginContext {
           return;
         }
 
-        const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter;
+        const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter as
+          | HaloPostFrontmatter
+          | undefined;
 
         if (!matterData?.halo?.site) {
           new Notice(i18next.t("command.update_post.error_not_published"));
@@ -669,7 +672,7 @@ export default class HaloPlugin extends Plugin implements HaloPluginContext {
    * 「为什么这篇没有站点」这个**结果**去汇总，而不是让一次弹窗打断整批。
    */
   private resolveSiteFor(file: TFile): SiteResolution {
-    const matterData = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const matterData = this.app.metadataCache.getFileCache(file)?.frontmatter as HaloPostFrontmatter | undefined;
 
     // `matterData?.halo?.site` 缺席时给的是 `undefined`，`resolveSite` 把**只有** `undefined` / `null`
     // 当「没写」而继续往下走规则表与默认站点。**绝不能在这里补 `?? ""`**：显式空串在
@@ -785,7 +788,9 @@ export default class HaloPlugin extends Plugin implements HaloPluginContext {
       return false;
     }
 
-    const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter;
+    const matterData = this.app.metadataCache.getFileCache(activeEditor.file)?.frontmatter as
+      | HaloPostFrontmatter
+      | undefined;
 
     if (matterData?.halo?.site && !isSameSiteUrl(matterData.halo.site, site.url)) {
       new Notice(i18next.t("service.error_site_not_match"));

@@ -26,6 +26,7 @@
   "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
+    "@halo-dev/api-client": "^2.25.2",
     "@rslib/core": "^0.23.0",
     "@rstest/core": "^0.10.6",
     "@rstest/coverage-istanbul": "^0.10.6",
@@ -35,9 +36,13 @@
     "typescript": "5.1.6"
   },
   "dependencies": {
-    "@halo-dev/api-client": "^2.25.2",
     "i18next": "^23.16.8",
     "transliteration": "^2.6.1"
   },
-  "packageManager": "pnpm@10.34.4"
+  "packageManager": "pnpm@10.34.4",
+  "pnpm": {
+    "overrides": {
+      "@babel/runtime": "^7.26.10"
+    }
+  }
 }

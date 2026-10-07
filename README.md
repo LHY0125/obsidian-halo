@@ -7,6 +7,12 @@ Publish your Obsidian notes to [Halo](https://github.com/halo-dev/halo), with th
 > The publishing backend has been migrated from Halo's REST API to the official MCP Server plugin,
 > and the plugin `id` changed from `halo` to `halo-mcp` so that it can coexist with the original.
 > It is a **separate plugin**, not an update to the upstream one.
+>
+> **Note on the link above:** this repository is itself named `obsidian-halo`, so it and the
+> upstream share a name. The link intentionally points at the **upstream** repository — it is the
+> fork's required attribution (GPL-3.0), not a leftover. `origin` is
+> [`LHY0125/obsidian-halo`](https://github.com/LHY0125/obsidian-halo) (this fork);
+> `upstream` is `halo-sigs/obsidian-halo` (read-only reference, no two-way sync).
 
 ## Features
 

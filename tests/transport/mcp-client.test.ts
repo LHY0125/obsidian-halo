@@ -15,11 +15,25 @@ const INIT_OK = JSON.stringify({
   },
 });
 
-/** 记录每次请求参数，并按脚本返回响应 */
+/**
+ * 记录每次请求参数，并按脚本返回响应。
+ *
+ * 入参形状按测试真正读到的字段声明（`method` / `url` / `headers` / `body`）——
+ * 此前是 `Record<string, any>`，biome 报 `noExplicitAny`；改成 `unknown` 又会让
+ * 下面每一处 `calls[0].method` 报 TS2571。声明成**具体形状**两头都解决，
+ * 而且顺带把「测试读的字段写错了」变成编译错误。
+ */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
 function stub(script: Array<{ status: number; text: string }>) {
-  const calls: Array<Record<string, any>> = [];
+  const calls: RecordedRequest[] = [];
   let i = 0;
-  rq.mockImplementation(async (param: Record<string, any>) => {
+  rq.mockImplementation(async (param: RecordedRequest) => {
     calls.push(param);
     const next = script[Math.min(i, script.length - 1)];
     i += 1;

@@ -6,6 +6,16 @@
 > **本仓库是 [`halo-sigs/obsidian-halo`](https://github.com/halo-sigs/obsidian-halo) 的 fork。**
 > 发布后端已从 Halo 的 REST API 迁移到官方 MCP Server 插件，插件 `id` 也从 `halo` 改为 `halo-mcp`，
 > 以便与官方插件共存。它是一个**独立插件**，不是上游插件的更新。
+>
+> **关于上面那个链接**：本仓库自己也叫 `obsidian-halo`，与上游**同名**。那个链接**有意**指向
+> **上游**仓库 —— 它是 fork 必须保留的署名（GPL-3.0），不是忘了改。`origin` 是
+> [`LHY0125/obsidian-halo`](https://github.com/LHY0125/obsidian-halo)（本 fork）；
+> `upstream` 是 `halo-sigs/obsidian-halo`（只读参考，不双向同步）。
+>
+> **关于上面那个链接**：本仓库自己也叫 `obsidian-halo`，与上游**同名**。那个链接**有意**指向
+> **上游**仓库 —— 它是 fork 必须保留的署名（GPL-3.0），不是忘了改。`origin` 是
+> [`LHY0125/obsidian-halo`](https://github.com/LHY0125/obsidian-halo)（本 fork）；
+> `upstream` 是 `halo-sigs/obsidian-halo`（只读参考，不双向同步）。
 
 [English](./README.md)
 

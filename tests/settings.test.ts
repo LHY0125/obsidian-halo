@@ -1,7 +1,13 @@
 import { describe, expect, it, rs, test } from "@rstest/core";
 import { Modal } from "obsidian";
 import { isSameSiteUrl, normalizeSite, normalizeSiteUrl } from "../src/settings";
-import { CURRENT_SETTINGS_VERSION, DEFAULT_SETTINGS, mcpEndpointOf, migrateSettings } from "../src/settings";
+import {
+  CURRENT_SETTINGS_VERSION,
+  DEFAULT_SETTINGS,
+  HaloSettingTab,
+  mcpEndpointOf,
+  migrateSettings,
+} from "../src/settings";
 import { openSiteRoutingModal } from "../src/ui/modals/site-routing-modal";
 
 describe("settings URL normalization", () => {
@@ -178,5 +184,96 @@ describe("站点路由弹窗的草案", () => {
     // 不能省：万一 `draft` 被改名成别的字段，上面那行会拿到 `undefined`，
     // `undefined !== rule` 恒真 —— 这条把「字段找错了」与「没复制」区分开。
     expect(draft).toEqual(rule);
+  });
+});
+
+/**
+ * 声明式设置 API（`getSettingDefinitions` / `getControlValue` / `setControlValue`）。
+ *
+ * 为什么必须钉住：这三个方法决定设置项**能不能被搜到**，以及**改的值有没有落盘**。
+ * 而它们的失败模式都是静默的 —— 键名写错时，开关照样能拨动、界面照样变，
+ * 只是写进了一个不存在的字段（或读出来恒为 `undefined`），用户下次打开发现设置没生效。
+ * 这类错误 tsc 看不见：`getControlValue` 的入参是 `string`，任何字符串都合法。
+ */
+describe("声明式设置 API", () => {
+  /** 造一个最小可用的插件桩：只需要 settings 与 saveSettings */
+  function makeTab(settings: Record<string, unknown>) {
+    const saved: number[] = [];
+    const plugin = {
+      app: {},
+      settings,
+      saveSettings: async () => {
+        saved.push(1);
+      },
+    } as never;
+    const tab = new HaloSettingTab(plugin);
+    return { tab, saved, settings };
+  }
+
+  it("三个开关都以 control 形式声明，键名与 HaloSetting 的字段逐字一致", () => {
+    const { tab } = makeTab({ ...DEFAULT_SETTINGS });
+
+    // 递归收集所有 control 的 key —— 定义是嵌套的（page → items → control）
+    const keys: string[] = [];
+    const walk = (items: unknown[]): void => {
+      for (const item of items) {
+        const node = item as { control?: { key?: string }; items?: unknown[] };
+        if (node.control?.key) keys.push(node.control.key);
+        if (node.items) walk(node.items);
+      }
+    };
+    walk(tab.getSettingDefinitions());
+
+    // 判别力所在：少一个 key 就说明某个开关没被声明（用户搜不到它）
+    expect(keys.sort()).toEqual(["publishByDefault", "replaceImageLinks", "skipPreviewOnPublish"]);
+  });
+
+  it("每个声明的 key 都真实存在于 DEFAULT_SETTINGS 上", () => {
+    const { tab } = makeTab({ ...DEFAULT_SETTINGS });
+
+    const keys: string[] = [];
+    const walk = (items: unknown[]): void => {
+      for (const item of items) {
+        const node = item as { control?: { key?: string }; items?: unknown[] };
+        if (node.control?.key) keys.push(node.control.key);
+        if (node.items) walk(node.items);
+      }
+    };
+    walk(tab.getSettingDefinitions());
+
+    // 这条是「键名拼错」的唯一防线：拼错时上面那条仍会通过（它比的是自己声明的键），
+    // 而这里会红 —— 因为拼错的键不在 DEFAULT_SETTINGS 上。
+    for (const key of keys) {
+      expect(Object.keys(DEFAULT_SETTINGS)).toContain(key);
+    }
+  });
+
+  it("getControlValue 读的是插件设置对象，不是 app.vault.getConfig", () => {
+    const { tab } = makeTab({ ...DEFAULT_SETTINGS, replaceImageLinks: true });
+
+    // 基类默认实现读 `this.app.vault.getConfig`（那是给 Obsidian 自己的设置页用的），
+    // 插件不覆盖就会拿到 undefined —— 界面上的开关恒显示默认态。
+    expect(tab.getControlValue("replaceImageLinks")).toBe(true);
+  });
+
+  it("setControlValue 既改内存也落盘", async () => {
+    const { tab, saved, settings } = makeTab({ ...DEFAULT_SETTINGS, publishByDefault: false });
+
+    await tab.setControlValue("publishByDefault", true);
+
+    expect(settings.publishByDefault).toBe(true);
+    // 不落盘的话，用户改了设置、重启 Obsidian 就回到旧值
+    expect(saved.length).toBe(1);
+  });
+
+  it("setControlValue 对 false 也生效（不能被真值判断吞掉）", async () => {
+    const { tab, settings } = makeTab({ ...DEFAULT_SETTINGS, replaceImageLinks: true });
+
+    await tab.setControlValue("replaceImageLinks", false);
+
+    // 判别力所在：若实现里写成 `if (value) settings[key] = value`，false 会被吞掉，
+    // 而界面上开关已经拨到「关」—— 用户以为关掉了，实际仍是 true（默认值就是 true，
+    // 所以这个 bug 在真机上表现为「关不掉」）。
+    expect(settings.replaceImageLinks).toBe(false);
   });
 });
