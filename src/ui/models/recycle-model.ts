@@ -1,6 +1,6 @@
-import { CONTENT_TOOLSETS } from "./content-kind";
-import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "./pagination";
-import type { McpClient } from "./transport/mcp-client";
+import { CONTENT_TOOLSETS } from "../../core/content-kind";
+import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../../core/pagination";
+import type { McpClient } from "../../transport/mcp-client";
 
 /**
  * 回收站里的内容类型。

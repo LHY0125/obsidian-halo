@@ -2,10 +2,10 @@ import i18next from "i18next";
 import { PluginSettingTab, Setting } from "obsidian";
 // 从 "glob" 而不是 "site-routing" 取这两个符号：glob.ts 是零项目内依赖的叶子，
 // 而 site-routing.ts 反过来 import 本文件。从那边取会重新造出 settings ⇄ site-routing 的 import 环。
-import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./glob";
+import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./core/glob";
 import type HaloPlugin from "./main";
-import { openSiteRoutingModal } from "./site-routing-modal";
-import { HaloSitesModal } from "./sites-modal";
+import { openSiteRoutingModal } from "./ui/modals/site-routing-modal";
+import { HaloSitesModal } from "./ui/modals/sites-modal";
 
 export interface HaloSite {
   name: string;
@@ -144,6 +144,18 @@ export function isSameSiteUrl(left: string, right: string): boolean {
 }
 
 export class HaloSettingTab extends PluginSettingTab {
+  /**
+   * ⚠️ 这里**必须**是真正的 `HaloPlugin`，不能用 `HaloPluginContext`。
+   *
+   * `PluginSettingTab` 的构造函数签名是 `(app: App, plugin: Plugin)` —— 它要的是 Obsidian 的
+   * **基类** `Plugin`，而 `HaloPluginContext` 是刻意收窄的接口（只有 `app` / `settings` /
+   * `saveSettings` 三个成员），不满足 `Plugin`。改成接口会直接报
+   * 「Argument of type 'HaloPluginContext' is not assignable to parameter of type 'Plugin'」。
+   *
+   * 所以本文件保留对 `main.ts` 的类型依赖 —— 这是**类型系统的要求**，不是漏改。
+   * 它也不破坏「切断反向依赖」这个目标：`main.ts` 要 `addSettingTab(new HaloSettingTab(this))`，
+   * 两边都是 `import type`，运行时无环。真正解掉的是其余 11 个 UI 文件对 `main.ts` 的回指。
+   */
   constructor(private readonly plugin: HaloPlugin) {
     super(plugin.app, plugin);
   }

@@ -2,10 +2,13 @@ import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
 // 从 "glob" 而不是 "site-routing" 取符号：glob.ts 是零项目内依赖的叶子，
 // 从 site-routing.ts 取会把 settings.ts 一起拉进本模块的依赖图（那边 import 了 settings）。
-import { type SiteRoutingRule, normalizeRulePattern } from "./glob";
-import type HaloPlugin from "./main";
+import { type SiteRoutingRule, normalizeRulePattern } from "../../core/glob";
+import type { HaloPluginContext } from "../../plugin-context";
 
-export function openSiteRoutingModal(plugin: HaloPlugin, rule?: SiteRoutingRule): Promise<SiteRoutingRule | undefined> {
+export function openSiteRoutingModal(
+  plugin: HaloPluginContext,
+  rule?: SiteRoutingRule,
+): Promise<SiteRoutingRule | undefined> {
   return new Promise((resolve) => {
     new SiteRoutingModal(plugin, rule ?? { pattern: "", site: plugin.settings.sites[0]?.url ?? "" }, resolve).open();
   });
@@ -27,7 +30,7 @@ class SiteRoutingModal extends Modal {
   private readonly draft: SiteRoutingRule;
 
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     draft: SiteRoutingRule,
     private readonly onSubmit: (rule: SiteRoutingRule | undefined) => void,
   ) {

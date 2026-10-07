@@ -1,5 +1,5 @@
+import { type HaloSite, isSameSiteUrl, normalizeSiteUrl } from "../settings";
 import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./glob";
-import { type HaloSite, isSameSiteUrl, normalizeSiteUrl } from "./settings";
 
 // 调用方（settings.ts 的设置面板、site-routing-modal.ts、main.ts、测试）只需认
 // "src/site-routing" 一个入口。glob.ts 是内部实现细节，将来要换匹配算法只动那一处。

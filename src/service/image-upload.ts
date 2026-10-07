@@ -1,10 +1,10 @@
 import i18next from "i18next";
 import { type App, Notice, TFile, getLinkpath, requestUrl } from "obsidian";
-import { randomUUID } from "src/utils/id";
 import { renderErrorMessage } from "../i18n/error-message";
 import type { HaloSetting, HaloSite, ImageUploadCacheEntry } from "../settings";
 import { McpError } from "../transport/errors";
 import type { McpClient } from "../transport/mcp-client";
+import { randomUUID } from "../utils/id";
 import {
   type LocalImageReference,
   collectLocalImageReferences,

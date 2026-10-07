@@ -1,10 +1,10 @@
 import i18next from "i18next";
 import { Modal, Setting } from "obsidian";
-import type HaloPlugin from "./main";
-import type { PublishPreview } from "./publish-preview";
+import type { HaloPluginContext } from "../../plugin-context";
+import type { PublishPreview } from "../models/publish-preview";
 
 /** 打开预览并等用户决定。**取消返回 `false`**，调用方据此直接结束，不写任何东西 */
-export function confirmPublishPreview(plugin: HaloPlugin, preview: PublishPreview): Promise<boolean> {
+export function confirmPublishPreview(plugin: HaloPluginContext, preview: PublishPreview): Promise<boolean> {
   return new Promise((resolve) => {
     new PublishPreviewModal(plugin, preview, resolve).open();
   });
@@ -12,7 +12,7 @@ export function confirmPublishPreview(plugin: HaloPlugin, preview: PublishPrevie
 
 class PublishPreviewModal extends Modal {
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly preview: PublishPreview,
     private readonly onDecide: (confirmed: boolean) => void,
   ) {

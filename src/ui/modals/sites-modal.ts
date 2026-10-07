@@ -1,10 +1,10 @@
 import i18next from "i18next";
 import { Modal, Setting } from "obsidian";
-import type HaloPlugin from "./main";
+import type { HaloPluginContext } from "../../plugin-context";
 import { openSiteEditingModal } from "./site-editing-modal";
 
 export class HaloSitesModal extends Modal {
-  constructor(private readonly plugin: HaloPlugin) {
+  constructor(private readonly plugin: HaloPluginContext) {
     super(plugin.app);
   }
 

@@ -1,10 +1,10 @@
 import i18next from "i18next";
 import { type App, Modal, Notice, Setting } from "obsidian";
-import { type AttachmentItem, deleteAttachment, fetchAttachments, formatBytes } from "./attachment-model";
-import { renderErrorMessage } from "./i18n/error-message";
-import type HaloPlugin from "./main";
-import { type HaloSite, mcpEndpointOf, normalizeSiteUrl } from "./settings";
-import { McpClient } from "./transport/mcp-client";
+import { renderErrorMessage } from "../../i18n/error-message";
+import type { HaloPluginContext } from "../../plugin-context";
+import { type HaloSite, mcpEndpointOf, normalizeSiteUrl } from "../../settings";
+import { McpClient } from "../../transport/mcp-client";
+import { type AttachmentItem, deleteAttachment, fetchAttachments, formatBytes } from "../models/attachment-model";
 
 /**
  * 站点地址 + permalink → **绝对**地址；没有 permalink 时回落空串。
@@ -71,7 +71,7 @@ export class AttachmentManagerModal extends Modal {
   private truncated = false;
 
   constructor(
-    plugin: HaloPlugin,
+    plugin: HaloPluginContext,
     private readonly site: HaloSite,
   ) {
     super(plugin.app);
@@ -178,7 +178,7 @@ export class AttachmentManagerModal extends Modal {
  * 「确定删除这个附件吗？」点下去。传的是**原项**（带 `name` / `version`），
  * 所以确认之后直接拿它去删，不必再回列表里找。
  *
- * ⚠️ 参数是 `App` 而**不是** `HaloPlugin`：这个确认框除了 `app`（`Modal` 的构造入参）
+ * ⚠️ 参数是 `App` 而**不是** `HaloPluginContext`：这个确认框除了 `app`（`Modal` 的构造入参）
  * 之外什么都不用，没有理由让它依赖整个插件。外面那个弹窗本身就是 `Modal`，
  * `this.app` 现成 —— 不必为了转发它而在 `AttachmentManagerModal` 上存一个用不到的
  * `plugin` 字段（那种字段会让「这个类到底用不用插件」变成读代码才能回答的问题）。

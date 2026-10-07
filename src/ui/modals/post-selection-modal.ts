@@ -1,22 +1,22 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
-import { renderErrorMessage } from "./i18n/error-message";
-import type HaloPlugin from "./main";
 import {
   type FetchAllPagesResult,
   LIST_PAGE_SIZE,
   MAX_PAGES_DEFAULT,
   type PagedResult,
   fetchAllPages,
-} from "./pagination";
-import type { McpPostItem } from "./service/post-mapping";
-import { type HaloSite, mcpEndpointOf } from "./settings";
-import { McpClient } from "./transport/mcp-client";
+} from "../../core/pagination";
+import { renderErrorMessage } from "../../i18n/error-message";
+import type { HaloPluginContext } from "../../plugin-context";
+import type { McpPostItem } from "../../service/post-mapping";
+import { type HaloSite, mcpEndpointOf } from "../../settings";
+import { McpClient } from "../../transport/mcp-client";
 
 /**
  * `LIST_PAGE_SIZE` 已移到 `pagination.ts` —— 四个调用点（分类 / 标签 / 拉取列表 / 附件列表）
  * 必须共用同一个值。这里按**原路径重导出**，既有的
- * `import { LIST_PAGE_SIZE } from "./post-selection-model"` 不会断。
+ * `import { LIST_PAGE_SIZE } from "./post-selection-modal"` 不会断。
  */
 export { LIST_PAGE_SIZE };
 
@@ -116,7 +116,7 @@ export function toSelectablePosts(items: McpPostItem[]): SelectablePost[] {
   return posts;
 }
 
-export function openPostSelectionModal(plugin: HaloPlugin, site: HaloSite): Promise<SelectablePost> {
+export function openPostSelectionModal(plugin: HaloPluginContext, site: HaloSite): Promise<SelectablePost> {
   return new Promise<SelectablePost>((resolve) => {
     const modal = new PostSelectionModal(plugin, site, (post) => {
       resolve(post);
@@ -136,7 +136,7 @@ class PostSelectionModal extends Modal {
   private readonly client: McpClient;
 
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly site: HaloSite,
     private readonly onSelect: (post: SelectablePost) => void,
   ) {

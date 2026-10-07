@@ -1,7 +1,7 @@
 import type { Post } from "@halo-dev/api-client";
 import { type App, TFile, getLinkpath, normalizePath } from "obsidian";
 import { slugify } from "transliteration";
-import type { HaloPostFields } from "../frontmatter-map";
+import type { HaloPostFields } from "../core/frontmatter-map";
 import type { ImageUploadCacheEntry } from "../settings";
 
 export interface LocalImageReference {

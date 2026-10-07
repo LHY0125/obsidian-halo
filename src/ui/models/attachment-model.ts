@@ -1,5 +1,5 @@
-import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "./pagination";
-import type { McpClient } from "./transport/mcp-client";
+import { LIST_PAGE_SIZE, type PagedResult, fetchAllPages } from "../../core/pagination";
+import type { McpClient } from "../../transport/mcp-client";
 
 /**
  * `halo_list_attachments` / `halo_get_attachment` 的项。

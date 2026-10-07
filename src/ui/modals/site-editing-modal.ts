@@ -1,11 +1,11 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
-import type HaloPlugin from "./main";
-import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
-import { type HaloSite, mcpEndpointOf, normalizeSite } from "./settings";
+import { describeSelfCheckFailure, runSelfCheck } from "../../mcp-self-check";
+import type { HaloPluginContext } from "../../plugin-context";
+import { type HaloSite, mcpEndpointOf, normalizeSite } from "../../settings";
 
 export function openSiteEditingModal(
-  plugin: HaloPlugin,
+  plugin: HaloPluginContext,
   site?: HaloSite,
   index = -1,
 ): Promise<{ site: HaloSite; index?: number }> {
@@ -29,7 +29,7 @@ export class SiteEditingModal extends Modal {
   private readonly currentSite: HaloSite;
 
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly site: HaloSite,
     private readonly index: number,
     private readonly onSubmit: (site: HaloSite, index?: number) => void,

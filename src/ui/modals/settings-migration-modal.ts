@@ -1,6 +1,6 @@
 import i18next from "i18next";
 import { type App, Modal, Setting } from "obsidian";
-import type { MigrationNotice } from "./settings";
+import type { MigrationNotice } from "../../settings";
 
 /** 迁移提示弹窗：只提供"改"与"不改"两个动作，绝不静默修改用户配置 */
 export class SettingsMigrationModal extends Modal {

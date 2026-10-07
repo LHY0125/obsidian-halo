@@ -1,4 +1,4 @@
-import type { LocalImageSummary } from "./service/image-upload";
+import type { LocalImageSummary } from "../../service/image-upload";
 
 export interface PublishPreviewInput {
   siteName: string;

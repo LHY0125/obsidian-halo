@@ -1,9 +1,9 @@
 import i18next from "i18next";
 import { Modal, Setting } from "obsidian";
-import type HaloPlugin from "./main";
-import type { McpSinglePageItem } from "./service/page-mapping";
-import PageService from "./service/page-service";
-import type { HaloSite } from "./settings";
+import type { HaloPluginContext } from "../../plugin-context";
+import type { McpSinglePageItem } from "../../service/page-mapping";
+import PageService from "../../service/page-service";
+import type { HaloSite } from "../../settings";
 
 /**
  * 选择器需要的最小字段集。理由同 `post-selection-model.ts` 的 `SelectablePost`：
@@ -54,7 +54,7 @@ export function toSelectablePages(items: McpSinglePageItem[]): SelectablePage[] 
   return pages;
 }
 
-export function openPageSelectionModal(plugin: HaloPlugin, site: HaloSite): Promise<SelectablePage> {
+export function openPageSelectionModal(plugin: HaloPluginContext, site: HaloSite): Promise<SelectablePage> {
   return new Promise<SelectablePage>((resolve) => {
     new PageSelectionModal(plugin, site, resolve).open();
   });
@@ -70,7 +70,7 @@ class PageSelectionModal extends Modal {
   private readonly service: PageService;
 
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly site: HaloSite,
     private readonly onSelect: (page: SelectablePage) => void,
   ) {

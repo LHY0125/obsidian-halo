@@ -1,8 +1,8 @@
 import i18next from "i18next";
 import { type App, Modal, Setting } from "obsidian";
-import type HaloPlugin from "./main";
-import type { SearchResult } from "./search-preview";
-import { type HaloSite, normalizeSiteUrl } from "./settings";
+import type { HaloPluginContext } from "../../plugin-context";
+import { type HaloSite, normalizeSiteUrl } from "../../settings";
+import type { SearchResult } from "../models/search-preview";
 
 /**
  * 摘要截断长度。
@@ -103,7 +103,7 @@ export function normalizeQuery(value: string): string | undefined {
  */
 export class SearchResultsModal extends Modal {
   constructor(
-    plugin: HaloPlugin,
+    plugin: HaloPluginContext,
     private readonly site: HaloSite,
     private readonly query: string,
     private readonly results: SearchResult[],

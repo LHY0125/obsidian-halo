@@ -1,8 +1,8 @@
 import i18next from "i18next";
 import { type ButtonComponent, Modal, Setting } from "obsidian";
-import type { BatchGroup, BatchPlan, BatchRunSummary } from "./batch-publish";
-import { summarizeSelection } from "./batch-publish";
-import type HaloPlugin from "./main";
+import type { BatchGroup, BatchPlan, BatchRunSummary } from "../../commands/batch-publish";
+import { summarizeSelection } from "../../commands/batch-publish";
+import type { HaloPluginContext } from "../../plugin-context";
 
 /**
  * 一次聚合确认。**返回勾选的路径集合；取消返回 `undefined`**，调用方据此直接结束，不写任何东西。
@@ -15,7 +15,7 @@ import type HaloPlugin from "./main";
  *
  * 返回的是**路径**集合（`file.path`），执行阶段也按路径取文件 —— 两边必须同一把键。
  */
-export function confirmBatchPlan(plugin: HaloPlugin, plan: BatchPlan): Promise<Set<string> | undefined> {
+export function confirmBatchPlan(plugin: HaloPluginContext, plan: BatchPlan): Promise<Set<string> | undefined> {
   return new Promise((resolve) => {
     new BatchConfirmModal(plugin, plan, resolve).open();
   });
@@ -40,7 +40,7 @@ export class BatchConfirmModal extends Modal {
   private confirmButton?: ButtonComponent;
 
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly plan: BatchPlan,
     private readonly onDecide: (selected: Set<string> | undefined) => void,
   ) {
@@ -246,7 +246,7 @@ export class BatchConfirmModal extends Modal {
  * 118 篇里 3 篇失败而汇总只说「118 篇完成」，用户就被告知了一件假事：
  * 他以为站点上齐了，实际少了三篇，而那三篇正是他需要去手工处理的。
  */
-export function showBatchSummary(plugin: HaloPlugin, summary: BatchRunSummary): void {
+export function showBatchSummary(plugin: HaloPluginContext, summary: BatchRunSummary): void {
   new BatchSummaryModal(plugin, summary).open();
 }
 
@@ -259,7 +259,7 @@ export function showBatchSummary(plugin: HaloPlugin, summary: BatchRunSummary): 
  */
 export class BatchSummaryModal extends Modal {
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly summary: BatchRunSummary,
   ) {
     super(plugin.app);

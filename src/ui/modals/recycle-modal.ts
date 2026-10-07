@@ -1,11 +1,17 @@
 import i18next from "i18next";
 import { Modal, Notice, Setting } from "obsidian";
-import { renderErrorMessage } from "./i18n/error-message";
-import type HaloPlugin from "./main";
-import { type RecycleKind, type RecycledItem, fetchActivePages, fetchRecycled, restoreRecycled } from "./recycle-model";
-import PageService from "./service/page-service";
-import { type HaloSite, mcpEndpointOf } from "./settings";
-import { McpClient } from "./transport/mcp-client";
+import { renderErrorMessage } from "../../i18n/error-message";
+import type { HaloPluginContext } from "../../plugin-context";
+import PageService from "../../service/page-service";
+import { type HaloSite, mcpEndpointOf } from "../../settings";
+import { McpClient } from "../../transport/mcp-client";
+import {
+  type RecycleKind,
+  type RecycledItem,
+  fetchActivePages,
+  fetchRecycled,
+  restoreRecycled,
+} from "../models/recycle-model";
 
 /**
  * 回收站的交互面：两个弹窗。
@@ -29,7 +35,7 @@ export class RecycleBinModal extends Modal {
   private truncated = false;
 
   constructor(
-    plugin: HaloPlugin,
+    plugin: HaloPluginContext,
     site: HaloSite,
     private readonly kind: RecycleKind,
   ) {
@@ -137,7 +143,7 @@ export class PageManagerModal extends Modal {
   private readonly client: McpClient;
   private readonly service: PageService;
 
-  constructor(plugin: HaloPlugin, site: HaloSite) {
+  constructor(plugin: HaloPluginContext, site: HaloSite) {
     super(plugin.app);
     this.client = new McpClient({ endpoint: mcpEndpointOf(site), token: site.mcpToken });
     // ⚠️ 把上面这个 client **注入**给 `PageService`，而不是让它自己再造一个：同一个站点、

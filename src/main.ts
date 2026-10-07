@@ -1,19 +1,11 @@
 import i18next from "i18next";
 import { Notice, Plugin, type TFile, moment } from "obsidian";
-import { AttachmentManagerModal } from "./attachment-modal";
-import { confirmBatchPlan, showBatchSummary } from "./batch-confirm-modal";
-import { type BatchAction, collectBatchCandidates, planBatch, runBatch } from "./batch-publish";
+import { type BatchAction, collectBatchCandidates, planBatch, runBatch } from "./commands/batch-publish";
+import { type SiteResolution, resolveSite } from "./core/site-routing";
 import { initializeI18n } from "./i18n";
 import { addHaloIcon } from "./icons";
 import { describeSelfCheckFailure, runSelfCheck } from "./mcp-self-check";
-import { openPageSelectionModal } from "./page-selection-model";
-import { openPostSelectionModal } from "./post-selection-model";
-import { type PublishPreviewInput, buildPublishPreview } from "./publish-preview";
-import { confirmPublishPreview } from "./publish-preview-modal";
-import { PageManagerModal, RecycleBinModal } from "./recycle-modal";
-import type { RecycleKind } from "./recycle-model";
-import { SearchResultsModal, promptForQuery } from "./search-modal";
-import { searchContent } from "./search-preview";
+import type { HaloPluginContext } from "./plugin-context";
 import HaloService from "./service";
 import PageService from "./service/page-service";
 import {
@@ -25,12 +17,21 @@ import {
   migrateSettings,
   normalizeSite,
 } from "./settings";
-import { SettingsMigrationModal } from "./settings-migration-modal";
-import { type SiteResolution, resolveSite } from "./site-routing";
-import { openSiteSelectionModal } from "./site-selection-modal";
 import { McpClient } from "./transport/mcp-client";
+import { AttachmentManagerModal } from "./ui/modals/attachment-modal";
+import { confirmBatchPlan, showBatchSummary } from "./ui/modals/batch-confirm-modal";
+import { openPageSelectionModal } from "./ui/modals/page-selection-modal";
+import { openPostSelectionModal } from "./ui/modals/post-selection-modal";
+import { confirmPublishPreview } from "./ui/modals/publish-preview-modal";
+import { PageManagerModal, RecycleBinModal } from "./ui/modals/recycle-modal";
+import { SearchResultsModal, promptForQuery } from "./ui/modals/search-modal";
+import { SettingsMigrationModal } from "./ui/modals/settings-migration-modal";
+import { openSiteSelectionModal } from "./ui/modals/site-selection-modal";
+import { type PublishPreviewInput, buildPublishPreview } from "./ui/models/publish-preview";
+import type { RecycleKind } from "./ui/models/recycle-model";
+import { searchContent } from "./ui/models/search-preview";
 
-export default class HaloPlugin extends Plugin {
+export default class HaloPlugin extends Plugin implements HaloPluginContext {
   settings: HaloSetting;
 
   async onload() {

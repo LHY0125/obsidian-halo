@@ -1,18 +1,18 @@
 import type { Content, SinglePage } from "@halo-dev/api-client";
 import i18next from "i18next";
 import { Notice, type TFile } from "obsidian";
-import { randomUUID } from "src/utils/id";
-import { CONTENT_TOOLSETS } from "../content-kind";
-import { renderErrorMessage } from "../i18n/error-message";
+import { CONTENT_TOOLSETS } from "../core/content-kind";
 import {
   type FetchAllPagesResult,
   LIST_PAGE_SIZE,
   MAX_PAGES_DEFAULT,
   type PagedResult,
   fetchAllPages,
-} from "../pagination";
+} from "../core/pagination";
+import { renderErrorMessage } from "../i18n/error-message";
 import { isSameSiteUrl } from "../settings";
 import { McpError } from "../transport/errors";
+import { randomUUID } from "../utils/id";
 import { HaloServiceBase, type PublishResult } from "./index";
 import {
   type HaloPageFrontmatter,

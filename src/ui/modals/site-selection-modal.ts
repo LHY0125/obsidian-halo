@@ -1,9 +1,9 @@
 import i18next from "i18next";
 import { Modal, Setting } from "obsidian";
-import type HaloPlugin from "./main";
-import type { HaloSite } from "./settings";
+import type { HaloPluginContext } from "../../plugin-context";
+import type { HaloSite } from "../../settings";
 
-export function openSiteSelectionModal(plugin: HaloPlugin): Promise<HaloSite> {
+export function openSiteSelectionModal(plugin: HaloPluginContext): Promise<HaloSite> {
   return new Promise<HaloSite>((resolve, reject) => {
     const modal = new SiteSelectionModal(plugin, (site) => {
       resolve(site);
@@ -16,7 +16,7 @@ class SiteSelectionModal extends Modal {
   private readonly sites: HaloSite[];
 
   constructor(
-    private readonly plugin: HaloPlugin,
+    private readonly plugin: HaloPluginContext,
     private readonly onSelect: (site: HaloSite) => void,
   ) {
     super(plugin.app);

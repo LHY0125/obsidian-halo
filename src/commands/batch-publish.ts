@@ -1,13 +1,13 @@
 import i18next from "i18next";
 import type { App, TFile } from "obsidian";
-import { renderErrorMessage } from "./i18n/error-message";
-import type HaloService from "./service";
-import type { LocalImageSummary } from "./service/image-upload";
-import type { HaloPostFrontmatter } from "./service/local-content";
-import { type McpCategoryItem, type McpTagItem, pickNewTerms } from "./service/post-mapping";
-import type { HaloSetting, HaloSite } from "./settings";
-import type { SiteResolution } from "./site-routing";
-import { resolveSite } from "./site-routing";
+import type { SiteResolution } from "../core/site-routing";
+import { resolveSite } from "../core/site-routing";
+import { renderErrorMessage } from "../i18n/error-message";
+import type HaloService from "../service";
+import type { LocalImageSummary } from "../service/image-upload";
+import type { HaloPostFrontmatter } from "../service/local-content";
+import { type McpCategoryItem, type McpTagItem, pickNewTerms } from "../service/post-mapping";
+import type { HaloSetting, HaloSite } from "../settings";
 
 /**
  * 批量路径的规划与执行。

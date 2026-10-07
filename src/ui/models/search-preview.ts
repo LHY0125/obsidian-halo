@@ -1,6 +1,6 @@
 import { Notice } from "obsidian";
-import { renderErrorMessage } from "./i18n/error-message";
-import type { McpClient } from "./transport/mcp-client";
+import { renderErrorMessage } from "../../i18n/error-message";
+import type { McpClient } from "../../transport/mcp-client";
 
 /**
  * `halo_search_content` 的结果项。
