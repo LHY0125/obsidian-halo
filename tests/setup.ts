@@ -178,21 +178,24 @@ rs.mock("obsidian", () => {
   };
 
   /**
-   * Obsidian 的 `activeWindow` —— 生产代码用它取定时器（`HaloServiceBase.sleep()`）。
+   * 给测试环境补上 `window` —— 生产代码的 `HaloServiceBase.sleep()` 用 `window.setTimeout`。
    *
-   * ⚠️ **它是 `declare global` 里的真全局，不是 `obsidian` 模块的导出** ——
+   * ⚠️ **`window` 是 TS 内置的 DOM 全局，不是 `obsidian` 模块的导出** ——
    * 所以必须挂在 `globalThis` 上，**不能**放进下面那个 return 对象里。
-   * 放进去的话 `activeWindow.setTimeout` 在测试里仍是 `undefined`，
+   * 放进去的话 `window.setTimeout` 在测试里仍是 `undefined`，
    * 而症状是「重试次数恒为 1」（退避一进入就抛），只会看到一个数字对不上。
    *
-   * 为什么生产代码不用 `globalThis` 兜底：Obsidian 审核器会报
-   * 「Avoid using 'globalThis'. Use 'window' or 'activeWindow' for popout window compatibility」。
-   * 在桩里补比在生产代码里放宽语义正确 —— 后者是为测试便利牺牲产品正确性。
+   * 为什么生产代码不写 `globalThis` 或 `activeWindow` 兜底：Obsidian 的审核器对两者各有一条规则 ——
+   *   · `globalThis` → 「Avoid using 'globalThis'. Use 'window' or 'activeWindow'...」
+   *   · `activeWindow` → 「Use 'window.setTimeout()' instead of 'activeWindow.setTimeout()'.
+   *                       Timer functions should use 'window'.」
+   * `window` 是唯一同时满足两条的写法。在桩里补比在生产代码里放宽语义正确 ——
+   * 后者是为测试便利牺牲产品正确性。
    *
    * 只给 `setTimeout` / `clearTimeout`：`sleep()` 只用到前者，而桩应当只提供被用到的面
    * （多给会让「生产代码悄悄多用了别的 API」在测试里不被发现）。
    */
-  (globalThis as Record<string, unknown>).activeWindow = {
+  (globalThis as Record<string, unknown>).window = {
     setTimeout: (handler: () => void, timeout?: number) => setTimeout(handler, timeout),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
   };

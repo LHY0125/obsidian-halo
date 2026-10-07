@@ -271,7 +271,7 @@ class PageService extends HaloServiceBase {
       // ⚠️ **必须 await**：`processFrontMatter` 是异步的，不 await 时下面那句「推送成功」
       // 会早于 frontmatter 落盘弹出 —— 用户看到成功提示后立刻关窗口，`halo.name` 就没写进去，
       // 下次推送走新建分支 → 站点上多出一篇重复页面。
-      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      await this.writeFrontMatter(file, (frontmatter) => {
         applyPageToFrontmatter(frontmatter, finalPage, {
           siteUrl: this.site.url,
           // ⚠️ 用本地那个 name，不是 `finalPage.metadata.name`：回读可能拿到一个缺 `name` 的 item，
@@ -350,7 +350,7 @@ class PageService extends HaloServiceBase {
     void this.app.workspace.getLeaf().openFile(file);
 
     // 必须 await：frontmatter 落盘后本函数才返回。
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.writeFrontMatter(file, (frontmatter) => {
       applyPageToFrontmatter(frontmatter, result.page, {
         siteUrl: this.site.url,
         // ⚠️ 是**入参** name，不是 `result.page.metadata.name` —— 理由同 `pushPage` 的回写

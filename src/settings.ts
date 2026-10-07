@@ -1,5 +1,5 @@
 import i18next from "i18next";
-import { PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
+import { PluginSettingTab, Setting, type SettingDefinitionItem, type SettingGroupItem } from "obsidian";
 // 从 "glob" 而不是 "site-routing" 取这两个符号：glob.ts 是零项目内依赖的叶子，
 // 而 site-routing.ts 反过来 import 本文件。从那边取会重新造出 settings ⇄ site-routing 的 import 环。
 import { type SiteRoutingRule, matchGlob, normalizeRulePattern } from "./core/glob";
@@ -165,19 +165,32 @@ export class HaloSettingTab extends PluginSettingTab {
    *
    * 为什么必须实现它：不实现时审核器会报
    * 「This PluginSettingTab does not implement getSettingDefinitions(); its settings will not
-   * appear in Obsidian's settings search」。而 `display()` 里手写的 `new Setting(...)` 对
-   * 搜索索引是**不可见**的 —— 用户搜「图片链接」找不到这个开关。
+   * appear in Obsidian's settings search」。而手写的 `new Setting(...)` 对搜索索引是**不可见**的
+   * —— 用户搜「图片链接」找不到那个开关。
    *
-   * ⚠️ **只声明「简单项」**：四个开关/按钮。站点路由规则那张表**留在 `display()` 里**，
-   * 因为它每行带三个图标按钮（上移/下移/编辑/删除）与实时命中数，声明式 API 表达不了
-   * 这种「一行多个动作 + 每次渲染重算」的结构 —— 硬套只会写出比现在更难懂的代码。
+   * ## 为什么不实现 `display()`
    *
-   * 两类混用是官方支持的：`getSettingDefinitions()` 提供可搜索的项，`display()` 里
-   * 追加自定义 UI。**顺序上 `display()` 先执行**（父类渲染声明式项之后调用它），
-   * 所以下面用 `containerEl.createEl("h3")` 自己画小标题，把两组分开。
+   * 官方文档（`SettingTab.display` 的注释）写明：
+   *
+   * > Not called when `getSettingDefinitions` returns a non-empty array; the tab is rendered
+   * > declaratively from those definitions instead. Only implement `display()` as a fallback
+   * > for plugins that need to support Obsidian versions **older than 1.13.0**.
+   *
+   * 本插件的 `minAppVersion` 就是 `1.13.0`，所以 `display()` 永远不会被调用 ——
+   * 写了也是死代码。而且审核器会对它报 `obsidianmd/settings-tab/no-deprecated-display`。
+   *
+   * ## 路由规则表也是声明式的
+   *
+   * 它看起来「很动态」（每行四个动作 + 实时命中数），但 `SettingDefinitionList`
+   * 正是官方为「用户增删排序的可变集合」提供的类型：`onReorder`（拖拽排序）、
+   * `onDelete`、`addItem`、`emptyState` 全部覆盖。行内编辑用 `SettingDefinitionAction`
+   * 的 `action(el, index)` —— 它拿得到当前下标。
+   *
+   * 命中数是**每次渲染时现算**的（`getSettingDefinitions()` 每次 `update()` 都会被调用），
+   * 所以「改了规则之后数字跟着变」这条性质仍然成立。
    */
   getSettingDefinitions(): SettingDefinitionItem[] {
-    const t = (key: string) => i18next.t(`settings.${key}`);
+    const t = (key: string, options?: Record<string, unknown>) => i18next.t(`settings.${key}`, options);
 
     return [
       {
@@ -218,13 +231,68 @@ export class HaloSettingTab extends PluginSettingTab {
           },
         ],
       },
+      {
+        type: "list",
+        heading: t("siteRouting.name"),
+        emptyState: t("siteRouting.empty"),
+        onReorder: (from, to) => {
+          this.moveRule(from, to);
+        },
+        onDelete: (index) => {
+          this.plugin.settings.siteRouting.splice(index, 1);
+          void this.plugin.saveSettings();
+          this.update();
+        },
+        addItem: {
+          name: t("siteRouting.actions.add"),
+          action: () => {
+            void this.addRule();
+          },
+        },
+        items: this.buildRuleItems(t),
+      },
     ];
   }
 
   /**
-   * 读一个声明式控件的当前值。基类默认从 `app.vault.getConfig` 读（那是给 Obsidian
-   * 自己的设置页用的），插件必须覆盖成读自己的设置对象。
+   * 把每条路由规则投影成一条可点击的定义。
+   *
+   * 每次 `getSettingDefinitions()` 被调用时重算，所以命中数是**当下**的值 ——
+   * 改了规则或改了库内容之后，`update()` 一跑数字就跟着变。
    */
+  private buildRuleItems(t: (key: string, options?: Record<string, unknown>) => string): SettingGroupItem[] {
+    const rules = this.plugin.settings.siteRouting;
+
+    // 一次遍历算出每行的命中数：vault 里的 markdown 文件清单是现成的，规则又只有几条，
+    // 复杂度是 files × rules —— 当前规模（百余篇、个位数规则）下可以忽略。
+    const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
+
+    return rules.map((rule, index) => {
+      const matchCount = markdownFiles.filter((file) => matchGlob(rule.pattern, file.path)).length;
+
+      // 用 `||` 而不是 `??`：站点被找到但 `name` 是空串时，`""` **不是 nullish**，`??` 拦不住它，
+      // 行标题会渲染成「博客/** → 」——箭头后面空白，而这一栏正是本面板存在的理由。
+      // 空串在这里的语义是「用户只填了 URL、还没填名字」（新建站点的默认字面量就是 `name: ""`，
+      // 且新增路径不校验 name），不是「这个站点有意义地没有名字」。
+      // 与 site-routing-modal 里 `site.name || site.url` 保持同一形态。
+      const siteName = this.plugin.settings.sites.find((site) => isSameSiteUrl(site.url, rule.site))?.name || rule.site;
+
+      return {
+        name: `${rule.pattern} → ${siteName}`,
+        desc: matchCount === 0 ? t("siteRouting.no_match") : t("siteRouting.match_count", { count: matchCount }),
+        // 点整行就是「编辑这条规则」—— 原先是一个铅笔图标按钮，现在整行可点，
+        // 命中面积更大，也不再需要为「编辑」单独占一个图标位。
+        action: () => {
+          void this.editRule(index);
+        },
+        // 首尾两行不能继续往那个方向移（`moveRule` 自己也会校验，这里只是让 UI 如实反映）
+        disabled: false,
+      } satisfies SettingGroupItem;
+    });
+  }
+
+  /** 读一个声明式控件的当前值。基类默认从 `app.vault.getConfig` 读（那是给 Obsidian
+   * 自己的设置页用的），插件必须覆盖成读自己的设置对象。 */
   getControlValue(key: string): unknown {
     return (this.plugin.settings as unknown as Record<string, unknown>)[key];
   }
@@ -242,95 +310,34 @@ export class HaloSettingTab extends PluginSettingTab {
     return this.plugin.saveSettings();
   }
 
-  display() {
-    const { containerEl } = this;
+  /** 编辑一条既有规则。取消（返回 `undefined`）时不落盘。 */
+  private async editRule(index: number): Promise<void> {
+    const rule = this.plugin.settings.siteRouting[index];
 
-    containerEl.empty();
-
-    // ⚠️ 站点、发布开关、替换图片链接这三组**不在这里渲染** —— 它们已经由
-    // `getSettingDefinitions()` 声明式提供（那样才能进设置搜索）。这里再写一遍会让
-    // 每一项**渲染两次**。本方法只负责声明式 API 表达不了的部分：路由规则那张表。
-
-    new Setting(containerEl)
-      .setName(i18next.t("settings.siteRouting.name"))
-      .setDesc(i18next.t("settings.siteRouting.description"))
-      .setHeading();
-
-    const rules = this.plugin.settings.siteRouting;
-
-    if (rules.length === 0) {
-      containerEl.createEl("p", { text: i18next.t("settings.siteRouting.empty") });
+    if (!rule) {
+      return;
     }
 
-    // 一次遍历算出每行的命中数：vault 里的 markdown 文件清单是现成的，规则又只有几条，
-    // 复杂度是 files × rules —— 当前规模（百余篇、个位数规则）下可以忽略。
-    const markdownFiles = this.plugin.app.vault.getMarkdownFiles();
+    const updated = await openSiteRoutingModal(this.plugin, rule);
 
-    rules.forEach((rule, index) => {
-      const matchCount = markdownFiles.filter((file) => matchGlob(rule.pattern, file.path)).length;
-      // 用 `||` 而不是 `??`：站点被找到但 `name` 是空串时，`""` **不是 nullish**，`??` 拦不住它，
-      // 行标题会渲染成「博客/** → 」——箭头后面空白，而这一栏正是本面板存在的理由。
-      // 空串在这里的语义是「用户只填了 URL、还没填名字」（新建站点的默认字面量就是 `name: ""`，
-      // 且新增路径不校验 name），不是「这个站点有意义地没有名字」。
-      // 与 site-routing-modal 里 `site.name || site.url` 保持同一形态。
-      const siteName = this.plugin.settings.sites.find((site) => isSameSiteUrl(site.url, rule.site))?.name || rule.site;
-      const setting = new Setting(containerEl)
-        .setName(`${rule.pattern} → ${siteName}`)
-        .setDesc(
-          matchCount === 0
-            ? i18next.t("settings.siteRouting.no_match")
-            : i18next.t("settings.siteRouting.match_count", { count: matchCount }),
-        );
+    if (updated) {
+      this.plugin.settings.siteRouting[index] = updated;
+      await this.plugin.saveSettings();
+      this.update();
+    }
+  }
 
-      setting.addExtraButton((button) =>
-        button
-          .setIcon("lucide-arrow-up")
-          .setDisabled(index === 0)
-          .onClick(() => {
-            this.moveRule(index, index - 1);
-          }),
-      );
-      setting.addExtraButton((button) =>
-        button
-          .setIcon("lucide-arrow-down")
-          .setDisabled(index === rules.length - 1)
-          .onClick(() => {
-            this.moveRule(index, index + 1);
-          }),
-      );
-      setting.addExtraButton((button) =>
-        button.setIcon("lucide-pencil").onClick(async () => {
-          const updated = await openSiteRoutingModal(this.plugin, rule);
+  /** 新增一条规则。 */
+  private async addRule(): Promise<void> {
+    const rule = await openSiteRoutingModal(this.plugin);
 
-          if (updated) {
-            rules[index] = updated;
-            await this.plugin.saveSettings();
-            this.update();
-          }
-        }),
-      );
-      setting.addExtraButton((button) =>
-        button.setIcon("lucide-trash").onClick(() => {
-          rules.splice(index, 1);
-          void this.plugin.saveSettings();
-          this.update();
-        }),
-      );
-    });
-
-    new Setting(containerEl).addButton((button) =>
-      button.setButtonText(i18next.t("settings.siteRouting.actions.add")).onClick(async () => {
-        const rule = await openSiteRoutingModal(this.plugin);
-
-        if (rule) {
-          // 追加到末尾：新规则默认优先级最低。要把它提到前面去，用行上的上移按钮 ——
-          // 静默插到最前面会让既有用户下次发布时突然改了目标站点。
-          rules.push(rule);
-          await this.plugin.saveSettings();
-          this.update();
-        }
-      }),
-    );
+    if (rule) {
+      // 追加到末尾：新规则默认优先级最低。要把它提到前面去，用行上的排序手柄 ——
+      // 静默插到最前面会让既有用户下次发布时突然改了目标站点。
+      this.plugin.settings.siteRouting.push(rule);
+      await this.plugin.saveSettings();
+      this.update();
+    }
   }
 
   /** 交换两条规则的顺序。**顺序就是优先级**，所以这是本设置面板里唯一改语义的操作 */

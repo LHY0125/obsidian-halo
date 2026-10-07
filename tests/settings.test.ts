@@ -1,5 +1,6 @@
-import { describe, expect, it, rs, test } from "@rstest/core";
+import { beforeAll, describe, expect, it, rs, test } from "@rstest/core";
 import { Modal } from "obsidian";
+import { initializeI18n } from "../src/i18n";
 import { isSameSiteUrl, normalizeSite, normalizeSiteUrl } from "../src/settings";
 import {
   CURRENT_SETTINGS_VERSION,
@@ -9,6 +10,17 @@ import {
   migrateSettings,
 } from "../src/settings";
 import { openSiteRoutingModal } from "../src/ui/modals/site-routing-modal";
+
+/**
+ * 初始化 i18n —— 走**生产同一条入口**。
+ *
+ * 声明式设置的 `name` / `desc` / `emptyState` 全部来自 `i18next.t()`，
+ * 不初始化时它返回 `undefined`，于是断言 `expect(list.emptyState).toBeTruthy()` 会红，
+ * 而那是**测试基建缺失**而不是生产代码的问题 —— 补桩，不要改断言。
+ */
+beforeAll(async () => {
+  await initializeI18n("en");
+});
 
 describe("settings URL normalization", () => {
   test("trims whitespace and removes trailing slashes", () => {
@@ -197,16 +209,22 @@ describe("站点路由弹窗的草案", () => {
  */
 describe("声明式设置 API", () => {
   /** 造一个最小可用的插件桩：只需要 settings 与 saveSettings */
-  function makeTab(settings: Record<string, unknown>) {
+  function makeTab(settings: Record<string, unknown>, markdownFiles: Array<{ path: string }> = []) {
     const saved: number[] = [];
     const plugin = {
-      app: {},
+      // `vault.getMarkdownFiles()` 是**必需**的：`getSettingDefinitions()` 会调它来算
+      // 每条路由规则命中多少篇（这个数字每次渲染时现算，所以不能预先存下来）。
+      app: { vault: { getMarkdownFiles: () => markdownFiles } },
       settings,
       saveSettings: async () => {
         saved.push(1);
       },
     } as never;
     const tab = new HaloSettingTab(plugin);
+    // `update()` 是 `SettingTab` 基类的方法，而 `PluginSettingTab` 在 tests/setup.ts 里是
+    // 个空壳（没有 update）。生产代码的 onDelete / moveRule 会调它，所以桩必须补 ——
+    // 不补的话「删一条规则」在测试里直接抛，而那是这张表最常用的操作。
+    (tab as unknown as { update: () => void }).update = () => {};
     return { tab, saved, settings };
   }
 
@@ -275,5 +293,136 @@ describe("声明式设置 API", () => {
     // 而界面上开关已经拨到「关」—— 用户以为关掉了，实际仍是 true（默认值就是 true，
     // 所以这个 bug 在真机上表现为「关不掉」）。
     expect(settings.replaceImageLinks).toBe(false);
+  });
+});
+
+/**
+ * 路由规则表的声明式定义。
+ *
+ * 为什么必须钉住：这张表此前在 `display()` 里手写渲染，改成声明式之后
+ * **`display()` 被整个删掉**（官方文档：`getSettingDefinitions()` 返回非空数组时
+ * `display()` 不会被调用）。所以这张表的全部行为现在都挂在这份定义上 ——
+ * 定义写错就没有任何 UI 可看，而 tsc 只能保证形状对、保证不了语义对。
+ */
+describe("路由规则的声明式定义", () => {
+  function makeTab(settings: Record<string, unknown>, markdownFiles: Array<{ path: string }> = []) {
+    const plugin = {
+      app: { vault: { getMarkdownFiles: () => markdownFiles } },
+      settings,
+      saveSettings: async () => {},
+    } as never;
+    const tab = new HaloSettingTab(plugin);
+    (tab as unknown as { update: () => void }).update = () => {};
+    return tab;
+  }
+
+  /** 从定义里取出那张 list（它是最后一个顶层项） */
+  function routingList(tab: HaloSettingTab) {
+    const defs = tab.getSettingDefinitions();
+    const list = defs[defs.length - 1] as {
+      type: string;
+      heading?: string;
+      emptyState?: string;
+      items?: Array<{ name: string; desc?: string; action?: unknown }>;
+      onReorder?: (a: number, b: number) => void;
+      onDelete?: (i: number) => void;
+      addItem?: { name: string; action: (el: unknown) => void };
+    };
+    return list;
+  }
+
+  it("是一条 list，且带 reorder / delete / addItem 三个动作", () => {
+    const tab = makeTab({ ...DEFAULT_SETTINGS });
+    const list = routingList(tab);
+
+    // 判别力所在：少任何一个，用户就少一种操作方式（不能排序 / 不能删 / 不能加）
+    expect(list.type).toBe("list");
+    expect(typeof list.onReorder).toBe("function");
+    expect(typeof list.onDelete).toBe("function");
+    expect(typeof list.addItem?.action).toBe("function");
+  });
+
+  it("空规则时给出 emptyState（否则用户看到一片空白，不知道是坏了还是没配）", () => {
+    const tab = makeTab({ ...DEFAULT_SETTINGS, siteRouting: [] });
+    const list = routingList(tab);
+
+    expect(list.items).toHaveLength(0);
+    expect(list.emptyState).toBeTruthy();
+  });
+
+  it("每条规则一行，标题是「模式 → 站点名」，命中数每次渲染现算", () => {
+    const tab = makeTab(
+      {
+        ...DEFAULT_SETTINGS,
+        sites: [{ name: "博客站", url: "https://blog.example.com", token: "", mcpToken: "", default: true }],
+        siteRouting: [{ pattern: "blog/**", site: "https://blog.example.com" }],
+      },
+      [{ path: "blog/a.md" }, { path: "blog/b.md" }, { path: "notes/c.md" }],
+    );
+    const list = routingList(tab);
+
+    expect(list.items).toHaveLength(1);
+    expect(list.items?.[0].name).toBe("blog/** → 博客站");
+    // 3 个文件里 2 个命中 —— 数字必须来自**当下**的 vault 内容
+    expect(list.items?.[0].desc ?? "").toContain("2");
+  });
+
+  it("站点名是空串时回落成站点 URL（否则标题会渲染成「博客/** → 」）", () => {
+    const tab = makeTab({
+      ...DEFAULT_SETTINGS,
+      sites: [{ name: "", url: "https://blog.example.com", token: "", mcpToken: "", default: true }],
+      siteRouting: [{ pattern: "blog/**", site: "https://blog.example.com" }],
+    });
+    const list = routingList(tab);
+
+    // 用 `||` 而不是 `??`：空串不是 nullish，`??` 拦不住它
+    expect(list.items?.[0].name).toBe("blog/** → https://blog.example.com");
+  });
+
+  it("onDelete 按下标删掉对应那条", () => {
+    const settings: Record<string, unknown> = {
+      ...DEFAULT_SETTINGS,
+      siteRouting: [
+        { pattern: "a/**", site: "https://a.example.com" },
+        { pattern: "b/**", site: "https://b.example.com" },
+      ],
+    };
+    const tab = makeTab(settings);
+
+    routingList(tab).onDelete?.(0);
+
+    expect(settings.siteRouting).toEqual([{ pattern: "b/**", site: "https://b.example.com" }]);
+  });
+
+  it("onReorder 交换两条规则的顺序（顺序就是优先级）", () => {
+    const settings: Record<string, unknown> = {
+      ...DEFAULT_SETTINGS,
+      siteRouting: [
+        { pattern: "a/**", site: "https://a.example.com" },
+        { pattern: "b/**", site: "https://b.example.com" },
+      ],
+    };
+    const tab = makeTab(settings);
+
+    routingList(tab).onReorder?.(0, 1);
+
+    expect(settings.siteRouting).toEqual([
+      { pattern: "b/**", site: "https://b.example.com" },
+      { pattern: "a/**", site: "https://a.example.com" },
+    ]);
+  });
+
+  it("onReorder 越界时不动数据（坏下标会把 undefined 插回数组并落盘）", () => {
+    const settings: Record<string, unknown> = {
+      ...DEFAULT_SETTINGS,
+      siteRouting: [{ pattern: "a/**", site: "https://a.example.com" }],
+    };
+    const tab = makeTab(settings);
+
+    routingList(tab).onReorder?.(0, 5);
+
+    // 判别力所在：不校验的话 `splice` 返回空数组、`undefined` 被插回，
+    // 之后任何一次 saveSettings() 都会把坏数据写进磁盘
+    expect(settings.siteRouting).toEqual([{ pattern: "a/**", site: "https://a.example.com" }]);
   });
 });

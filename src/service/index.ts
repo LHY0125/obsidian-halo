@@ -213,22 +213,53 @@ export class HaloServiceBase {
     }
   }
 
+  /**
+   * 改写一篇笔记的 frontmatter，**把 Obsidian 的 `any` 收口在这一处**。
+   *
+   * ## 为什么需要它
+   *
+   * Obsidian 自己的类型定义是：
+   *
+   * ```ts
+   * processFrontMatter(file: TFile, fn: (frontmatter: any) => void, ...): Promise<void>
+   * ```
+   *
+   * 回调参数被声明成 `any`。直接把它传给 `applyPostToFrontmatter(frontmatter:
+   * Record<string, unknown>, ...)` 会触发 `@typescript-eslint/no-unsafe-argument`
+   * —— 而这是**上游类型定义的缺陷，不是我们的代码问题**：我们无法在不降低自身类型安全的
+   * 前提下消除它（把 `applyPostToFrontmatter` 的入参改成 `any` 只是把问题往下游推）。
+   *
+   * 所以在这里断言一次，并**只在这里**。这样：
+   *   · 审核告警消掉（5 处调用收敛成 1 处断言）；
+   *   · 「本处依赖 Obsidian 的 `any`」这件事被显式写下来，而不是散在 5 个调用点；
+   *   · 将来 Obsidian 修了这个签名，只需删掉这一个断言。
+   *
+   * 断言是**安全**的：`processFrontMatter` 的契约就是「给你一个可写的普通对象」，
+   * 它由 YAML 解析器产出，原型链上只有 `Object.prototype`。
+   */
+  protected async writeFrontMatter(file: TFile, mutate: (frontmatter: Record<string, unknown>) => void): Promise<void> {
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      mutate(frontmatter as Record<string, unknown>);
+    });
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      // 用 Obsidian 的 `activeWindow`，**不是**裸 `setTimeout`、也不是 `globalThis`。
+      // 用 `window.setTimeout`，**不是**裸 `setTimeout`。
       //
-      // 裸 `setTimeout` 落在主窗口的定时器上：Obsidian 的弹出窗口（popout window）有自己的
-      // `window`，弹窗关闭后回调仍可能在主窗口触发。
+      // 裸调用落在全局作用域的定时器上；Obsidian 的弹出窗口（popout window）有自己的
+      // `window`，显式写 `window.` 才能落在**当前**窗口上。
       //
-      // `globalThis` 虽然能跑，但 Obsidian 的审核器会报
-      // 「Avoid using 'globalThis'. Use 'window' or 'activeWindow' for popout window compatibility」
-      // —— 而 `activeWindow` 正是官方为此提供的 API：它指向**当前聚焦**的窗口，
-      // 弹窗场景下就是那个弹窗，主窗口下就是主窗口。
+      // ⚠️ **不要改成 `globalThis` 或 `activeWindow`** —— 两条审核规则正好把这两个都堵死了：
+      //   · `globalThis` → 「Avoid using 'globalThis'. Use 'window' or 'activeWindow'...」
+      //   · `activeWindow` → 「Use 'window.setTimeout()' instead of 'activeWindow.setTimeout()'.
+      //                       Timer functions should use 'window'.」
+      // 两条规则约束的对象不同（前者禁 `globalThis`，后者要求**定时器**用 `window`），
+      // 而 `window` 是唯一同时满足两者的写法。
       //
-      // 测试环境（Node，没有 `window`）由 `tests/setup.ts` 的 obsidian mock 提供
-      // `activeWindow: { setTimeout, clearTimeout }` —— 在桩里补，而不是在生产代码里
-      // 加 `globalThis` 兜底：为测试而放宽生产代码的类型与语义，是把测试的便利凌驾于产品正确性。
-      activeWindow.setTimeout(resolve, ms);
+      // 测试环境（Node，没有 `window`）由 `tests/setup.ts` 的 obsidian mock 挂上
+      // `globalThis.window` —— 在桩里补，而不是在生产代码里加兜底。
+      window.setTimeout(resolve, ms);
     });
   }
 }
@@ -586,7 +617,7 @@ class HaloService extends HaloServiceBase {
     // 不 await 时下面那句「发布成功」会**早于** frontmatter 落盘弹出 —— 用户看到成功提示后
     // 立刻关掉窗口/切换笔记，回写就可能被丢弃，而站点上文章已经发了。
     // 下次发布时 `halo.name` 缺席 → 走新建分支 → 站点上多出一篇重复文章。
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.writeFrontMatter(file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, params, {
         siteUrl: this.site.url,
         name: params.metadata.name,
@@ -880,7 +911,7 @@ class HaloService extends HaloServiceBase {
     await this.app.vault.modify(activeEditor.file, raw);
 
     // 必须 await：本函数返回后调用方会弹「更新成功」，早于落盘弹提示会让用户以为已经写完。
-    await this.app.fileManager.processFrontMatter(activeEditor.file, (frontmatter) => {
+    await this.writeFrontMatter(activeEditor.file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, post.post, {
         siteUrl: this.site.url,
         name: post.post.metadata.name,
@@ -935,7 +966,7 @@ class HaloService extends HaloServiceBase {
     void this.app.workspace.getLeaf().openFile(file);
 
     // 必须 await：frontmatter 落盘后本函数才返回，调用方不会在回写完成前就认为拉取结束。
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.writeFrontMatter(file, (frontmatter) => {
       applyPostToFrontmatter(frontmatter, post.post, {
         siteUrl: this.site.url,
         // ⚠️ 是**入参** name，不是 post.post.metadata.name —— 理由见 PostToFrontmatterOptions.name
